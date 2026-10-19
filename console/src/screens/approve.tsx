@@ -18,6 +18,7 @@ import { Notice } from "../components/ui/notice";
 import { HashText } from "../components/ui/hash-text";
 import { LabelLine, ScreenHeader, SeedNotice, StepNav, View } from "../components/screen";
 import {
+  DECIDED_CARD_SENTENCE,
   NOT_DEPLOYED_SENTENCE,
   STANDIN_HEADER,
   approveAttempt,
@@ -60,7 +61,10 @@ function EvidenceLink({ runId, sentenceId }: { runId: string; sentenceId: string
 export function Approve({ active, loaded, error, blownSeed, onDecided }: Props) {
   const run = loaded?.run ?? null;
   const choice = run ? chipsFor(run) : null;
-  const [ticked, setTicked] = useState<string[]>([]);
+  /* The verifier refuses an approval with an unticked Confirm row, so an approved run shows them ticked. */
+  const [ticked, setTicked] = useState<string[]>(() =>
+    run && run.approval.status === "approved" ? run.confirm_rows.map((row) => row.row_id) : [],
+  );
   const [missing, setMissing] = useState<string[]>([]);
   const [chosen, setChosen] = useState<DestinationId[]>(() => (choice ? choice.chips.filter((c) => c.ticked).map((c) => c.id) : []));
   const [result, setResult] = useState<Result>(null);
@@ -300,7 +304,7 @@ export function Approve({ active, loaded, error, blownSeed, onDecided }: Props) 
                             {preview ? <Badge tone="preview">Preview</Badge> : null}
                           </span>
                           {described ? (
-                            <span id={noteId} className="mt-0.5 block text-xs leading-5 text-muted">
+                            <span id={noteId} className="mt-0.5 block text-xs leading-5 wrap-anywhere text-muted">
                               {[d.note, d.status && d.status !== d.note ? d.status : null].filter(Boolean).join(" ")}
                             </span>
                           ) : null}
@@ -312,7 +316,9 @@ export function Approve({ active, loaded, error, blownSeed, onDecided }: Props) 
               </ul>
             </fieldset>
 
-            <Notice tone="info">{NOT_DEPLOYED_SENTENCE}</Notice>
+            <Notice tone="info">
+              {decidedMessage(run) ? DECIDED_CARD_SENTENCE : NOT_DEPLOYED_SENTENCE}
+            </Notice>
           </div>
 
           <footer className="flex flex-col gap-3 border-t border-line bg-surface-2 px-5 py-4">

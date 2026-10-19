@@ -68,8 +68,19 @@ for (const viewport of VIEWPORTS) {
         ),
       ),
     ).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByText("Withheld by design", { exact: true })).toHaveCount(2);
-    await expect(page.getByText(/The approved hash equals the published hash/)).toBeVisible();
+    /* One block per listed run, each under its own label; the export on top holds the two
+       withheld payloads, and every approved pipeline run finds its approved hash equal. */
+    const index = await (await page.request.get("/runs/index.json")).json();
+    const blocks = page.locator('[data-view="verify"] section[data-run-id]');
+    await expect(blocks).toHaveCount(index.runs.length);
+    const block = page.locator(`[data-view="verify"] section[data-run-id="${id}"]`);
+    await expect(block.getByRole("heading", { name: run.label })).toBeVisible();
+    await expect(block.getByText("Withheld by design", { exact: true })).toHaveCount(2);
+    for (const row of index.runs as { run_id: string; provenance: string }[]) {
+      const comparison = page.locator(`[data-view="verify"] section[data-run-id="${row.run_id}"]`);
+      const expected = row.provenance === "pipeline" ? /The approved hash equals the published hash/ : /There is no approved hash to compare/;
+      await expect(comparison.getByText(expected)).toBeVisible();
+    }
     await expectNoHorizontalScroll(page);
     await expectNoSeriousAxe(page, `recorded verify ${viewport.width}`);
     await page.screenshot({ path: `screenshots/23-recorded-verify-${viewport.width}-light.png`, fullPage: true });
