@@ -13,6 +13,7 @@ Built against agent-framework-foundry 1.15.0 (read at tag python-1.22.0 of micro
 * `to_prompt_agent(agent)` plus ``AIProjectClient.agents.create_version(...)`` publishes a prompt
   file as a new agent version (foundry README, "Publishing an agent as a Foundry prompt agent").
   The version description carries the prompt's sha256, so the deployed agent names its source.
+  `agon.agents.publish` finds that version, or creates it when none exists.
 
 Prompt provenance (why the bundle's prompt hashes are true): for the three prompt-agent roles the
 instructions that run live in the Foundry agent version, not in the local file. So the worker
@@ -38,7 +39,6 @@ from typing import Any
 
 from agon.agents.ports import PROMPT_AGENT_ROLES, ModelUnavailable, Prompt
 from agon.agents.prompts import load_prompt
-from agon.agents.schemas import SCHEMAS
 
 DEFAULT_AGENT_NAMES: dict[str, str] = {
     "analyst": "agon-analyst",
@@ -207,37 +207,3 @@ class FoundryModelPort:
         if not text or not text.strip():
             raise ModelUnavailable(f"Foundry {role}: empty answer")
         return text
-
-
-async def publish_prompt_agents(settings_endpoint: str, credential: Any, models: dict[str, str]) -> dict[str, str]:
-    """Publish each prompt file as a new Foundry prompt agent version. Returns role to version.
-
-    `models` maps each prompt-agent role to its model deployment name (gate C2 records them).
-    Run by an operator or a main-only CI job holding the Foundry role; never by the worker.
-    """
-    from agent_framework import Agent
-    from agent_framework.foundry import FoundryChatClient, to_prompt_agent
-    from azure.ai.projects.aio import AIProjectClient
-
-    if set(models) != set(PROMPT_AGENT_ROLES):
-        raise ValueError(f"models must map exactly {list(PROMPT_AGENT_ROLES)}")
-    versions: dict[str, str] = {}
-    project = AIProjectClient(endpoint=settings_endpoint, credential=credential)
-    try:
-        for role in PROMPT_AGENT_ROLES:
-            prompt = load_prompt(role)
-            agent = Agent(
-                client=FoundryChatClient(project_endpoint=settings_endpoint, model=models[role], credential=credential),
-                name=DEFAULT_AGENT_NAMES[role],
-                instructions=prompt.text,
-                default_options={"response_format": SCHEMAS[role]},
-            )
-            created = await project.agents.create_version(
-                agent_name=DEFAULT_AGENT_NAMES[role],
-                definition=to_prompt_agent(agent),
-                description=f"Agon {role} prompt {prompt.version}, sha256 {prompt.sha256}",
-            )
-            versions[role] = str(created.version)
-    finally:
-        await project.close()
-    return versions

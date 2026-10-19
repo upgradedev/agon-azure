@@ -1,0 +1,9 @@
+# Fleet worker (python -m agon.fleet.worker): the fleet set plus the Storage SDKs its Azure adapters
+# import lazily (agon.fleet.azure_ports). Every line is an exact pin (ci/check_pins.py).
+# Versions read on PyPI 2026-10-19, read only:
+# azure-storage-queue 12.18.0 (2026-09-30), the same pin as requirements/intake.txt;
+# azure-storage-blob 12.31.0 (uploaded 2026-09-30, 19 days before 2026-10-19), requires
+# azure-core>=1.37.0, which the azure-core 1.41.0 pin in fleet.txt satisfies.
+-r fleet.txt
+azure-storage-queue==12.18.0
+azure-storage-blob==12.31.0
