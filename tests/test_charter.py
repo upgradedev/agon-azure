@@ -16,7 +16,7 @@ SOURCE = SynthMatchSource()
 # Pinned: the charter the officer approves is these exact bytes for seed 1, match 0 with the default
 # voices. A change to a template, a threshold, a held class or the roster changes this hash, and
 # with it the hash on the next Teams card; re-pin only on purpose.
-CHARTER_SEED1_SHA256 = "ca5c4bdba7ae142199446eb7656e2d7571c8d32db07ba23236103b9f576dc7b4"
+CHARTER_SEED1_SHA256 = "9c7de25e513fd31fccec74d29f1a896d262f77cac3643d390c7ecc75382c07c2"
 
 
 def _record(seed: int = 1):
@@ -139,12 +139,18 @@ def test_a_held_class_cannot_be_dropped():
 def test_names_off_the_fictional_roster_are_refused():
     charter = copy.deepcopy(_charter())
     pid = sorted(charter["names"]["players"])[0]
-    charter["names"]["players"][pid] = "Somebody Else"
+    charter["names"]["players"][pid]["name"] = "Somebody Else"
     assert any("not on the fictional roster" in r for r in _check(charter).charter_reasons)
 
     club = copy.deepcopy(_charter())
     club["fixture"]["home"]["name"] = "Invented Rovers"
     assert any("fixture home" in r for r in _check(club).charter_reasons)
+
+    moved = copy.deepcopy(_charter())
+    away = moved["fixture"]["away"]["club_id"]
+    home_player = next(pid for pid, e in sorted(moved["names"]["players"].items()) if e["club_id"] != away)
+    moved["names"]["players"][home_player]["club_id"] = away
+    assert any("does not play for" in r for r in _check(moved).charter_reasons)
 
 
 def test_the_briefs_thresholds_and_the_list_hashes_cannot_drift():

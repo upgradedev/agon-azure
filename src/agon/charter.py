@@ -12,7 +12,8 @@ with no language model anywhere:
   refereeing, and quotes;
 * the Rights Guard lists the cues run under, named by sha256 only (the lists themselves are deny
   lists of real names and are never copied into a published file);
-* the names the cues may use (the two squads of the fictional fixture) and the voices.
+* the names the cues may use (the two squads of the fictional fixture, each player with its club)
+  and the voices.
 
 `charter_check` is the deterministic gate: every template is in all four languages, every slot is
 one the template id allows (an allow-list in code, not in the charter), no template carries held
@@ -255,7 +256,11 @@ def build_charter(record: Any, voices: Mapping[str, str] | None = None) -> dict[
     """
     roster: Roster = record.roster
     home, away = record.meta["home"], record.meta["away"]
-    squads = {pid: name for pid, name in sorted(roster.players.items()) if roster.player_club.get(pid) in (home, away)}
+    squads = {
+        pid: {"name": name, "club_id": roster.player_club[pid]}
+        for pid, name in sorted(roster.players.items())
+        if roster.player_club.get(pid) in (home, away)
+    }
     chosen = dict(DEFAULT_VOICES if voices is None else voices)
     if set(chosen) != set(LANGUAGES):
         raise CharterError(f"voices must name exactly {list(LANGUAGES)}")
@@ -461,11 +466,15 @@ def _name_problems(charter: Mapping[str, Any], roster: Roster) -> list[str]:
     players = names.get("players") if isinstance(names, Mapping) and set(names) == {"players"} else None
     if not isinstance(players, Mapping) or not players:
         return problems + ["names must hold exactly a non-empty players table"]
-    for pid, name in sorted(players.items()):
+    for pid, entry in sorted(players.items()):
+        if not isinstance(entry, Mapping) or set(entry) != {"name", "club_id"}:
+            problems.append(f"player {pid!r} must hold exactly name and club_id")
+            continue
+        name = entry["name"]
         if roster.players.get(pid) != name:
             problems.append(f"name {name!r} is not on the fictional roster as {pid!r}")
-        elif roster.player_club.get(pid) not in clubs:
-            problems.append(f"{name!r} does not play for either club of the fixture")
+        elif roster.player_club.get(pid) != entry["club_id"] or entry["club_id"] not in clubs:
+            problems.append(f"{name!r} does not play for {entry['club_id']!r}, a club of the fixture")
     return problems
 
 
@@ -473,7 +482,7 @@ def sample_values(charter: Mapping[str, Any], language: str) -> dict[str, str]:
     """Slot values from the charter's own names, to screen every template as it would be shown."""
     home = charter["fixture"]["home"]
     away = charter["fixture"]["away"]
-    players = sorted(charter["names"]["players"].values())
+    players = sorted(entry["name"] for entry in charter["names"]["players"].values())
     first, second = players[0], players[-1]
     decimal = "." if language == "en" else ","
     return {
