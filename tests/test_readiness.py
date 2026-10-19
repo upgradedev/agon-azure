@@ -29,7 +29,7 @@ GOOD_JS = "console.log('Agon replay ready');"
 
 
 def run_gate(*args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run([sys.executable, str(SCRIPT), *args], capture_output=True, text=True)
+    return subprocess.run([sys.executable, str(SCRIPT), *args], capture_output=True, encoding="utf-8")
 
 
 def write_case(tmp_path: Path, index: dict, markers: list[str] | None = None,
@@ -87,6 +87,161 @@ def test_forbidden_string_in_page_fails(tmp_path: Path, injected: str, reason: s
     result = run_gate("--offline", str(fixtures), "--config", str(config))
     assert result.returncode == 1
     assert reason in result.stdout
+
+
+ENTITY_LABEL = "em or en dash as an HTML character reference"
+ESCAPE_LABEL = "em or en dash as a \\u escape"
+
+
+@pytest.mark.parametrize(
+    ("injected", "reason"),
+    [
+        ("Full time &mdash; 2 to 1", ENTITY_LABEL),
+        ("minutes 55&ndash;70", ENTITY_LABEL),
+        ("Full time &MDASH; 2 to 1", ENTITY_LABEL),
+        ("Full time &#8212; 2 to 1", ENTITY_LABEL),
+        ("minutes 55&#8211;70", ENTITY_LABEL),
+        ("Full time &#x2014; 2 to 1", ENTITY_LABEL),
+        ("minutes 55&#X2013;70", ENTITY_LABEL),
+        ("Full time &#x02014 2 to 1", ENTITY_LABEL),
+        ("A compli&#97;nt workflow", "the word 'compliant'"),
+        ("As seen in the Premier&nbsp;League", "real-world name 'Premier League'"),
+    ],
+)
+def test_html_escaped_forbidden_string_in_page_fails(tmp_path: Path, injected: str, reason: str) -> None:
+    body = GOOD_BODY.replace("</body>", f"<p>{injected}</p></body>")
+    fixtures, config = write_case(tmp_path, good_index(body=body))
+    result = run_gate("--offline", str(fixtures), "--config", str(config))
+    assert result.returncode == 1, result.stdout
+    assert reason in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("js", "reason"),
+    [
+        ("const label = 'Full time \\u2014 final';", ESCAPE_LABEL),
+        ("const label = 'minutes 55\\u201370';", ESCAPE_LABEL),
+        ("const label = `Full time \\u{2014} final`;", ESCAPE_LABEL),
+        ("el.innerHTML = 'Full time &mdash; final';", ENTITY_LABEL),
+        ("const label = 'compli\\u0061nt';", "the word 'compliant'"),
+    ],
+)
+def test_escaped_forbidden_string_in_shipped_script_fails(tmp_path: Path, js: str, reason: str) -> None:
+    fixtures, config = write_case(tmp_path, good_index(js=js))
+    result = run_gate("--offline", str(fixtures), "--config", str(config))
+    assert result.returncode == 1, result.stdout
+    asset_lines = [ln for ln in result.stdout.splitlines() if "asset https://agon.example.test/app.js" in ln]
+    assert len(asset_lines) == 1 and asset_lines[0].startswith("FAIL"), result.stdout
+    assert reason in asset_lines[0]
+
+
+def test_json_dumps_default_output_is_caught() -> None:
+    # json.dumps escapes non-ASCII by default, so a feed built with it carries
+    # the dash as six ASCII characters.
+    feed = json.dumps({"title": "Full time \u2014 2 to 1"})
+    assert "\u2014" not in feed
+    assert any(ESCAPE_LABEL in hit for hit in readiness.forbidden_hits(feed, readiness.build_rules()))
+
+
+def test_escaped_dash_probes_from_review_are_caught() -> None:
+    rules = readiness.build_rules()
+    for probe in ("Full time &mdash; 2 to 1", "55&ndash;70", "&#8212;", "&#x2014;", "x = '\\u2014'"):
+        assert readiness.forbidden_hits(probe, rules), probe
+
+
+def test_modulepreload_is_matched_by_token(tmp_path: Path) -> None:
+    body = GOOD_BODY.replace("</body>", '<link rel="preload modulepreload" href="/chunk.js"></body>')
+    index = good_index(body=body)
+    index[URL + "chunk.js"] = {"status": 200, "body": "const t = 'Full time \\u2014';"}
+    fixtures, config = write_case(tmp_path, index)
+    result = run_gate("--offline", str(fixtures), "--config", str(config))
+    assert result.returncode == 1, result.stdout
+    chunk = [ln for ln in result.stdout.splitlines() if "asset https://agon.example.test/chunk.js" in ln]
+    assert len(chunk) == 1 and chunk[0].startswith("FAIL")
+
+
+@pytest.mark.parametrize(
+    "js",
+    [
+        'const load = () => import("./lazy-abc123.js");',
+        'import{r as e}from"./lazy-abc123.js";e();',
+        "import './lazy-abc123.js';",
+    ],
+)
+def test_chunk_reached_through_an_import_is_scanned(tmp_path: Path, js: str) -> None:
+    body = GOOD_BODY.replace('src="/app.js"', 'src="/assets/app.js" type="module"')
+    index = {
+        URL: {"status": 200, "body": body},
+        URL + "assets/app.js": {"status": 200, "body": js},
+        URL + "assets/lazy-abc123.js": {"status": 200, "body": "const t = 'Full time \u2014 2 to 1';"},
+    }
+    fixtures, config = write_case(tmp_path, index)
+    result = run_gate("--offline", str(fixtures), "--config", str(config))
+    assert result.returncode == 1, result.stdout
+    lazy = [ln for ln in result.stdout.splitlines() if "asset https://agon.example.test/assets/lazy-abc123.js" in ln]
+    assert len(lazy) == 1 and lazy[0].startswith("FAIL") and "em dash U+2014" in lazy[0]
+
+
+def test_import_specifiers_skip_bare_and_computed_names() -> None:
+    js = ('import React from "react";import("./a.js");const n = 1;'
+          'import(`./b-${n}.js`);export * from "../c.mjs?v=2";const s = "data from \'/about\'";')
+    assert readiness.import_specifiers(js) == ["./a.js", "../c.mjs?v=2"]
+
+
+def test_asset_cap_fails_rather_than_passing_unscanned_chunks() -> None:
+    pages = {
+        URL: fixture_result(200, '<script src="/a.js"></script><script src="/b.js"></script>'),
+        URL + "a.js": fixture_result(200, "ok"),
+        URL + "b.js": fixture_result(200, "ok"),
+    }
+    target = readiness.Target("demo", URL, ["script"], scan_assets=True)
+    findings = readiness.check_target(target, pages.__getitem__, readiness.build_rules(), max_assets=1)
+    cap = [f for f in findings if f.check == "asset scan complete"]
+    assert len(cap) == 1 and not cap[0].ok and "1 not scanned" in cap[0].detail
+
+
+def fixture_result(status: int, body: str) -> readiness.FetchResult:
+    return readiness.FetchResult(status, (URL,), body)
+
+
+def test_limitations_are_printed_but_never_counted(tmp_path: Path) -> None:
+    fixtures, config = write_case(tmp_path, good_index())
+    result = run_gate("--offline", str(fixtures), "--config", str(config))
+    assert result.returncode == 0, result.stdout
+    assert "LIMITATIONS (not checked, never counted)" in result.stdout
+    assert "computed at run time" in result.stdout
+    passes = result.stdout.count("\nPASS ")
+    assert f"passed: {passes};" in result.stdout
+
+
+@pytest.mark.parametrize(("markers", "reason"), [([], "no body marker configured"), ([""], "blank marker"),
+                                                 (["  "], "blank marker")])
+def test_config_target_without_a_usable_marker_fails(tmp_path: Path, markers: list[str], reason: str) -> None:
+    index = good_index(body="<html><body>Page not found, try again</body></html>")
+    targets = [{"name": "demo", "url": URL, "markers": markers}]
+    fixtures, config = write_case(tmp_path, index, targets=targets)
+    result = run_gate("--offline", str(fixtures), "--config", str(config))
+    assert result.returncode == 1, result.stdout
+    assert reason in result.stdout
+    assert "verdict: FAIL" in result.stdout
+
+
+def test_url_without_marker_fails(tmp_path: Path) -> None:
+    index = good_index(body="<html><body>Page not found, try again</body></html>")
+    fixtures, _ = write_case(tmp_path, index)
+    empty = tmp_path / "none.json"
+    result = run_gate("--offline", str(fixtures), "--config", str(empty), "--url", URL)
+    assert result.returncode == 1, result.stdout
+    assert "no body marker configured" in result.stdout
+    assert "verdict: FAIL" in result.stdout
+
+
+def test_markers_given_as_a_string_are_a_config_error(tmp_path: Path) -> None:
+    targets = [{"name": "demo", "url": URL, "markers": "Agon"}]
+    fixtures, config = write_case(tmp_path, good_index(), targets=targets)
+    result = run_gate("--offline", str(fixtures), "--config", str(config))
+    assert result.returncode == 1
+    assert "config error" in result.stdout and "markers must be a list of strings" in result.stdout
 
 
 def test_forbidden_string_in_shipped_script_fails(tmp_path: Path) -> None:
@@ -174,6 +329,7 @@ def test_pinned_defaults_cannot_be_removed_by_config() -> None:
     rules = readiness.build_rules(extra_terms=[])
     labels = [label for label, _ in rules]
     assert "the word 'compliant'" in labels and "self-score pattern" in labels
+    assert ENTITY_LABEL in labels and ESCAPE_LABEL in labels
 
 
 def test_self_score_rule_ignores_dates_and_paths() -> None:
