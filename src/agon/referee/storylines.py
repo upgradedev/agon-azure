@@ -2,6 +2,7 @@
 
 Usage:
     python -m agon.referee.storylines --seeds 2001-2010 --print-hash
+    python -m agon.referee.storylines --seeds 1,2,3 --out build/labels.ndjson
 
 Each storyline is a deterministic function of (seed, kind): which side it hits, the minute it
 starts and its size are drawn on the STORYLINE stream under a match key no real fixture uses, so
@@ -11,6 +12,7 @@ planning never shifts a draw inside a match. Spec seed set for storylines: 2001 
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 import time
 from typing import Any, Sequence
@@ -78,11 +80,19 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m agon.referee.storylines", description=__doc__.splitlines()[0])
     parser.add_argument("--seeds", default=DEFAULT_SEEDS)
     parser.add_argument("--print-hash", action="store_true", help="print the label set sha256 last")
+    parser.add_argument("--out", help="write the labels as NDJSON here (binary, LF) instead of stdout")
     args = parser.parse_args(argv)
     started = time.perf_counter()
     labels = storyline_labels(parse_seeds(args.seeds))
-    for label in labels:
-        sys.stdout.write(canonical_bytes(label).decode("ascii") + "\n")
+    body = b"".join(canonical_bytes(label) + b"\n" for label in labels)
+    if args.out:
+        parent = os.path.dirname(args.out)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(args.out, "wb") as fh:
+            fh.write(body)
+    else:
+        sys.stdout.write(body.decode("ascii"))
     if args.print_hash:
         sys.stdout.write(f"labels {len(labels)} sha256 {sha256_hex(canonical_bytes(labels))}\n")
     sys.stderr.write(f"wall time {int((time.perf_counter() - started) * 1000)} ms total\n")
