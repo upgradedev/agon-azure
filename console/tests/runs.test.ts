@@ -229,6 +229,15 @@ describe("approval and labels", () => {
     expect(att.attesting).toBe("You are attesting: headline report and 2 flagged sentences");
     expect(att.cleared).toBe("Gate-cleared only: 4 editions");
   });
+
+  it("names each kind a pipeline bundle gate-clears, never counting audio, captions or the card as editions", () => {
+    const run = sampleRun();
+    const manifest = readJson<BundleManifest>(join(WEB, "runs", "sample-s1", "manifest.json"));
+    const pipeline = clone(manifest);
+    pipeline.attested_scope.gate_cleared = ["audio-el.mp3", "audio-en.mp3", "captions-el.json", "card.json", "report-el.json", "report-fr.json"];
+    expect(attestation(run, pipeline).cleared).toBe("Gate-cleared only: 2 editions, 2 audio files, 1 caption file and the card file");
+    expect(attestation(run, pipeline).clearedCount).toBe(6);
+  });
 });
 
 describe("wall, why and the bundle check", () => {

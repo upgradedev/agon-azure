@@ -19,7 +19,7 @@ import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import { prerender } from "../src/entry-server";
 import { loadRunsData, type FetchText } from "../src/lib/loader";
-import { NOT_DEPLOYED_SENTENCE, STANDIN_HEADER, editionLabel } from "../src/lib/runs";
+import { DECIDED_CARD_SENTENCE, NOT_DEPLOYED_SENTENCE, STANDIN_HEADER, decidedMessage, editionLabel } from "../src/lib/runs";
 import { PREVIEW_ONLY_SENTENCE } from "../src/lib/destinations";
 import { REPO, afterFetch, diskFetch } from "./helpers";
 
@@ -31,6 +31,7 @@ const SOURCES: [string, FetchText, boolean][] = [
 describe.each(SOURCES)("prerendered markup, %s", (_name, fetchText, committed) => {
   let html = "";
   let labels: string[] = [];
+  let decided = false;
 
   beforeAll(async () => {
     const result = await prerender(fetchText);
@@ -39,6 +40,7 @@ describe.each(SOURCES)("prerendered markup, %s", (_name, fetchText, committed) =
     const data = await loadRunsData(fetchText);
     const run = data.runs[data.defaultRunId].run;
     labels = [`id="wall-label">${run.label}`, `id="approve-label">${run.label}`, `id="recap-label">${editionLabel(run)}`];
+    decided = decidedMessage(run) !== null;
   });
 
   it("states the labels of the run it shows by default on every screen that shows it", () => {
@@ -62,9 +64,11 @@ describe.each(SOURCES)("prerendered markup, %s", (_name, fetchText, committed) =
     }
   });
 
-  it("states the stand-in card header, the not-deployed sentence and the preview-only sentence", () => {
+  it("states the stand-in card header, the not-deployed or decided sentence and the preview-only sentence", () => {
     expect(html).toContain(STANDIN_HEADER);
-    expect(html).toContain(NOT_DEPLOYED_SENTENCE);
+    /* A decided run (a recorded run, approved on the real card) says so instead of "not deployed". */
+    expect(html).toContain(decided ? DECIDED_CARD_SENTENCE : NOT_DEPLOYED_SENTENCE);
+    expect(html).not.toContain(decided ? NOT_DEPLOYED_SENTENCE : DECIDED_CARD_SENTENCE);
     expect(html.split(PREVIEW_ONLY_SENTENCE).length - 1).toBe(2);
   });
 

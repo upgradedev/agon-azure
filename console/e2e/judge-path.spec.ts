@@ -88,7 +88,10 @@ for (const viewport of [
     if (preview) {
       await expect(page.getByText(/There is no approved hash to compare with the published one/)).toBeVisible();
     } else {
-      await expect(page.getByText(/The approved hash equals the published hash/)).toBeVisible();
+      /* Verify lists every run's bundle under its own label; this run's block holds its comparison. */
+      const block = page.locator(`[data-view="verify"] section[data-run-id="${id}"]`);
+      await expect(block.getByRole("heading", { name: run.label })).toBeVisible();
+      await expect(block.getByText(/The approved hash equals the published hash/)).toBeVisible();
     }
     await expect(page.getByText(/Recomputed in your browser: (\d+) of \1 files match\./)).toBeVisible({ timeout: 30_000 });
     expect(Date.now() - started, "the path fits in 90 seconds").toBeLessThan(90_000);

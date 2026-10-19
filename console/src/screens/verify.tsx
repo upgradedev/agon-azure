@@ -25,6 +25,7 @@ import {
   bundleCheck,
   bundleFileUrl,
   compareApproved,
+  isApproved,
   shortHash,
   validateRun,
   withheldPayloads,
@@ -262,16 +263,20 @@ export function Verify({ active }: { active: boolean }) {
             {first ? <StatusBadge status={first.check.ok ? "match" : "mismatch"} /> : <Badge tone="neutral">{running ? "Running" : "Not run"}</Badge>}
           </CardHeader>
           <CardBody className="space-y-4">
-            {first ? (
-              <p className={cn("rounded-lg border px-3 py-2 text-sm font-medium", first.run.provenance === "design_preview" ? "border-preview/25 bg-preview-bg text-preview" : "border-line bg-surface-2 text-fg")}>
-                {first.run.label}
-              </p>
-            ) : null}
             <p className={cn("text-sm font-medium", first ? (first.check.ok ? "text-accent" : "text-danger") : bundleError ? "text-danger" : "text-fg")} aria-live="polite">
               {bundleOverall}
             </p>
             {bundles.map((b) => (
-              <div key={b.run.run_id} className="space-y-3">
+              <section key={b.run.run_id} className="space-y-3" aria-labelledby={`bundle-${b.run.run_id}`} data-run-id={b.run.run_id}>
+                <h3
+                  id={`bundle-${b.run.run_id}`}
+                  className={cn(
+                    "rounded-lg border px-3 py-2 text-sm font-medium",
+                    b.run.provenance === "design_preview" ? "border-preview/25 bg-preview-bg text-preview" : "border-line bg-surface-2 text-fg",
+                  )}
+                >
+                  {b.run.label}
+                </h3>
                 <div className="space-y-2 rounded-lg border border-line p-3">
                   <dl className="space-y-1.5">
                     <HashRow label="Bundle hash on the approval card" value={b.run.bundle.sha256} />
@@ -299,7 +304,7 @@ export function Verify({ active }: { active: boolean }) {
                     </li>
                   ))}
                 </ul>
-              </div>
+              </section>
             ))}
           </CardBody>
         </Card>
@@ -378,10 +383,18 @@ export function Verify({ active }: { active: boolean }) {
                 A match means the bytes your browser received are exactly the bytes the manifest lists, and that the bundle on the approval card
                 is the bundle served here.
               </p>
-              <p>
-                It does not show that anyone approved them. The approved-hash line above is computed from the run file: today no report has been
-                approved or published from this site.
-              </p>
+              {bundles.some((b) => isApproved(b.run)) ? (
+                <p>
+                  It does not by itself show who approved them. The approval on file (role, channel and time) comes from the run file, which was
+                  written from the files the Publisher published; the approved-hash line above compares the hash that approval names with the
+                  hash computed on this page.
+                </p>
+              ) : (
+                <p>
+                  It does not show that anyone approved them. The approved-hash line above is computed from the run file: today no report has
+                  been approved or published from this site.
+                </p>
+              )}
             </CardBody>
           </Card>
         </div>

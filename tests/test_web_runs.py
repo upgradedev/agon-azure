@@ -263,10 +263,17 @@ def test_recap_text_never_shows_a_raw_id():
             assert not re.search(r"\bC\d+(P\d+)?\b", sentence["text"]), sentence["text"]
 
 
+# Audio in a recorded run is binary (.gitattributes marks *.mp3 binary); a CR byte inside it is data.
+BINARY_SUFFIXES = frozenset({".mp3", ".wav", ".png", ".jpg", ".mp4"})
+
+
 def test_run_files_have_no_cr_bytes():
+    checked = 0
     for path in sorted(RUNS.rglob("*")):
-        if path.is_file():
+        if path.is_file() and path.suffix.lower() not in BINARY_SUFFIXES:
             assert b"\r" not in path.read_bytes(), path
+            checked += 1
+    assert checked >= 3, "no text run files were checked"
 
 
 def test_readme_documents_the_format():

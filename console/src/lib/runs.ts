@@ -686,6 +686,10 @@ export function decidedMessage(run: Run): string | null {
   return null;
 }
 
+/* The card's standing notice on a decided run, in place of the not-deployed sentence. */
+export const DECIDED_CARD_SENTENCE =
+  "This run is already decided, so Approve and Request changes on this stand-in card send nothing; they only say how it was decided.";
+
 export interface Attestation {
   attesting: string;
   cleared: string;
@@ -705,12 +709,33 @@ export function attestation(run: Run, manifest: BundleManifest): Attestation {
     parts.push("headline report");
   }
   parts.push(`${flagged} flagged sentence${flagged === 1 ? "" : "s"}`);
-  const cleared = scope.gate_cleared.length;
+  /* The gate-cleared set of a pipeline bundle also holds audio, captions and the card file, so
+     each kind is counted under its own name, never all of them as editions. */
+  const names = scope.gate_cleared;
+  const editions = names.filter((n) => EDITION_FILE.test(n)).length;
+  const audio = names.filter((n) => n.startsWith("audio-")).length;
+  const captions = names.filter((n) => n.startsWith("captions-")).length;
+  const card = names.includes("card.json") ? 1 : 0;
+  const other = names.length - editions - audio - captions - card;
+  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+  const kinds = [plural(editions, "edition")];
+  if (audio) {
+    kinds.push(plural(audio, "audio file"));
+  }
+  if (captions) {
+    kinds.push(plural(captions, "caption file"));
+  }
+  if (card) {
+    kinds.push("the card file");
+  }
+  if (other) {
+    kinds.push(plural(other, "other file"));
+  }
   return {
     attesting: `You are attesting: ${parts.join(" and ")}`,
-    cleared: `Gate-cleared only: ${cleared} edition${cleared === 1 ? "" : "s"}`,
+    cleared: `Gate-cleared only: ${joinLabels(kinds)}`,
     flagged,
-    clearedCount: cleared,
+    clearedCount: names.length,
   };
 }
 

@@ -170,7 +170,9 @@ def test_required_pairs_are_all_in_the_shipped_table():
 
 
 def test_no_dash_characters_in_shipped_or_check_files():
-    files = [p for p in (ROOT / "web").rglob("*") if p.is_file()]
+    # Binary media (recorded-run audio) carries no text; ci/check_dashes.py skips it the same way.
+    binary = {".mp3", ".wav", ".png", ".jpg", ".mp4"}
+    files = [p for p in (ROOT / "web").rglob("*") if p.is_file() and p.suffix.lower() not in binary]
     files += [ROOT / "ci" / "web_check.py", Path(__file__)]
     for path in files:
         text = path.read_text(encoding="utf-8")
