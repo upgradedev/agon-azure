@@ -4,6 +4,9 @@ The race is forced, not left to the scheduler: the store holds every thread righ
 of the nonce until all 50 have read it as pending, so all 50 then attempt the compare-and-set.
 Negative control: a store that ignores the etag lets every thread consume the nonce, which proves
 the etag compare-and-set is what decides the winner.
+
+Scope: this runs against `InMemoryStore`, the reference implementation of the store protocol. The
+Cosmos DB etag compare-and-set is NOT exercised here; that needs the Cosmos adapter and a deploy.
 """
 
 from __future__ import annotations
@@ -96,7 +99,10 @@ def test_fifty_concurrent_approvals_publish_exactly_once():
     assert store.keys(P.PUBLISHED) == [env.bundle.bundle_sha256]
     assert len(store.keys(verifier.APPROVALS)) == 1
     assert store.consumed_writes == 1
-    print(f"M15 self-measured: {N} concurrent approvals of one nonce -> {sum(1 for p in publishes if p.ok)} publish")
+    print(
+        f"M15 self-measured against the in-memory reference store (Cosmos etag not exercised): "
+        f"{N} concurrent approvals of one nonce -> {sum(1 for p in publishes if p.ok)} publish"
+    )
 
 
 def test_negative_control_without_the_etag_check_every_thread_consumes():

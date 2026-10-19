@@ -4,6 +4,9 @@ Static: every file in governance/channels, selected by path, passes `routes.audi
 Dynamic: `verifier.verify` is replaced by a spy; every adapter must call it exactly once for a
 valid payload and return exactly what it returned. Negative control: rogue adapters written to a
 temporary folder must each be flagged.
+
+Scope: no HTTP router exists yet, so today the count covers the four channel adapters only. When
+the API router lands, this test must enumerate its routes by path as well.
 """
 
 from __future__ import annotations

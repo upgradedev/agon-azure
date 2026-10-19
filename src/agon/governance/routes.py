@@ -15,6 +15,9 @@ file text) and counted, so a refactored or renamed adapter cannot fall out of sc
 The dynamic half lives in tests/routes: it replaces `verifier.verify` with a spy and asserts every
 adapter calls it exactly once for a valid payload and returns exactly what it returned.
 
+Scope: this audits the channel adapters. No HTTP router exists yet; when the API lands, its
+approval routes must be enumerated by path here too, or M16 does not cover them.
+
 Usage: python -m agon.governance.routes [--dir PATH]
 """
 
@@ -143,7 +146,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"FAIL {problem}")
     print(
         f"channel files scanned: {len(report.scanned)}; adapters: {len(report.adapters)} "
-        f"({', '.join(report.adapters)}); routes that skip verify(): {len(report.problems)}"
+        f"({', '.join(report.adapters)}); routes that skip verify(): {len(report.problems)} "
+        f"(channel adapters only; no HTTP router exists yet)"
     )
     return 0 if report.ok else 1
 
