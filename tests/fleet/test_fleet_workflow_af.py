@@ -21,8 +21,8 @@ from agon.fleet import stores  # noqa: E402
 from agon.fleet.checkpoints import GuardedCheckpointStorage, file_storage  # noqa: E402
 from agon.fleet.contracts import (  # noqa: E402
     CHANGES_REQUESTED,
-    DECISION_REFUSED,
     EXECUTOR_IDS,
+    PUBLISH_ALREADY_REQUESTED,
     PUBLISH_REQUESTED,
     REFUSED_AT_INGEST,
     REFUSED_BY_GATE,
@@ -108,8 +108,8 @@ def test_approve_in_a_fresh_workflow_gives_exactly_one_publish_request(tmp_path:
     assert [o["status"] for o in first["outcomes"]] == [PUBLISH_REQUESTED]
     assert first["reemitted_request_ids"] == []
     replay = _resume(tmp_path, handoff)
-    assert [o["code"] for o in replay["outcomes"]] == ["already_consumed"]
-    assert [o["status"] for o in replay["outcomes"]] == [DECISION_REFUSED]
+    assert [o["code"] for o in replay["outcomes"]] == ["already_enqueued"]
+    assert [o["status"] for o in replay["outcomes"]] == [PUBLISH_ALREADY_REQUESTED]
     assert len(deps.publish_queue.items()) == 1
     assert deps.ledger.status("run-1") == stores.APPROVED
 

@@ -55,12 +55,14 @@ MAX_WRITER_ATTEMPTS = 2
 REFUSED_AT_INGEST = "refused_at_ingest"
 REFUSED_BY_GATE = "refused_by_gate"
 PUBLISH_REQUESTED = "publish_requested"
+PUBLISH_ALREADY_REQUESTED = "publish_already_requested"
 CHANGES_REQUESTED = "changes_requested"
 DECISION_REFUSED = "decision_refused"
 OUTCOME_STATUSES: tuple[str, ...] = (
     REFUSED_AT_INGEST,
     REFUSED_BY_GATE,
     PUBLISH_REQUESTED,
+    PUBLISH_ALREADY_REQUESTED,
     CHANGES_REQUESTED,
     DECISION_REFUSED,
 )

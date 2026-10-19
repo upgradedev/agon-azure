@@ -39,7 +39,7 @@ def test_live_cosmos_kill_then_resume_publishes_exactly_once(tmp_path: Path) -> 
     assert first["save_failures"] == []
     assert_split_across_processes(run_dir, handoff["pid"], first["pid"])
     code, replay = resume(run_dir, "b2", "--decision", "approve", "--confirm-all", storage=COSMOS)
-    assert [o["code"] for o in replay["outcomes"]] == ["already_consumed"]
+    assert [o["code"] for o in replay["outcomes"]] == ["already_enqueued"]
     assert len(list((run_dir / "publish-requests").glob("*.json"))) == 1
 
 

@@ -103,7 +103,7 @@ def test_kill_then_resume_in_a_fresh_process_publishes_exactly_once(tmp_path: Pa
 
     code, replay = resume(run_dir, "b2", "--decision", "approve", "--confirm-all")
     assert code == 0
-    assert [o["code"] for o in replay["outcomes"]] == ["already_consumed"]
+    assert [o["code"] for o in replay["outcomes"]] == ["already_enqueued"]
     assert sorted((run_dir / "publish-requests").glob("*.json")) == files and files[0].read_bytes() == before
 
 

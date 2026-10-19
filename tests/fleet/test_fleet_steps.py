@@ -16,7 +16,7 @@ from agon.agents.fakes import FakeModel, FakeSpeech, FakeTranslator
 from agon.fleet import steps, stores
 from agon.fleet.contracts import (
     CHANGES_REQUESTED,
-    DECISION_REFUSED,
+    PUBLISH_ALREADY_REQUESTED,
     PUBLISH_REQUESTED,
     REFUSED_AT_INGEST,
     REFUSED_BY_GATE,
@@ -313,15 +313,29 @@ def _awaiting(**kw):
     return deps, ref
 
 
-def test_approve_gives_exactly_one_publish_request_and_a_replay_is_refused() -> None:
+def test_approve_gives_exactly_one_publish_request_and_a_replay_enqueues_nothing() -> None:
     deps, ref = _awaiting()
     first = run(steps.decide(deps, ref.request, _envelope(ref.request), ref.sealed.manifest_json))
     assert isinstance(first, PublishRequest)
     assert run(steps.enqueue_publish(deps, first)).status == PUBLISH_REQUESTED
     replay = run(steps.decide(deps, ref.request, _envelope(ref.request), ref.sealed.manifest_json))
-    assert replay.status == DECISION_REFUSED and replay.code == "already_consumed"
+    assert isinstance(replay, PublishRequest) and replay.approval_id == first.approval_id
+    again = run(steps.enqueue_publish(deps, replay))
+    assert again.status == PUBLISH_ALREADY_REQUESTED and again.code == "already_enqueued"
     assert len(deps.publish_queue.items()) == 1
     assert deps.ledger.status("run-1") == stores.APPROVED
+
+
+def test_a_crash_between_consume_and_enqueue_is_recovered_without_a_second_publish() -> None:
+    """The verifier consumed the nonce, then the worker died before publish_request ran."""
+    deps, ref = _awaiting()
+    lost = run(steps.decide(deps, ref.request, _envelope(ref.request), ref.sealed.manifest_json))
+    assert isinstance(lost, PublishRequest) and deps.publish_queue.items() == []
+    recovered = run(steps.decide(deps, ref.request, _envelope(ref.request), ref.sealed.manifest_json))
+    assert isinstance(recovered, PublishRequest) and recovered.approval_id == lost.approval_id
+    assert run(steps.enqueue_publish(deps, recovered)).status == PUBLISH_REQUESTED
+    assert run(steps.enqueue_publish(deps, recovered)).status == PUBLISH_ALREADY_REQUESTED
+    assert len(deps.publish_queue.items()) == 1
 
 
 def test_changes_requested_consumes_the_nonce_and_publishes_nothing() -> None:

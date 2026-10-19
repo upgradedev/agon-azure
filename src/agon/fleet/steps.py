@@ -31,6 +31,7 @@ from agon.fleet.contracts import (
     EDITION_LANGUAGE,
     FANOUT_EDITIONS,
     MAX_WRITER_ATTEMPTS,
+    PUBLISH_ALREADY_REQUESTED,
     PUBLISH_REQUESTED,
     REFUSED_AT_INGEST,
     REFUSED_BY_GATE,
@@ -658,6 +659,10 @@ async def decide(
         confirmed_rows=frozenset(envelope.confirmed_rows),
     )
     result = verifier.verify(decision, deps.store, deps.clock())
+    if not result.ok and result.code == "already_consumed":
+        recovered = _recover_publish_request(deps, request)
+        if recovered is not None:
+            return recovered
     if not result.ok:
         return refused(result.code, result.detail)
     if deps.ledger.status(request.run_id) == stores.SEALED:
@@ -680,11 +685,33 @@ async def decide(
     )
 
 
+def _recover_publish_request(deps: FleetDeps, request: ApprovalRequest) -> PublishRequest | None:
+    """Close the crash window between consume-once and the enqueue.
+
+    If a worker died after `verify` consumed the nonce but before `publish_request` ran, every
+    replay of the pause checkpoint meets "already consumed". The approval record the verifier
+    wrote is the evidence: when it says "approve" for this bundle and target, the publish request
+    is emitted again. The queue is create-only by approval id, so this can never publish twice.
+    """
+    approval_id = verifier.approval_id_for(request.nonce)
+    doc = deps.store.read(verifier.APPROVALS, approval_id)
+    if doc is None:
+        return None
+    body = doc.body
+    if body.get("decision") != "approve" or body.get("bundle_sha256") != request.bundle_sha256 or body.get("target") != request.target:
+        return None
+    if deps.ledger.status(request.run_id) in (stores.SEALED, stores.AWAITING_APPROVAL):
+        if deps.ledger.status(request.run_id) == stores.SEALED:
+            deps.ledger.advance(request.run_id, stores.AWAITING_APPROVAL, "recorded when the decision arrived")
+        deps.ledger.advance(request.run_id, stores.APPROVED, "recovered from the approval record", approval_id=approval_id)
+    return PublishRequest(run_id=request.run_id, target=request.target, bundle_sha256=request.bundle_sha256, approval_id=approval_id)
+
+
 async def enqueue_publish(deps: FleetDeps, request: PublishRequest) -> RunOutcome:
     created = deps.publish_queue.enqueue(request)
     return RunOutcome(
         run_id=request.run_id,
-        status=PUBLISH_REQUESTED if created else DECISION_REFUSED,
+        status=PUBLISH_REQUESTED if created else PUBLISH_ALREADY_REQUESTED,
         bundle_sha256=request.bundle_sha256,
         code="publish_requested" if created else "already_enqueued",
         detail=f"approval {request.approval_id}",

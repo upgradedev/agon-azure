@@ -15,6 +15,7 @@ on:
     paths:
       - "src/agon/fleet/**"
       - "src/agon/agents/**"
+      - "src/agon/governance/**"
       - "tests/fleet/**"
       - "requirements/fleet.txt"
       - ".github/workflows/fleet-cosmos.yml"
