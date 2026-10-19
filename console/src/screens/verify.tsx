@@ -111,7 +111,10 @@ async function checkBundle(file: string): Promise<BundleResult> {
   return { run: valid, computed, check: bundleCheck(valid, manifest, computed), approval: compareApproved(valid, computed.manifest) };
 }
 
-function StatusBadge({ status }: { status: "match" | "mismatch" | "error" }) {
+function StatusBadge({ status }: { status: "match" | "mismatch" | "error" | "withheld" }) {
+  if (status === "withheld") {
+    return <Badge tone="neutral">Withheld by design</Badge>;
+  }
   if (status === "match") {
     return (
       <Badge tone="success">
@@ -206,11 +209,13 @@ export function Verify({ active }: { active: boolean }) {
   } else if (bundleError) {
     bundleOverall = bundleError;
   } else if (first) {
-    const total = first.check.rows.length;
+    const withheld = first.check.rows.filter((r) => r.status === "withheld").length;
+    const total = first.check.rows.length - withheld;
     const matched = first.check.rows.filter((r) => r.status === "match").length;
+    const tail = withheld ? `, and ${withheld} unticked destination ${withheld === 1 ? "payload is" : "payloads are"} withheld by design` : "";
     bundleOverall = first.check.bundleMatches
-      ? `Recomputed in your browser: the bundle hash equals the hash on the approval card, ${shortHash(first.run.bundle.sha256)}, and ${matched} of ${total} edition files match the sealed manifest.`
-      : `Recomputed in your browser: the bundle hash does not equal the hash on the approval card, and ${matched} of ${total} edition files match the sealed manifest.`;
+      ? `Recomputed in your browser: the bundle hash equals the hash on the approval card, ${shortHash(first.run.bundle.sha256)}, and ${matched} of ${total} published files match the sealed manifest${tail}.`
+      : `Recomputed in your browser: the bundle hash does not equal the hash on the approval card, and ${matched} of ${total} published files match the sealed manifest${tail}.`;
     if (bundles.length > 1) {
       bundleOverall += ` ${bundlesOk} of ${bundles.length} run bundles check out in full.`;
     }
@@ -283,7 +288,8 @@ export function Verify({ active }: { active: boolean }) {
                         <HashRow label="sha256 in the sealed manifest" value={r.expected} />
                         <HashRow label="sha256 computed in your browser" value={r.computed} />
                       </dl>
-                      {r.reason ? <p className="mt-1.5 text-xs text-danger">Differs: {r.reason}.</p> : null}
+                      {r.reason && r.status === "withheld" ? <p className="mt-1.5 text-xs text-muted">Not published: {r.reason}.</p> : null}
+                      {r.reason && r.status !== "withheld" ? <p className="mt-1.5 text-xs text-danger">Differs: {r.reason}.</p> : null}
                     </li>
                   ))}
                 </ul>

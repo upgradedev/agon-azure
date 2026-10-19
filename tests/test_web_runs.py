@@ -30,6 +30,7 @@ from agon.governance.claims import Claim, Sentence
 from agon.governance.factgate import check_translation, run_factgate
 from agon.governance.rights import run_rights
 from agon.governance.seal import canonical_utf8, sha256_hex, verify_manifest
+from sitekit import served
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
@@ -37,6 +38,10 @@ RUNS = WEB / "runs"
 SAMPLE = RUNS / "sample-s1.json"
 LABEL = "Design preview: sample run written by hand, not produced by the pipeline."
 RUN_CASES = json.loads((ROOT / "tests" / "js" / "run_cases.json").read_text(encoding="utf-8"))
+CONSOLE_RUNS = ROOT / "console" / "src" / "lib" / "runs.ts"
+RECORDED = ROOT / "tests" / "fixtures" / "recorded-run" / "runs"
+STANDIN = "Stand-in for the Microsoft Teams card. It calls the same decision endpoint. The real Teams card is in the video."
+LABEL_PREFIXES = ('id="wall-label">', 'id="approve-label">', 'id="recap-label">')
 
 
 def _run() -> dict:
@@ -305,23 +310,28 @@ def test_index_rules_fail(index, problem):
 def test_label_is_pinned_in_every_place_that_enforces_it():
     assert webrun.DESIGN_PREVIEW_LABEL == LABEL
     assert web_check.DESIGN_PREVIEW_LABEL == LABEL
+    # the served console renders it from one constant; the retired vanilla page keeps its copy until web/ goes
+    assert f'export const DESIGN_PREVIEW_LABEL = "{LABEL}";' in CONSOLE_RUNS.read_text(encoding="utf-8")
     assert f'var DESIGN_PREVIEW_LABEL = "{LABEL}";' in (WEB / "agon-runs.js").read_text(encoding="utf-8")
-    assert LABEL in (WEB / "index.html").read_text(encoding="utf-8")
-    targets = {t.name: t for t in readiness.load_config(readiness.DEFAULT_CONFIG)[0]}
     anchored = [marker for _, marker in web_check.PAGE_LABEL_MARKERS]
     assert anchored[0] == 'id="wall-label">' + LABEL
     assert all(marker.endswith(LABEL) for marker in anchored)
-    # the live gate and the static checker hold the same anchored strings, and the page carries each one
-    assert [m for m in targets["demo"].markers if LABEL in m] == anchored
-    page = (WEB / "index.html").read_text(encoding="utf-8")
-    assert all(marker in page for marker in anchored)
+    targets = {t.name: t for t in readiness.load_config(readiness.DEFAULT_CONFIG)[0]}
     assert LABEL in targets["demo-run"].markers
 
 
+def test_the_served_page_carries_every_marker_of_the_live_gate():
+    page = (served() / "index.html").read_text(encoding="utf-8")
+    targets = {t.name: t for t in readiness.load_config(readiness.DEFAULT_CONFIG)[0]}
+    labels = [m for m in targets["demo"].markers if m.startswith(LABEL_PREFIXES)]
+    assert len(labels) == 3
+    assert [m for m in targets["demo"].markers if m not in page] == []
+
+
 def test_standin_header_is_on_the_page_verbatim():
-    header = "Stand-in for the Microsoft Teams card. It calls the same decision endpoint. The real Teams card is in the video."
-    assert header in (WEB / "index.html").read_text(encoding="utf-8")
-    assert header in (WEB / "agon-runs.js").read_text(encoding="utf-8")
+    assert f'export const STANDIN_HEADER =\n  "{STANDIN}";' in CONSOLE_RUNS.read_text(encoding="utf-8")
+    assert STANDIN in (WEB / "agon-runs.js").read_text(encoding="utf-8")
+    assert STANDIN in (served() / "index.html").read_text(encoding="utf-8")
 
 
 # ---------------------------------------------------------------- negative proofs
@@ -415,7 +425,18 @@ def _copy_web(tmp_path: Path) -> Path:
     return target
 
 
+def _copy_served(tmp_path: Path) -> Path:
+    target = tmp_path / "site"
+    shutil.copytree(served(), target)
+    return target
+
+
 def test_web_check_passes_on_the_shipped_tree():
+    count, violations = web_check.scan(served())
+    assert count > 20 and violations == [], violations
+
+
+def test_web_check_passes_on_the_retired_vanilla_tree_it_still_holds_as_a_fixture():
     count, violations = web_check.scan(WEB)
     assert count > 20 and violations == []
 
@@ -430,7 +451,7 @@ def test_web_check_refuses_a_design_preview_run_without_its_label(tmp_path):
 
 
 def test_web_check_refuses_a_page_without_the_label(tmp_path):
-    web = _copy_web(tmp_path)
+    web = _copy_served(tmp_path)
     index = web / "index.html"
     index.write_bytes(index.read_bytes().replace(LABEL.encode("utf-8"), b"Sample run."))
     rules = {v.rule for v in web_check.scan(web)[1]}
@@ -440,7 +461,7 @@ def test_web_check_refuses_a_page_without_the_label(tmp_path):
 @pytest.mark.parametrize("element", ["wall-label", "approve-label", "recap-label"])
 def test_web_check_refuses_a_page_missing_one_screen_copy_of_the_label(tmp_path, element):
     """Only one copy goes; the others stay. A bare substring check passed this."""
-    web = _copy_web(tmp_path)
+    web = _copy_served(tmp_path)
     index = web / "index.html"
     page = index.read_text(encoding="utf-8")
     start = page.index(f'id="{element}">')
@@ -463,6 +484,48 @@ def test_web_check_refuses_a_fallback_without_the_runs_globs(tmp_path):
     assert found and "/runs/" in found[0].message and "/runs/*/" in found[0].message
 
 
+def _with_recorded_default(tmp_path: Path) -> tuple[Path, dict]:
+    """The vanilla tree with the committed recorded-run fixture listed first, as the exporter lists it."""
+    web = _copy_web(tmp_path)
+    index = json.loads((RECORDED / "index.json").read_text(encoding="utf-8"))
+    row = index["runs"][0]
+    shutil.copy(RECORDED / row["file"], web / "runs" / row["file"])
+    shutil.copytree(RECORDED / row["run_id"], web / "runs" / row["run_id"])
+    runs_index = json.loads((web / "runs" / "index.json").read_text(encoding="utf-8"))
+    runs_index["runs"].insert(0, row)
+    (web / "runs" / "index.json").write_bytes(canonical_utf8(runs_index) + b"\n")
+    return web, json.loads((web / "runs" / row["file"]).read_text(encoding="utf-8"))
+
+
+def test_web_check_requires_the_recorded_runs_own_labels_once_it_is_the_default(tmp_path):
+    web, run = _with_recorded_default(tmp_path)
+    found = [v for v in web_check.scan(web)[1] if v.rule == "run-label-page"]
+    assert len(found) == 3, found
+    assert all("recorded run shown by default" in v.message for v in found)
+    assert webrun.verify_run_dir(web / "runs") == [run["run_id"], "sample-s1"]
+
+
+def test_web_check_passes_a_page_that_states_the_recorded_runs_labels(tmp_path):
+    web, run = _with_recorded_default(tmp_path)
+    markers = [m for _, m in web_check.page_label_markers(run)]
+    assert markers[2].startswith('id="recap-label">AI-drafted. Numbers and names checked by code. Headline report and flagged sentences approved')
+    index = web / "index.html"
+    page = index.read_text(encoding="utf-8")
+    index.write_text(page.replace("</main>", "".join(f"<p {m}</p>" for m in markers) + "</main>"), encoding="utf-8")
+    assert [v for v in web_check.scan(web)[1] if v.rule == "run-label-page"] == []
+
+
+def test_the_approved_label_needs_the_approval_to_name_the_bundle_hash():
+    row = json.loads((RECORDED / "index.json").read_text(encoding="utf-8"))["runs"][0]
+    run = json.loads((RECORDED / row["file"]).read_text(encoding="utf-8"))
+    assert web_check.edition_label(run).startswith(web_check.APPROVED_LABEL_PREFIX)
+    other = copy.deepcopy(run)
+    other["approval"]["approved_bundle_sha256"] = "0" * 64
+    assert web_check.edition_label(other) == (
+        "AI-drafted. Numbers and names checked by code. Not approved: the approval on file does not name this bundle hash."
+    )
+
+
 # ---------------------------------------------------------------- deploy stamp
 
 
@@ -478,6 +541,19 @@ def test_stamp_web_verifies_runs_and_fails_on_a_broken_bundle(tmp_path, capsys):
 
 
 # ---------------------------------------------------------------- live gate rules over shipped files
+
+
+def test_every_served_file_passes_the_live_gate_rules():
+    """The same scan over the built console: the page, its bundle and every run file it fetches."""
+    rules = readiness.build_rules()
+    site = served()
+    scanned = 0
+    for path in sorted(site.rglob("*")):
+        if path.is_file() and path.suffix in (".html", ".js", ".json", ".css", ".txt"):
+            hits = readiness.forbidden_hits(path.read_text(encoding="utf-8"), rules)
+            assert hits == [], f"{path.relative_to(site)}: {hits}"
+            scanned += 1
+    assert scanned >= 20
 
 
 def test_every_shipped_web_file_passes_the_live_gate_rules():

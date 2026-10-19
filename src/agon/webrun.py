@@ -38,11 +38,14 @@ from agon.governance.claims import Claim, Sentence
 from agon.governance.factgate import check_translation, run_factgate
 from agon.governance.recompute import MatchFacts, Roster, display_minute, events_of_kind, score_after, stat_events
 from agon.governance.rights import run_rights
+from agon.governance import destinations as dest_mod
 from agon.governance.seal import (
     Artifact,
     canonical_utf8,
+    destination_payload_problem,
     event_log_sha256,
     is_sha256_hex,
+    offered_destinations,
     seal,
     seed_sha256,
     sha256_hex,
@@ -78,8 +81,15 @@ CONFIRM_TYPES = {
 GATE_VERDICTS = ("pass", "mismatch", "refused", "skipped")
 
 RUN_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
-EDITION_FILE = re.compile(r"^edition-[a-z]{2,8}\.json$")
-SENTENCE_ID = re.compile(r"^[a-z]{2,8}-[0-9]{2}$")
+# A design preview names its editions edition-<id>.json (written here); a pipeline run keeps the
+# sealed bundle as published, whose editions are report-<id>.json (agon.fleet.steps.seal_step), so a
+# pipeline run may use either name and a design preview only the first.
+EDITION_FILE = re.compile(r"^(?:edition|report)-[a-z]{2,8}\.json$")
+# Sample ids look like en-04; pipeline ids look like s1, t2, s1-el and s1-easy.
+SENTENCE_ID = re.compile(r"^[a-z0-9][a-z0-9-]{0,62}$")
+# A file inside a pipeline bundle folder: the sealed artifact names (report-en.json, card.json,
+# captions-el.json, destination-feeds.json, audio files), never a path.
+ARTIFACT_FILE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,94}$")
 ISO_TIME = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(?::[0-9]{2})?Z$")
 
 RUN_KEYS = frozenset({
@@ -611,8 +621,13 @@ def validate_run(run: Any) -> list[str]:
             if not isinstance(e, dict) or set(e) != EDITION_KEYS:
                 problems.append(f"editions[{i}] keys must be exactly edition, file, language and name")
                 continue
-            if not isinstance(e["file"], str) or not EDITION_FILE.match(e["file"]) or e["file"] != f"edition-{e['edition']}.json":
-                problems.append(f"editions[{i}].file must be edition-<edition>.json")
+            allowed = [f"edition-{e['edition']}.json"]
+            if run["provenance"] == PIPELINE:
+                allowed.append(f"report-{e['edition']}.json")
+            if not isinstance(e["file"], str) or not EDITION_FILE.match(e["file"]) or e["file"] not in allowed:
+                problems.append(
+                    f"editions[{i}].file must be edition-<edition>.json" + (" or report-<edition>.json" if len(allowed) > 1 else "")
+                )
             if e["edition"] in edition_ids:
                 problems.append(f"editions[{i}].edition {e['edition']} is listed twice")
             edition_ids.add(e["edition"])
@@ -682,6 +697,57 @@ def validate_run(run: Any) -> list[str]:
     return problems
 
 
+def withheld_payloads(run: dict[str, Any]) -> set[str]:
+    """Artifact names the Publisher keeps out of a published bundle: the payload of every
+    destination the sealed bundle offered and the officer did not tick (status not_selected)."""
+    rows = run.get("destinations")
+    if not isinstance(rows, list):
+        return set()
+    return {
+        dest_mod.artifact_name(r["id"])
+        for r in rows
+        if isinstance(r, dict) and r.get("status") == "not_selected" and r.get("id") in dest_mod.LABELS
+    }
+
+
+def _verify_published_bundle(name: str, run: dict[str, Any], manifest_bytes: bytes, artifacts: dict[str, bytes]) -> None:
+    """A pipeline run keeps its bundle exactly as the Publisher published it.
+
+    The manifest is recomputed (canonical form, shape, the hash the run states) and every artifact
+    present is held to its listed sha256 and length. An artifact may be absent only when it is the
+    payload of a destination the officer did not tick, which the Publisher never publishes; every
+    edition the run lists must be present.
+    """
+    check = verify_manifest(manifest_bytes, None, expected_sha256=run["bundle"]["sha256"])
+    if not check.ok or check.manifest is None:
+        raise ValueError(f"{name}: bundle does not verify: " + "; ".join(check.reasons))
+    manifest = check.manifest
+    listed = manifest["artifacts"]
+    unsafe = sorted(n for n in artifacts if not ARTIFACT_FILE.match(n))
+    if unsafe:
+        raise ValueError(f"{name}: bundle file names are not plain artifact names: {', '.join(unsafe)}")
+    stray = sorted(set(artifacts) - set(listed))
+    if stray:
+        raise ValueError(f"{name}: artifact {', '.join(stray)} is present but not listed in the manifest")
+    missing = sorted(set(listed) - set(artifacts) - withheld_payloads(run))
+    if missing:
+        raise ValueError(
+            f"{name}: bundle is missing {', '.join(missing)}; only the payload of a destination the officer did not tick may be withheld"
+        )
+    for artifact, data in sorted(artifacts.items()):
+        entry = listed[artifact]
+        if not isinstance(entry, dict) or entry.get("sha256") != sha256_hex(data) or entry.get("bytes") != len(data):
+            raise ValueError(f"{name}: {artifact} sha256 or length does not match the manifest")
+    for dest_id in offered_destinations(manifest):
+        data = artifacts.get(dest_mod.artifact_name(dest_id))
+        problem = None if data is None else destination_payload_problem(dest_id, data)
+        if problem:
+            raise ValueError(f"{name}: {problem}")
+    absent = sorted({e["file"] for e in run["editions"]} - set(artifacts))
+    if absent:
+        raise ValueError(f"{name}: editions {', '.join(absent)} are not in the bundle")
+
+
 def verify_run_dir(runs_dir: Path) -> list[str]:
     """Check web/runs end to end: index, every run, every bundle recomputed, no stray files.
 
@@ -719,12 +785,15 @@ def verify_run_dir(runs_dir: Path) -> list[str]:
         stray_dirs = [p.name for p in bundle_dir.iterdir() if p.is_dir()]
         if stray_dirs:
             raise ValueError(f"{row['file']}: unexpected folders in the bundle: {', '.join(sorted(stray_dirs))}")
-        check = verify_manifest(manifest_bytes, artifacts, expected_sha256=run["bundle"]["sha256"])
-        if not check.ok:
-            raise ValueError(f"{row['file']}: bundle does not verify: " + "; ".join(check.reasons))
-        listed_files = {e["file"] for e in run["editions"]}
-        if listed_files != set(artifacts):
-            raise ValueError(f"{row['file']}: editions list {sorted(listed_files)} but the bundle holds {sorted(artifacts)}")
+        if run["provenance"] == PIPELINE:
+            _verify_published_bundle(row["file"], run, manifest_bytes, artifacts)
+        else:
+            check = verify_manifest(manifest_bytes, artifacts, expected_sha256=run["bundle"]["sha256"])
+            if not check.ok:
+                raise ValueError(f"{row['file']}: bundle does not verify: " + "; ".join(check.reasons))
+            listed_files = {e["file"] for e in run["editions"]}
+            if listed_files != set(artifacts):
+                raise ValueError(f"{row['file']}: editions list {sorted(listed_files)} but the bundle holds {sorted(artifacts)}")
         sentence_ids = set()
         for e in run["editions"]:
             edition = json.loads(artifacts[e["file"]].decode("utf-8"))

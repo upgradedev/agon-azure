@@ -90,8 +90,13 @@ export const VERDICT_WORDS: Record<GateVerdict, string> = { pass: "Pass", mismat
 const GATE_WORDS: Record<string, string> = { factgate: "Fact Gate", factgate_lang: "Fact Gate, translation", rights: "Rights Guard" };
 
 const RUN_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
-const EDITION_FILE = /^edition-[a-z]{2,8}\.json$/;
-const SENTENCE_ID = /^[a-z]{2,8}-[0-9]{2}$/;
+/* A design preview names its editions edition-<id>.json; a pipeline run keeps
+   the sealed bundle as published, whose editions are report-<id>.json, and its
+   sentence ids look like s1, s1-el and s1-easy (agon.fleet.steps). */
+const EDITION_FILE = /^(?:edition|report)-[a-z]{2,8}\.json$/;
+const SENTENCE_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
+/* Any file inside a published bundle folder: a plain artifact name, never a path. */
+const ARTIFACT_FILE = /^[a-z0-9][a-z0-9._-]{0,94}$/;
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 const ISO_TIME = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(?::[0-9]{2})?Z$/;
 const RUN_KEYS = [
@@ -393,8 +398,12 @@ export function validateRun(run: unknown): string[] {
         problems.push(`editions[${i}] keys must be exactly edition, file, language and name`);
         return;
       }
-      if (typeof e.file !== "string" || !EDITION_FILE.test(e.file) || e.file !== `edition-${String(e.edition)}.json`) {
-        problems.push(`editions[${i}].file must be edition-<edition>.json`);
+      const allowed = [`edition-${String(e.edition)}.json`];
+      if (run.provenance === "pipeline") {
+        allowed.push(`report-${String(e.edition)}.json`);
+      }
+      if (typeof e.file !== "string" || !EDITION_FILE.test(e.file) || !allowed.includes(e.file)) {
+        problems.push(`editions[${i}].file must be edition-<edition>.json${allowed.length > 1 ? " or report-<edition>.json" : ""}`);
       }
       const id = String(e.edition);
       if (editionIds.has(id)) {
@@ -516,7 +525,8 @@ export function runUrl(runId: string): string {
 }
 
 export function bundleFileUrl(run: Run, name: string): string {
-  if (name !== BUNDLE_MANIFEST && !EDITION_FILE.test(String(name))) {
+  const safe = run.provenance === "pipeline" ? ARTIFACT_FILE.test(String(name)) : EDITION_FILE.test(String(name));
+  if (name !== BUNDLE_MANIFEST && !safe) {
     throw new Error("refusing an unsafe bundle file name");
   }
   return `${RUNS_BASE}${run.bundle.dir}/${name}`;
@@ -635,6 +645,31 @@ export function notDeployedMessage(action: "approve" | "changes", run: Run, dest
   );
 }
 
+/* On a run that is no longer waiting, the stand-in card says what was decided
+   instead of pretending to decide again. */
+export const CHANNEL_WORDS: Record<string, string> = {
+  teams: "Microsoft Teams",
+  outlook: "an Outlook approval email",
+  signed_link: "a signed link",
+  console: "the console",
+};
+
+export function decidedMessage(run: Run): string | null {
+  const a = run.approval;
+  if (a.status === "approved" && a.approved_at) {
+    const published = run.state === "PUBLISHED" ? " and published" : "";
+    const channel = CHANNEL_WORDS[a.channel ?? ""] ?? "an approval channel";
+    return (
+      `This report was already approved on ${channel} by the ${a.approver_role ?? "approver"} at ` +
+      `${formatUtc(a.approved_at)}${published}, for bundle ${shortHash(run.bundle.sha256)}. This stand-in card sends nothing more.`
+    );
+  }
+  if (a.status === "changes_requested") {
+    return "The club media office already asked for changes on this report, so this stand-in card sends nothing more.";
+  }
+  return null;
+}
+
 export interface Attestation {
   attesting: string;
   cleared: string;
@@ -646,7 +681,8 @@ export interface Attestation {
    attested scope and the run's Confirm rows. */
 export function attestation(run: Run, manifest: BundleManifest): Attestation {
   const scope = manifest.attested_scope;
-  const headline = scope.attested.includes("edition-en.json");
+  const enFile = run.editions.find((e) => e.edition === "en")?.file ?? "edition-en.json";
+  const headline = scope.attested.includes(enFile);
   const flagged = run.confirm_rows.length;
   const parts: string[] = [];
   if (headline) {
@@ -733,8 +769,13 @@ function unique(list: string[]): string[] {
 /* Everything the Why drawer lists for one sentence of one edition. Edition
    sentence n has the type of English sentence n. */
 export function why(run: Run, edition: EditionMeta, sentence: Sentence, index: number): Why {
+  /* The English sentence this one renders: itself, or for a pipeline edition the id without its
+     edition suffix (s1-el is s1); the sample's editions follow the English order instead. */
+  const suffix = `-${edition.edition}`;
+  const base = sentence.sentence_id.endsWith(suffix) ? sentence.sentence_id.slice(0, -suffix.length) : "";
   const enIds = Object.keys(run.sentence_types).sort();
-  const type = run.sentence_types[enIds[index] ?? ""];
+  const type =
+    run.sentence_types[sentence.sentence_id] ?? (base ? run.sentence_types[base] : undefined) ?? run.sentence_types[enIds[index] ?? ""];
   const eventIds: string[] = [];
   const claimTypes: string[] = [];
   for (const claim of sentence.claims ?? []) {
@@ -796,8 +837,13 @@ export interface BundleRow {
   name: string;
   expected: string;
   computed: string;
-  status: "match" | "mismatch" | "error";
+  status: "match" | "mismatch" | "error" | "withheld";
   reason: string;
+}
+
+/* Payloads the Publisher never publishes: an offered destination the officer did not tick. */
+export function withheldPayloads(run: Run): Set<string> {
+  return new Set((run.destinations ?? []).filter((d) => d.status === "not_selected").map((d) => `destination-${d.id}.json`));
 }
 
 export interface BundleCheck {
@@ -815,6 +861,7 @@ export interface ComputedBundle {
 /* Compare what the browser computed with what the run and manifest state. */
 export function bundleCheck(run: Run, manifest: BundleManifest | null, computed: ComputedBundle): BundleCheck {
   const listed: Record<string, BundleArtifact> = manifest && isObject(manifest.artifacts) ? manifest.artifacts : {};
+  const withheld = withheldPayloads(run);
   const rows: BundleRow[] = Object.keys(listed)
     .sort()
     .map((name) => {
@@ -822,7 +869,10 @@ export function bundleCheck(run: Run, manifest: BundleManifest | null, computed:
       const got = computed.files[name];
       let status: BundleRow["status"] = "error";
       let reason = "";
-      if (!got) {
+      if (!got && withheld.has(name)) {
+        status = "withheld";
+        reason = "the officer did not tick this destination, so the Publisher never published its payload; the manifest still names it by hash";
+      } else if (!got) {
         reason = "the file could not be fetched";
       } else if (got.sha256 !== entry.sha256) {
         status = "mismatch";
@@ -836,7 +886,7 @@ export function bundleCheck(run: Run, manifest: BundleManifest | null, computed:
       return { name, expected: entry.sha256, computed: got ? got.sha256 : "", status, reason };
     });
   const bundleMatches = computed.manifest === run.bundle.sha256;
-  const filesMatch = rows.length > 0 && rows.every((r) => r.status === "match");
+  const filesMatch = rows.some((r) => r.status === "match") && rows.every((r) => r.status === "match" || r.status === "withheld");
   return { bundleMatches, filesMatch, ok: bundleMatches && filesMatch, rows };
 }
 

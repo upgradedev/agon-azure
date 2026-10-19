@@ -70,8 +70,11 @@
   var GATE_WORDS = { factgate: "Fact Gate", factgate_lang: "Fact Gate, translation", rights: "Rights Guard" };
 
   var RUN_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
-  var EDITION_FILE = /^edition-[a-z]{2,8}\.json$/;
-  var SENTENCE_ID = /^[a-z]{2,8}-[0-9]{2}$/;
+  /* A pipeline run keeps the sealed bundle as published, whose editions are
+     report-<id>.json; a design preview names them edition-<id>.json. Pipeline
+     sentence ids look like s1, s1-el and s1-easy. Same rules as agon.webrun. */
+  var EDITION_FILE = /^(?:edition|report)-[a-z]{2,8}\.json$/;
+  var SENTENCE_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
   var SHA256_HEX = /^[0-9a-f]{64}$/;
   var ISO_TIME = /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}(?::[0-9]{2})?Z$/;
   var RUN_KEYS = ["approval", "away", "bundle", "confirm_rows", "desk_editor_flags", "desks", "editions", "format",
@@ -280,8 +283,12 @@
           problems.push("editions[" + i + "] keys must be exactly edition, file, language and name");
           return;
         }
-        if (typeof e.file !== "string" || !EDITION_FILE.test(e.file) || e.file !== "edition-" + e.edition + ".json") {
-          problems.push("editions[" + i + "].file must be edition-<edition>.json");
+        var allowed = ["edition-" + e.edition + ".json"];
+        if (run.provenance === "pipeline") {
+          allowed.push("report-" + e.edition + ".json");
+        }
+        if (typeof e.file !== "string" || !EDITION_FILE.test(e.file) || allowed.indexOf(e.file) === -1) {
+          problems.push("editions[" + i + "].file must be edition-<edition>.json" + (allowed.length > 1 ? " or report-<edition>.json" : ""));
         }
         if (has(editionIds, e.edition)) {
           problems.push("editions[" + i + "].edition " + e.edition + " is listed twice");
