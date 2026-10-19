@@ -20,6 +20,10 @@
 // Cosmos data-plane grants are not here: they are Microsoft.DocumentDB resources
 // in modules/cosmos-access.bicep, deployed by main.bicep under Contributor.
 //
+// Deploy order for the artifacts grants: agon-main must have created the private
+// artifacts container and the fleet-poison queue first (a container or queue
+// that does not exist yet fails with ParentResourceNotFound).
+//
 // Not here yet, because the resources do not exist in any template yet (add them
 // with the resource, in this file):
 //   id-publisher: Key Vault Crypto User on the one signing key.
@@ -81,6 +85,7 @@ param speechAccountName string
 // Built-in role definition GUIDs. Check each before the first deploy with
 // `az role definition list --name <guid> --query [].roleName -o tsv`.
 var storageBlobDataContributor = 'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
+var storageBlobDataReader = '2a2b9908-6ea1-4ae2-8e65-a410df84e7d1'
 var storageQueueDataReader = '19e7f393-937e-4f77-808e-94535e297925'
 var storageQueueDataMessageProcessor = '8a0f0c08-91a1-4084-bc3d-661d67233fed'
 var storageQueueDataMessageSender = 'c6a89b2d-59bc-44d0-9896-0f6e12d7b80a'
@@ -221,10 +226,30 @@ var queueGrants = [
     role: storageQueueDataReader
     reason: 'beyond spec 7.1: KEDA queue length for the sandbox publisher job'
   }
+  // The fleet worker (agon.fleet.worker) parks a message it could not settle
+  // after five deliveries in fleet-poison and never drops it.
+  {
+    principalId: fleetPrincipalId
+    queue: 'fleet-poison'
+    role: storageQueueDataMessageSender
+    reason: 'beyond spec 7.1: the fleet worker parks an unsettled runs or decisions message, never drops it'
+  }
+  // BEYOND THE SPEC 7.1 TABLE. No api app exists yet to start a run, so the
+  // main-only, environment-protected fleet-run workflow (workflow_dispatch) puts
+  // one RunInput on runs as the CI identity. Send only, on this one queue: it
+  // cannot read, delete or decide anything. Remove it once the api starts runs.
+  {
+    principalId: ciPrincipalId
+    queue: 'runs'
+    role: storageQueueDataMessageSender
+    reason: 'beyond spec 7.1: the main-only fleet-run drill starts one synthetic run until the api exists'
+  }
 ]
 
-// Spec 7.1: each publisher writes exactly one container. Nothing else holds a
-// blob write role; the public read of feed and sandbox is anonymous.
+// Spec 7.1: each publisher writes exactly one public container. The fleet writes
+// only the private artifacts container (content addressed, create-only in code),
+// and the publishers read the approved bytes from there. The public read of feed
+// and sandbox is anonymous; artifacts has no anonymous access.
 var containerGrants = [
   {
     principalId: publisherPrincipalId
@@ -237,6 +262,24 @@ var containerGrants = [
     container: 'sandbox'
     role: storageBlobDataContributor
     reason: 'spec 7.1: id-publisher-sandbox writes sandbox only'
+  }
+  {
+    principalId: fleetPrincipalId
+    container: 'artifacts'
+    role: storageBlobDataContributor
+    reason: 'spec 3.2 row 2: id-fleet writes sealed bundle files to the private artifacts container, create-only by sha256'
+  }
+  {
+    principalId: publisherPrincipalId
+    container: 'artifacts'
+    role: storageBlobDataReader
+    reason: 'spec 3.2 row 11: id-publisher reads approved bundle bytes from artifacts before it writes feed'
+  }
+  {
+    principalId: publisherSandboxPrincipalId
+    container: 'artifacts'
+    role: storageBlobDataReader
+    reason: 'spec 3.2 row 11b: id-publisher-sandbox reads approved bundle bytes from artifacts before it writes sandbox'
   }
 ]
 

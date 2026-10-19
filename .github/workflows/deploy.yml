@@ -279,6 +279,13 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    # The fleet job in agon-apps reads these (job apps); none of them is a secret.
+    outputs:
+      foundry_project_endpoint: ${{ steps.ai_outputs.outputs.foundry_project_endpoint }}
+      foundry_deployment_names: ${{ steps.ai_outputs.outputs.foundry_deployment_names }}
+      translator_custom_endpoint: ${{ steps.ai_outputs.outputs.translator_custom_endpoint }}
+      speech_endpoint: ${{ steps.ai_outputs.outputs.speech_endpoint }}
+      speech_resource_id: ${{ steps.ai_outputs.outputs.speech_resource_id }}
     env:
       APP_INSIGHTS_NAME: ${{ needs.deploy.outputs.app_insights_name }}
     steps:
@@ -321,11 +328,22 @@ jobs:
             --parameters location="$LOCATION" appInsightsName="$APP_INSIGHTS_NAME" \
             --mode Incremental \
             --output json > "$RUNNER_TEMP/ai-deployment.json"
-      - name: AI outputs in the job summary
+      - name: AI outputs in the job summary and as job outputs for the fleet job
+        id: ai_outputs
         run: |
           python3 - "$RUNNER_TEMP/ai-deployment.json" <<'PY'
           import json, os, sys
           outputs = json.load(open(sys.argv[1], encoding="utf-8"))["properties"]["outputs"]
+          rows = {
+              "foundry_project_endpoint": outputs["foundryProjectEndpoint"]["value"],
+              "foundry_deployment_names": json.dumps(outputs["foundryDeploymentNames"]["value"], separators=(",", ":")),
+              "translator_custom_endpoint": outputs["translatorCustomEndpoint"]["value"],
+              "speech_endpoint": outputs["speechEndpoint"]["value"],
+              "speech_resource_id": outputs["speechResourceId"]["value"],
+          }
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              for key, val in rows.items():
+                  fh.write(f"{key}={val}\n")
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
               fh.write("### ai.bicep outputs (deployment agon-ai)\n\n| output | value |\n|---|---|\n")
               for key in sorted(outputs):
@@ -487,9 +505,15 @@ jobs:
   # agon-apps). Independent of web and readiness. Until the owner-side rbac deploy
   # grants AcrPull and the queue roles, the jobs exist but their executions fail
   # to pull or to read the queues; the job summary says so.
+  #
+  # It waits for ai and flows, because the fleet job takes the agon-ai outputs and
+  # the trigger URLs of the approval Logic Apps, but it runs whatever they end as:
+  # a failed ai job leaves the AI parameters empty and apps.bicep then skips the
+  # fleet job (the intake job still deploys); a Logic App that does not exist
+  # leaves its URL empty and the worker posts no card on that channel.
   apps:
-    needs: deploy
-    if: github.ref == 'refs/heads/main'
+    needs: [deploy, ai, flows]
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' && needs.deploy.result == 'success' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: azure
@@ -503,6 +527,13 @@ jobs:
       STORAGE_ACCOUNT: ${{ needs.deploy.outputs.storage_account }}
       COSMOS_ACCOUNT: ${{ needs.deploy.outputs.cosmos_account_name }}
       COSMOS_DATABASE: ${{ needs.deploy.outputs.cosmos_database_name }}
+      STATIC_SITE_HOSTNAME: ${{ needs.deploy.outputs.static_site_hostname }}
+      AI_RESULT: ${{ needs.ai.result }}
+      FOUNDRY_PROJECT_ENDPOINT: ${{ needs.ai.outputs.foundry_project_endpoint }}
+      FOUNDRY_DEPLOYMENT_NAMES: ${{ needs.ai.outputs.foundry_deployment_names }}
+      TRANSLATOR_CUSTOM_ENDPOINT: ${{ needs.ai.outputs.translator_custom_endpoint }}
+      SPEECH_ENDPOINT: ${{ needs.ai.outputs.speech_endpoint }}
+      SPEECH_RESOURCE_ID: ${{ needs.ai.outputs.speech_resource_id }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -530,16 +561,94 @@ jobs:
         run: |
           az acr login --name "$REGISTRY_NAME"
           docker push "$REGISTRY_LOGIN_SERVER/agon:$GITHUB_SHA"
+      # listCallbackUrl answers with the full trigger URL, SAS signature included. The
+      # query keeps only basePath and api-version, so the signature never reaches
+      # stdout, a file or a parameter; the worker authenticates with an Entra token.
+      - name: Read the approval flow trigger URLs (base path and api-version only, never the SAS)
+        run: |
+          for name in la-agon-teams-approval la-agon-outlook-approval; do
+            id="$(az resource show --resource-group "$RESOURCE_GROUP" --resource-type Microsoft.Logic/workflows --name "$name" --query id --output tsv 2>/dev/null || true)"
+            if [ -z "$id" ]; then
+              echo "$name is not deployed; its URL stays empty"
+              continue
+            fi
+            az rest --method post \
+              --url "https://management.azure.com${id}/triggers/manual/listCallbackUrl?api-version=2019-05-01" \
+              --query '{base: basePath, version: queries."api-version"}' --output json > "$RUNNER_TEMP/$name.callback.json" \
+              || { echo "$name: listCallbackUrl failed; its URL stays empty"; rm -f "$RUNNER_TEMP/$name.callback.json"; }
+          done
+      - name: Write the apps.bicep parameters file
+        run: |
+          python3 - <<'PY'
+          import json, os, re, sys
+          env = os.environ
+          temp = env["RUNNER_TEMP"]
+
+          def flow_url(name):
+              path = os.path.join(temp, f"{name}.callback.json")
+              if not os.path.exists(path):
+                  return ""
+              data = json.load(open(path, encoding="utf-8"))
+              base, version = data.get("base") or "", data.get("version") or ""
+              if not base.startswith("https://") or "?" in base or not re.fullmatch(r"[0-9-]{8,12}", version):
+                  sys.exit(f"{name}: unexpected callback shape; refusing to pass it on")
+              return f"{base}?api-version={version}"
+
+          names = json.loads(env.get("FOUNDRY_DEPLOYMENT_NAMES") or "[]")
+          values = {
+              "location": env["LOCATION"],
+              "image": f"{env['REGISTRY_LOGIN_SERVER']}/agon:{env['GITHUB_SHA']}",
+              "storageAccountName": env["STORAGE_ACCOUNT"],
+              "cosmosAccountName": env["COSMOS_ACCOUNT"],
+              "cosmosDatabaseName": env["COSMOS_DATABASE"],
+              "registryName": env["REGISTRY_NAME"],
+              "environmentName": env["CONTAINER_ENV_NAME"],
+              "foundryProjectEndpoint": env.get("FOUNDRY_PROJECT_ENDPOINT", ""),
+              "foundryDeploymentNames": names,
+              "translatorCustomEndpoint": env.get("TRANSLATOR_CUSTOM_ENDPOINT", ""),
+              "speechEndpoint": env.get("SPEECH_ENDPOINT", ""),
+              "speechResourceId": env.get("SPEECH_RESOURCE_ID", ""),
+              "staticSiteHostname": env.get("STATIC_SITE_HOSTNAME", ""),
+              "teamsFlowUrl": flow_url("la-agon-teams-approval"),
+              "outlookFlowUrl": flow_url("la-agon-outlook-approval"),
+          }
+          for key in ("teamsFlowUrl", "outlookFlowUrl"):
+              if "sig=" in values[key].lower():
+                  sys.exit(f"{key} carries a SAS signature; refusing to pass it on")
+          body = {
+              "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentParameters.json#",
+              "contentVersion": "1.0.0.0",
+              "parameters": {k: {"value": v} for k, v in values.items()},
+          }
+          with open(os.path.join(temp, "apps.parameters.json"), "w", encoding="utf-8") as fh:
+              json.dump(body, fh)
+          with open(env["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
+              fh.write(f"### apps parameters\n\n- ai job: {env.get('AI_RESULT')}\n")
+              fh.write(f"- AI parameters present: {all(values[k] for k in ('foundryProjectEndpoint', 'translatorCustomEndpoint', 'speechEndpoint', 'speechResourceId'))}; deployments: {names}\n")
+              fh.write(f"- Teams flow URL: {'set' if values['teamsFlowUrl'] else 'empty (no card)'}; Outlook flow URL: {'set' if values['outlookFlowUrl'] else 'empty (no email)'}\n")
+          PY
       - name: What-if apps.bicep (read only)
         run: |
-          az deployment group what-if             --resource-group "$RESOURCE_GROUP"             --name "$APPS_DEPLOYMENT_NAME"             --template-file infra/apps.bicep             --parameters location="$LOCATION" image="$REGISTRY_LOGIN_SERVER/agon:$GITHUB_SHA"                          storageAccountName="$STORAGE_ACCOUNT" cosmosAccountName="$COSMOS_ACCOUNT"                          cosmosDatabaseName="$COSMOS_DATABASE" registryName="$REGISTRY_NAME"                          environmentName="$CONTAINER_ENV_NAME"
+          az deployment group what-if \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$APPS_DEPLOYMENT_NAME" \
+            --template-file infra/apps.bicep \
+            --parameters @"$RUNNER_TEMP/apps.parameters.json"
       - name: Deploy apps.bicep (incremental only, never complete)
         run: |
-          az deployment group create             --resource-group "$RESOURCE_GROUP"             --name "$APPS_DEPLOYMENT_NAME"             --template-file infra/apps.bicep             --parameters location="$LOCATION" image="$REGISTRY_LOGIN_SERVER/agon:$GITHUB_SHA"                          storageAccountName="$STORAGE_ACCOUNT" cosmosAccountName="$COSMOS_ACCOUNT"                          cosmosDatabaseName="$COSMOS_DATABASE" registryName="$REGISTRY_NAME"                          environmentName="$CONTAINER_ENV_NAME"             --mode Incremental --query "properties.outputs" --output json
+          az deployment group create \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$APPS_DEPLOYMENT_NAME" \
+            --template-file infra/apps.bicep \
+            --parameters @"$RUNNER_TEMP/apps.parameters.json" \
+            --mode Incremental --query "properties.outputs" --output json > "$RUNNER_TEMP/apps-outputs.json"
+          cat "$RUNNER_TEMP/apps-outputs.json"
       - name: Image and jobs in the job summary
         run: |
+          fleet="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["fleetJobName"]["value"] or "not deployed (AI parameters missing)")' "$RUNNER_TEMP/apps-outputs.json")"
           {
             echo "### apps: image $REGISTRY_LOGIN_SERVER/agon:$GITHUB_SHA"
             echo
-            echo "Jobs deployed by agon-apps. Executions need the owner-side rbac deploy (AcrPull, queue roles) before they can pull and drain."
+            echo "Jobs deployed by agon-apps: job-agon-intake; fleet job: $fleet."
+            echo "Executions need the owner-side rbac deploy (AcrPull, queue and blob roles) before they can pull and drain."
           } >> "$GITHUB_STEP_SUMMARY"

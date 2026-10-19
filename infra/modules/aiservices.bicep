@@ -88,6 +88,12 @@ output translatorName string = translator.name
 output translatorEndpoint string = translator.properties.endpoint
 output translatorRegion string = translator.location
 output translatorResourceId string = translator.id
+// The endpoint Microsoft Entra calls must use. properties.endpoint of a
+// TextTranslation account is the global https://api.cognitive.microsofttranslator.com/
+// (read from agon-ai on 2026-10-19), which needs extra region and resource
+// headers; the custom domain serves /translator/text/v3.0/translate with a
+// plain bearer token (agon.agents.translator).
+output translatorCustomEndpoint string = 'https://${translator.properties.customSubDomainName}.cognitiveservices.azure.com/'
 output speechName string = speech.name
 output speechEndpoint string = speech.properties.endpoint
 output speechRegion string = speech.location
