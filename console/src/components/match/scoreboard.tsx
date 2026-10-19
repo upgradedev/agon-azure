@@ -18,9 +18,10 @@ export interface ScoreboardProps {
   live: LivePoint | null;
   goals: Goal[] | null;
   possessionRule: string | null;
+  favourite?: Side | null;
 }
 
-function ClubLine({ side, club, name }: { side: Side; club: MatchClub | null; name: string }) {
+function ClubLine({ side, club, name, favourite }: { side: Side; club: MatchClub | null; name: string; favourite: boolean }) {
   return (
     <div className={cn("flex min-w-0 items-center gap-2.5", side === "away" && "flex-row-reverse text-right")}>
       <Crest club={club} className="size-9 sm:size-10" />
@@ -37,7 +38,10 @@ function ClubLine({ side, club, name }: { side: Side; club: MatchClub | null; na
             name
           )}
         </p>
-        <SideBadge side={side} className="mt-0.5" />
+        <span className={cn("mt-0.5 flex flex-wrap items-center gap-1", side === "away" && "justify-end")}>
+          <SideBadge side={side} />
+          {favourite ? <span className={cn("text-[0.6875rem] font-semibold", SIDE_TEXT[side])}>Your club</span> : null}
+        </span>
       </div>
     </div>
   );
@@ -63,13 +67,13 @@ function GoalList({ side, goals }: { side: Side; goals: Goal[] }) {
   );
 }
 
-export function Scoreboard({ clubs, names, score, minute, half, live, goals, possessionRule }: ScoreboardProps) {
+export function Scoreboard({ clubs, names, score, minute, half, live, goals, possessionRule, favourite = null }: ScoreboardProps) {
   const homeShare = live ? live.home_possession_permille : 500;
   const width = (homeShare / 10).toFixed(1);
   return (
     <div className="overflow-hidden rounded-xl border border-line bg-surface-2">
       <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2 px-3 pt-3 sm:gap-4 sm:px-4">
-        <ClubLine side="home" club={clubs.home} name={names.home} />
+        <ClubLine side="home" club={clubs.home} name={names.home} favourite={favourite === "home"} />
         <div className="flex flex-col items-center px-1 text-center">
           <p className="flex items-baseline gap-2 text-3xl font-bold tracking-tight tabular-nums text-fg sm:text-4xl">
             <span className={SIDE_TEXT.home}>{score.home}</span>
@@ -82,7 +86,7 @@ export function Scoreboard({ clubs, names, score, minute, half, live, goals, pos
           <p className="mt-0.5 rounded-md bg-surface px-2 text-sm font-semibold tabular-nums text-fg">{minute}</p>
           <p className="text-[0.6875rem] tracking-wide text-muted uppercase">{half}</p>
         </div>
-        <ClubLine side="away" club={clubs.away} name={names.away} />
+        <ClubLine side="away" club={clubs.away} name={names.away} favourite={favourite === "away"} />
       </div>
 
       <div className="px-3 pt-3 sm:px-4">
@@ -95,7 +99,7 @@ export function Scoreboard({ clubs, names, score, minute, half, live, goals, pos
           <rect x="0" y="0" width="100" height="4" className="fill-surface-3" />
           {live ? (
             <>
-              <rect x="0" y="0" width={width} height="4" className={cn(SIDE_FILL.home, "transition-[width] duration-300")} />
+              <rect x="0" y="0" width={width} height="4" className={SIDE_FILL.home} />
               <rect x={width} y="0" width={(100 - Number(width)).toFixed(1)} height="4" className={SIDE_FILL.away} />
               <rect x={(Number(width) - 0.4).toFixed(1)} y="0" width="0.8" height="4" className="fill-surface" />
             </>

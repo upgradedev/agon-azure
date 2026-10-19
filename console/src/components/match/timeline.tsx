@@ -35,7 +35,21 @@ function place(marks: TimelineMark[], side: Side, layout: Layout, x: (s: number)
   return out;
 }
 
-function TimelineSvg({ file, marks, nowS, layout, className }: { file: MatchFile; marks: TimelineMark[]; nowS: number | null; layout: Layout; className?: string }) {
+function TimelineSvg({
+  file,
+  marks,
+  nowS,
+  layout,
+  focusPlayer,
+  className,
+}: {
+  file: MatchFile;
+  marks: TimelineMark[];
+  nowS: number | null;
+  layout: Layout;
+  focusPlayer: string | null;
+  className?: string;
+}) {
   const { width, height, pad, icon } = layout;
   const end = Math.max(1, file.axis.end_s);
   const x = (s: number) => pad + (Math.min(Math.max(s, 0), end) / end) * (width - 2 * pad);
@@ -57,8 +71,9 @@ function TimelineSvg({ file, marks, nowS, layout, className }: { file: MatchFile
       {[...home.map((p) => ({ ...p, side: "home" as Side })), ...away.map((p) => ({ ...p, side: "away" as Side }))].map(({ mark, x: px, lane, side }) => {
         const cy = side === "home" ? mid - 8 - icon / 2 - lane * step : mid + 8 + icon / 2 + lane * step;
         const future = now !== null && px > now + 0.5;
+        const other = focusPlayer !== null && mark.player !== focusPlayer;
         return (
-          <g key={mark.event_id} className={cn("transition-opacity duration-300", future ? "opacity-35" : "opacity-100")}>
+          <g key={mark.event_id} className={cn("transition-opacity duration-300", other ? "opacity-20" : future ? "opacity-35" : "opacity-100")}>
             <line x1={px} y1={mid} x2={px} y2={side === "home" ? cy + icon / 2 : cy - icon / 2} className="stroke-line-strong" strokeWidth="1" />
             <circle cx={px} cy={cy} r={icon / 2 + 2} className={cn(mark.kind === "goal" ? SIDE_FILL[side] : "fill-surface", "stroke-line-strong")} strokeWidth="1" />
             <svg x={px - icon / 2 + 2} y={cy - icon / 2 + 2} width={icon - 4} height={icon - 4} viewBox="0 0 24 24" overflow="visible">
@@ -85,7 +100,19 @@ function fanMark(m: TimelineMark): boolean {
   return m.kind === "goal" || m.kind === "yellow" || m.kind === "red" || m.kind === "sub" || m.big_chance;
 }
 
-export function MatchTimeline({ file, nowS, names, fan = false }: { file: MatchFile; nowS: number | null; names: Record<Side, string>; fan?: boolean }) {
+export function MatchTimeline({
+  file,
+  nowS,
+  names,
+  fan = false,
+  focusPlayer = null,
+}: {
+  file: MatchFile;
+  nowS: number | null;
+  names: Record<Side, string>;
+  fan?: boolean;
+  focusPlayer?: string | null;
+}) {
   const marks = fan ? file.timeline.filter(fanMark) : file.timeline;
   const counts = (side: Side) => {
     const mine = file.timeline.filter((m) => m.side === side);
@@ -108,8 +135,8 @@ export function MatchTimeline({ file, nowS, names, fan = false }: { file: MatchF
         </span>
       </div>
       <div className="rounded-lg border border-line bg-surface px-1">
-        <TimelineSvg file={file} marks={marks} nowS={nowS} layout={COMPACT} className="sm:hidden" />
-        <TimelineSvg file={file} marks={marks} nowS={nowS} layout={WIDE} className="hidden sm:block" />
+        <TimelineSvg file={file} marks={marks} nowS={nowS} layout={COMPACT} focusPlayer={focusPlayer} className="sm:hidden" />
+        <TimelineSvg file={file} marks={marks} nowS={nowS} layout={WIDE} focusPlayer={focusPlayer} className="hidden sm:block" />
       </div>
       <div className="flex justify-between px-1 text-[0.6875rem] text-muted tabular-nums" aria-hidden="true">
         <span>0&apos;</span>

@@ -547,6 +547,7 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
               live={live}
               goals={file && view ? file.goals.filter((g) => view.seq !== null && g.seq <= view.seq) : null}
               possessionRule={file ? file.rules.possession : null}
+              favourite={prefs.club === clubs.home?.club_id ? "home" : prefs.club === clubs.away?.club_id ? "away" : null}
             />
             <p className="sr-only" aria-live="polite" aria-atomic="true">
               {scoreNews}
@@ -637,7 +638,7 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
                 </label>
                 {file ? (
                   <div className="mt-2">
-                    <MatchTimeline file={file} nowS={view ? view.nowS : null} names={sideNames} fan={mode === "fan"} />
+                    <MatchTimeline file={file} nowS={view ? view.nowS : null} names={sideNames} fan={mode === "fan"} focusPlayer={focusPlayer} />
                   </div>
                 ) : null}
                 <svg viewBox="0 0 1000 12" preserveAspectRatio="none" className={cn("mt-1 block h-3 w-full", file && "hidden")} aria-hidden="true" focusable="false">
