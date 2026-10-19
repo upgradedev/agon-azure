@@ -105,8 +105,11 @@ list is byte-identical to a plain one.
 general football knowledge as sanity checks for a synthetic generator, not measurements of any
 real league. They were frozen, and their sha256 written to `src/agon/synth/bands.lock`, in a commit
 before any engine constant changed (`git log --follow src/agon/synth/bands.json` shows the order).
-The CLI refuses a bands file that does not match its lock, and `tests/test_synth_bands.py` pins the
-same hash as a literal. Before the bands were written we had read v0.1 aggregates for seeds 1001
+The CLI refuses a bands file that does not match its lock, and it also refuses (exit 2, "NOT THE
+FROZEN BANDS: not an M2 result", before any match is simulated) any file whose sha256 differs from
+`FROZEN_BANDS_SHA256`, pinned in `agon/synth/bands.py`. So an edited band set with a regenerated lock
+next to it never prints an M2 line. `tests/test_synth_bands.py` pins the same hash as a literal and
+runs that widened-and-relocked attack. Before the bands were written we had read v0.1 aggregates for seeds 1001
 to 1040 (goals, shots, passes, cards, corners); the bands were not set to bracket them.
 
 Two bands need tracking data (sprints per outfield player, distance per outfield player). The

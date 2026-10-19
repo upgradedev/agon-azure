@@ -27,7 +27,7 @@ def _sha(path: str) -> str:
 
 
 def test_bands_file_matches_its_lock_and_the_pinned_hash() -> None:
-    assert _sha(B.BANDS_FILE) == B.read_lock(B.LOCK_FILE) == FROZEN_BANDS_SHA256
+    assert _sha(B.BANDS_FILE) == B.read_lock(B.LOCK_FILE) == B.FROZEN_BANDS_SHA256 == FROZEN_BANDS_SHA256
 
 
 def test_threshold_is_pinned_in_code_and_fixture() -> None:
@@ -70,17 +70,53 @@ def test_missing_lock_is_refused(tmp_path) -> None:
         B.load_bands(str(copy))
 
 
-def test_impossible_bands_make_the_cli_exit_1(tmp_path, capsys) -> None:
-    """Negative control: a band set nothing can meet, correctly relocked, must fail M2."""
+def _relocked_copy(tmp_path, edit) -> str:
+    """A bands file edited by `edit` and given a fresh, correct bands.lock of its own."""
     doc = json.loads(open(B.BANDS_FILE, encoding="utf-8").read())
-    for band in doc["bands"]:
-        band["lo"], band["hi"] = "900000", "900001"
+    edit(doc)
     data = json.dumps(doc).encode("utf-8")
     (tmp_path / "bands.json").write_bytes(data)
     (tmp_path / "bands.lock").write_bytes(f"sha256 {hashlib.sha256(data).hexdigest()}  bands.json\n".encode("ascii"))
-    assert B.main(["--seeds", "1201-1202", "--bands", str(tmp_path / "bands.json")]) == 1
-    out = capsys.readouterr().out
-    assert "M2 passed 0 of 22 (threshold 20)" in out
+    return str(tmp_path / "bands.json")
+
+
+def test_widened_and_relocked_bands_never_produce_an_m2_line(tmp_path, capsys) -> None:
+    """The attack: widen a band and write a matching lock next to it. The CLI must refuse (exit 2)."""
+
+    def widen(doc):
+        for band in doc["bands"]:
+            band["lo"], band["hi"] = "0", "900000"
+
+    path = _relocked_copy(tmp_path, widen)
+    assert B.load_bands(path)  # its own lock is consistent, so the lock check alone would accept it
+    assert B.main(["--seeds", "1201", "--bands", path]) == 2
+    captured = capsys.readouterr()
+    assert "NOT THE FROZEN BANDS: not an M2 result" in captured.err
+    assert "M2 passed" not in captured.out
+    assert "PASS" not in captured.out
+
+
+def test_report_lines_refuse_a_non_frozen_hash() -> None:
+    with pytest.raises(B.BandsError, match="NOT THE FROZEN BANDS"):
+        B.report_lines([], "1", B.BANDS_FILE, "0" * 64, 0)
+
+
+def test_impossible_bands_fail_m2_through_load_and_evaluate(tmp_path) -> None:
+    """Negative control on the scoring path: a band set nothing can meet scores 0 and exits 1.
+
+    It runs through load_bands, observe and evaluate, not the CLI: the CLI refuses any non-frozen
+    file with exit 2 before scoring, so a non-frozen file can never reach exit 0 there.
+    """
+
+    def impossible(doc):
+        for band in doc["bands"]:
+            band["lo"], band["hi"] = "900000", "900001"
+
+    path = _relocked_copy(tmp_path, impossible)
+    rows = B.evaluate(B.load_bands(path), B.observe(B.collect_stats([1201, 1202])))
+    assert B.passed_count(rows) == 0
+    assert B.verdict_exit_code(B.passed_count(rows)) == 1
+    assert B.main(["--seeds", "1201-1202", "--bands", path]) == 2
 
 
 def test_spec_command_resolves_bands_json_from_the_repo_root(monkeypatch, capsys) -> None:

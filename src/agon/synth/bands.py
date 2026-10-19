@@ -14,7 +14,9 @@ not produce yet. They are reported as NOT MEASURABLE and counted as not passed. 
 skipped and never counted as a pass.
 
 Exit codes: 0 when at least `M2_PASS_THRESHOLD` bands pass; 1 below it; 2 when the bands file is
-missing, malformed or does not match its lock.
+missing, malformed, does not match its lock, or is not the frozen set (its sha256 differs from
+`FROZEN_BANDS_SHA256`, pinned in this module). A relocked copy of edited bands is refused before
+any match is simulated, so it can never print an M2 line.
 
 Every comparison uses exact fractions, so the verdict is the same on every OS. Wall time goes to
 stderr so stdout stays byte-comparable.
@@ -43,6 +45,10 @@ BAND_COUNT = 22
 # M2 target from the build spec (section 5.3): at least 20 of 22. Pinned here AND as a literal in
 # tests/test_synth_bands.py; change both or neither.
 M2_PASS_THRESHOLD = 20
+# The sha256 of the frozen bands.json. Pinned in three places: here, in bands.lock, and as a literal
+# in tests/test_synth_bands.py. The CLI produces an M2 result only for a file with exactly this hash;
+# a sibling bands.lock proves a file is unedited since its lock, not that it is the frozen set.
+FROZEN_BANDS_SHA256 = "0e3b59af44b836a230996e9b6951cd738f1ef410087e690d6cf8013418db8325"
 DEFAULT_SEEDS = "1001-1200"
 DEFAULT_MATCH_INDEX = 0
 
@@ -292,10 +298,12 @@ def _fmt(value: Fraction | None) -> str:
 
 
 def report_lines(rows: Sequence[Row], seeds_text: str, bands_path: str, bands_sha: str, match_index: int) -> list[str]:
+    if bands_sha != FROZEN_BANDS_SHA256:
+        raise BandsError("NOT THE FROZEN BANDS: not an M2 result")
     shown = "agon/synth/bands.json (packaged)" if os.path.abspath(bands_path) == BANDS_FILE else bands_path
     lines = [
         f"realism bands M2, generator {GENERATOR_VERSION}, seeds {seeds_text}, match_index {match_index}",
-        f"bands {shown} sha256 {bands_sha} (matches bands.lock)",
+        f"bands {shown} sha256 {bands_sha} (the frozen bands: matches bands.lock and FROZEN_BANDS_SHA256)",
         f"{'band':34} {'lo':>8} {'hi':>8} {'observed':>10}  status",
     ]
     for r in rows:
@@ -319,6 +327,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         sha = file_sha256(path)
     except (BandsError, OSError, KeyError, ValueError) as exc:
         print(f"bands refused: {exc}", file=sys.stderr)
+        return 2
+    if sha != FROZEN_BANDS_SHA256:
+        print(
+            f"bands refused: NOT THE FROZEN BANDS: not an M2 result (sha256 {sha}, frozen {FROZEN_BANDS_SHA256})",
+            file=sys.stderr,
+        )
         return 2
     seeds = parse_seeds(args.seeds)
     rows = evaluate(bands, observe(collect_stats(seeds, args.match_index)))
