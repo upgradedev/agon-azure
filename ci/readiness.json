@@ -1,0 +1,31 @@
+{
+  "targets": [
+    {
+      "name": "demo",
+      "url": "",
+      "markers": ["Agon"],
+      "scan_assets": true
+    },
+    {
+      "name": "repo-readme",
+      "url": "https://raw.githubusercontent.com/upgradedev/agon-azure/main/README.md",
+      "markers": ["# Agon", "synthetic"],
+      "scan_assets": false
+    }
+  ],
+  "extra_forbidden_terms": [],
+  "user_gated": [
+    {
+      "item": "Public demo video under 2 minutes",
+      "manual_step": "owner uploads to YouTube as Public (not unlisted) and pastes the URL into STATE.md"
+    },
+    {
+      "item": "Teams approval round trip (gate T)",
+      "manual_step": "owner gives OAuth consent on the Teams connection and taps Approve on one card"
+    },
+    {
+      "item": "Innovation Studio project saved complete",
+      "manual_step": "owner saves the project page with every required field and records the time in STATE.md"
+    }
+  ]
+}
