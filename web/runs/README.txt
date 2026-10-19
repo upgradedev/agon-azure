@@ -17,7 +17,11 @@ agon.governance.rights) run over those hand-written sentences, including the
 planted "2 shots on target" draft that the Fact Gate refuses; and the bundle
 is sealed by agon.governance.seal, so Verify recomputes a real bundle hash.
 
-Regenerate it (byte for byte; tests/test_web_runs.py fails on any drift):
+Regenerate it after a change to the hand-written text or to seed 1.
+tests/test_web_runs.py does not compare these files byte for byte with a
+fresh build: it reruns the real gates over the committed sentences and fails
+when they no longer agree with seed 1. The deploy step holds the committed
+bytes to the committed bundle hash (verify_run_dir).
 
     PYTHONPATH=src python -m agon.webrun --write-sample web/runs
 

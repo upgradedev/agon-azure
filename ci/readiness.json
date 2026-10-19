@@ -3,7 +3,7 @@
     "__AGON_SWA_HOSTNAME__ stands for the Static Web Apps default hostname. A target URL that still holds it FAILS without any fetch.",
     "The deploy workflow replaces it with the staticSiteDefaultHostname output of infra/main.bicep (--set-host) and adds the deployed commit sha to the demo markers (--add-marker demo=<sha>).",
     "demo markers: 'Agon' (the brand in the top bar), 'Match Centre' (the S1 landing view and nav item), plus the full 40-character commit sha stamped into data-commit at deploy.",
-    "demo markers also hold 'Newsroom Wall' (the S2 view) and the exact design preview label: while the only run is the hand-written sample, the page must say so in the same sentence, and the gate fails without it.",
+    "demo markers also hold 'Newsroom Wall' (the S2 view) and the exact design preview label anchored to each screen that shows it (id=wall-label, id=approve-label, id=recap-label): while the only run is the hand-written sample, each of those screens must say so in the same sentence, and the gate fails if any one copy is missing, even while another copy survives. ci/web_check.py PAGE_LABEL_MARKERS holds the same three strings; tests/test_web_runs.py keeps them equal.",
     "demo-data markers: the web data contract written by agon.webdata (the generator key, one file entry per published seed and its world file of fictional names), so the recorded synthetic data the browser accepts must have shipped with the page.",
     "demo-run: the one hand-written sample run (web/runs/sample-s1.json). Its markers are the run id, the provenance and the exact design preview label, so a run file that drops the label, or a deploy without runs, fails live. tests/test_readiness_config.py holds the run id to web/runs/index.json.",
     "demo-bundle: the sealed manifest of that run (agon.governance.seal, schema agon.bundle/1), which Verify hashes in the browser; a missing bundle folder or an HTML fallback page in its place fails live.",
@@ -17,7 +17,9 @@
         "Agon",
         "Match Centre",
         "Newsroom Wall",
-        "Design preview: sample run written by hand, not produced by the pipeline."
+        "id=\"wall-label\">Design preview: sample run written by hand, not produced by the pipeline.",
+        "id=\"approve-label\">Design preview: sample run written by hand, not produced by the pipeline.",
+        "id=\"recap-label\">Not approved. Design preview: sample run written by hand, not produced by the pipeline."
       ],
       "scan_assets": true
     },

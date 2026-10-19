@@ -108,6 +108,22 @@ def test_demo_target_fails_on_a_page_without_the_label() -> None:
     assert any("Design preview" in check for check in failed), failed
 
 
+@pytest.mark.parametrize("element", ["wall-label", "approve-label", "recap-label"])
+def test_demo_target_fails_when_one_screen_loses_its_label(element: str) -> None:
+    """Strip only one copy of the label; the other copies stay on the page and must not save it."""
+    label = "Design preview: sample run written by hand, not produced by the pipeline."
+    target = _targets()["demo"]
+    target = readiness.Target(target.name, "https://agon.example/", list(target.markers), scan_assets=False)
+    page = (RUNS_INDEX.parent.parent / "index.html").read_text(encoding="utf-8")
+    start = page.index(f'id="{element}">')
+    end = page.index("</p>", start)
+    stripped = page[:start] + f'id="{element}">Sample run.' + page[end:]
+    assert label in stripped
+    rules = readiness.build_rules()
+    failed = [f.check for f in readiness.check_target(target, _fetcher(target.url, stripped), rules) if not f.ok]
+    assert failed and all(element in check for check in failed), failed
+
+
 def test_demo_bundle_target_passes_on_the_sealed_manifest_and_fails_on_the_fallback_page() -> None:
     target = _targets()["demo-bundle"]
     assert target.url == "https://__AGON_SWA_HOSTNAME__/runs/sample-s1/manifest.json"

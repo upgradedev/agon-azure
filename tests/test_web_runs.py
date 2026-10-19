@@ -1,10 +1,16 @@
 """Tests for the run files behind the Newsroom Wall, the stand-in card, the recap and Verify.
 
 Why these exist: the one shipped run is a hand-written design preview, so its honesty rests on
-checks, not on care. These tests prove that the sample regenerates byte for byte from the real
-gates and the real seal, that the bundle hash a visitor recomputes is the one the run states,
-that the exact design preview label is pinned everywhere it must appear, and that every check
-fails once on a deliberately broken input.
+checks, not on care. These tests prove that the real gates still agree with the committed
+sentences (rerun, not compared byte for byte), that the bundle hash a visitor recomputes is the one
+the run states, that the exact design preview label is pinned everywhere it must appear, and that
+every check fails once on a deliberately broken input.
+
+Coupling, on purpose and not: verify_run_dir holds the committed bytes to the committed hash, which
+is the coupling worth keeping. The sample is NOT compared byte for byte with a fresh build, because
+its bytes embed other lanes' output (Fact Gate reason wording, the Sentence dict shape, the seal
+manifest layout); a wording change there must not turn this lane red. The semantic test below
+reruns the gates over the committed sentences instead.
 """
 
 from __future__ import annotations
@@ -20,6 +26,9 @@ import readiness
 import stamp_web
 import web_check
 from agon import webrun
+from agon.governance.claims import Claim, Sentence
+from agon.governance.factgate import check_translation, run_factgate
+from agon.governance.rights import run_rights
 from agon.governance.seal import canonical_utf8, sha256_hex, verify_manifest
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -58,14 +67,134 @@ def _apply(run: dict, case: dict):
 # ---------------------------------------------------------------- the committed sample
 
 
-def test_sample_regenerates_byte_for_byte():
-    """Fails when a gate, the seal, the generator or the hand-written text changes.
-    Fix: PYTHONPATH=src python -m agon.webrun --write-sample web/runs"""
+def _committed_sentences(runs: Path, edition_file: str) -> list[Sentence]:
+    """Rebuild the committed sentences through the constructors, not from_dict, so a stricter dict
+    parser in another lane cannot break this test. The file says author "hand"; the gates need a
+    pipeline tag, and the author plays no part in any verdict."""
+    edition = json.loads((runs / "sample-s1" / edition_file).read_text(encoding="utf-8"))
+    return [
+        Sentence(
+            sentence_id=s["sentence_id"], text=s["text"], language=s["language"], author="template",
+            claims=tuple(
+                Claim(type=c["type"], value=c["value"], event_ids=tuple(c.get("event_ids", ())),
+                      stat=c.get("stat"), subject=c.get("subject"))
+                for c in s["claims"]
+            ),
+        )
+        for s in edition["sentences"]
+    ]
+
+
+def _claim_key(c: Claim) -> tuple:
+    return (c.type, json.dumps(c.value, sort_keys=True), c.subject, tuple(c.event_ids))
+
+
+def test_real_gates_still_agree_with_the_committed_sample():
+    """Reruns the Fact Gate, the translation check and the Rights Guard over the committed sentences
+    against seed 1. It fails when the sample no longer tells the truth about seed 1, never on a
+    change of reason wording or dict shape. Fix: PYTHONPATH=src python -m agon.webrun --write-sample web/runs"""
+    _assert_sample_agrees_with_seed(RUNS)
+
+
+def _assert_sample_agrees_with_seed(runs: Path) -> None:
+    run = json.loads((runs / "sample-s1.json").read_text(encoding="utf-8"))
+    assert run["seed"] == webrun.SAMPLE_SEED == 1
+    f = webrun._sample_facts(run["seed"])
+    facts, n = f["facts"], f["names"]
+
+    # the match the run names is still seed 1's match, with the same clubs and score
+    assert run["match_id"] == f["result"].meta["match_id"]
+    assert (run["home"]["club_id"], run["away"]["club_id"]) == (facts.home_id, facts.away_id)
+    assert (run["home"]["name"], run["away"]["name"]) == (n["home"], n["away"])
+    assert run["score"] == {"home": n["fh"], "away": n["fa"]}
+
+    editions = {e["edition"]: _committed_sentences(runs, e["file"]) for e in run["editions"]}
+    en = editions["en"]
+
+    # every name and minute claim still matches the log of seed 1, sentence by sentence
+    expected = webrun._sample_claims(f)
+    assert len(en) == len(expected)
+    for sentence, claims in zip(en, expected):
+        for kind in ("name", "minute"):
+            got = sorted(_claim_key(c) for c in sentence.claims if c.type == kind)
+            want = sorted(_claim_key(c) for c in claims if c.type == kind)
+            assert got == want, (sentence.sentence_id, kind)
+
+    # the planted draft is still struck, and the committed run still says so
+    draft = run_factgate([webrun._planted_draft(f)], facts)
+    gates = {g["gate"]: g for g in run["gates"]}
+    assert draft.status == "mismatch" == gates["factgate_draft"]["verdict"]
+
+    # every final sentence passes every gate, and the committed verdicts agree with the rerun
+    en_report = run_factgate(en, facts)
+    assert en_report.status == "pass" == gates["factgate"]["verdict"], [v.reasons for v in en_report.verdicts]
+    for v in en_report.verdicts:
+        assert run["sentence_gates"][v.sentence_id]["factgate"] == v.status == "pass"
+    for edition, sentences in editions.items():
+        if edition == "en":
+            continue
+        assert len(sentences) == len(en), edition
+        for source, translated in zip(en, sentences):
+            verdict = check_translation(source, translated, facts)
+            assert verdict.status == "pass", (translated.sentence_id, verdict.reasons)
+            assert run["sentence_gates"][translated.sentence_id]["factgate_lang"] == "pass"
+    assert gates["factgate_lang"]["verdict"] == "pass"
+    every = [s for sentences in editions.values() for s in sentences]
+    rights = run_rights(facts.roster, every)
+    assert rights.status == "pass" == gates["rights"]["verdict"], rights.refusals
+    assert rights.refusals == ()
+
+
+def _edit_sentence(runs: Path, edition_file: str, index: int, edit) -> None:
+    path = runs / "sample-s1" / edition_file
+    edition = json.loads(path.read_text(encoding="utf-8"))
+    edit(edition["sentences"][index])
+    path.write_bytes(canonical_utf8(edition) + b"\n")
+
+
+def test_semantic_check_fails_on_a_wrong_number_in_a_translation(tmp_path):
+    runs = _copy_runs(tmp_path)
+    sot = str(webrun._sample_facts(1)["names"]["sot"])
+
+    def wrong(sentence):
+        assert sot in sentence["text"]
+        sentence["text"] = sentence["text"].replace(sot, "9")
+
+    _edit_sentence(runs, "edition-fr.json", 2, wrong)
+    with pytest.raises(AssertionError):
+        _assert_sample_agrees_with_seed(runs)
+
+
+def test_semantic_check_fails_on_a_minute_that_drifted_from_the_log(tmp_path):
+    runs = _copy_runs(tmp_path)
+
+    def drift(sentence):
+        for claim in sentence["claims"]:
+            if claim["type"] == "minute":
+                claim["value"] = str(int(claim["value"]) + 1)
+
+    _edit_sentence(runs, "edition-en.json", 1, drift)
+    with pytest.raises(AssertionError):
+        _assert_sample_agrees_with_seed(runs)
+
+
+def test_semantic_check_ignores_reason_wording_and_extra_dict_fields(tmp_path):
+    """The coupling the byte test had and this one must not: other lanes' wording and dict shape."""
+    runs = _copy_runs(tmp_path)
+    path = runs / "sample-s1.json"
+    run = json.loads(path.read_text(encoding="utf-8"))
+    run["gates"][0]["evidence"] = "reworded by another lane"
+    path.write_bytes(webrun.run_bytes(run))
+    _edit_sentence(runs, "edition-en.json", 0, lambda sentence: sentence.update(new_field_from_lane_c=True))
+    _assert_sample_agrees_with_seed(runs)
+
+
+def test_sample_still_builds_from_the_real_gates():
+    """--write-sample stays a working convenience: the builder runs the real gates and the seal and
+    refuses to write a sample they would refuse. Bytes are not compared with the committed files."""
     run, files = webrun.build_sample_run()
-    assert webrun.run_bytes(run) == SAMPLE.read_bytes()
-    assert canonical_utf8(webrun.index_for([run])) + b"\n" == (RUNS / "index.json").read_bytes()
-    for name, data in files.items():
-        assert data == (RUNS / "sample-s1" / name).read_bytes(), name
+    assert webrun.validate_run(run) == []
+    assert sorted(files) == sorted(p.name for p in (RUNS / "sample-s1").iterdir())
 
 
 def test_runs_folder_verifies_end_to_end():
@@ -179,7 +308,13 @@ def test_label_is_pinned_in_every_place_that_enforces_it():
     assert f'var DESIGN_PREVIEW_LABEL = "{LABEL}";' in (WEB / "agon-runs.js").read_text(encoding="utf-8")
     assert LABEL in (WEB / "index.html").read_text(encoding="utf-8")
     targets = {t.name: t for t in readiness.load_config(readiness.DEFAULT_CONFIG)[0]}
-    assert LABEL in targets["demo"].markers
+    anchored = [marker for _, marker in web_check.PAGE_LABEL_MARKERS]
+    assert anchored[0] == 'id="wall-label">' + LABEL
+    assert all(marker.endswith(LABEL) for marker in anchored)
+    # the live gate and the static checker hold the same anchored strings, and the page carries each one
+    assert [m for m in targets["demo"].markers if LABEL in m] == anchored
+    page = (WEB / "index.html").read_text(encoding="utf-8")
+    assert all(marker in page for marker in anchored)
     assert LABEL in targets["demo-run"].markers
 
 
@@ -300,6 +435,22 @@ def test_web_check_refuses_a_page_without_the_label(tmp_path):
     index.write_bytes(index.read_bytes().replace(LABEL.encode("utf-8"), b"Sample run."))
     rules = {v.rule for v in web_check.scan(web)[1]}
     assert "run-label-page" in rules
+
+
+@pytest.mark.parametrize("element", ["wall-label", "approve-label", "recap-label"])
+def test_web_check_refuses_a_page_missing_one_screen_copy_of_the_label(tmp_path, element):
+    """Only one copy goes; the others stay. A bare substring check passed this."""
+    web = _copy_web(tmp_path)
+    index = web / "index.html"
+    page = index.read_text(encoding="utf-8")
+    start = page.index(f'id="{element}">')
+    end = page.index("</p>", start)
+    stripped = page[:start] + f'id="{element}">Sample run.' + page[end:]
+    assert stripped.count(LABEL) == page.count(LABEL) - 1 >= 2
+    index.write_bytes(stripped.encode("utf-8"))
+    found = [v for v in web_check.scan(web)[1] if v.rule == "run-label-page"]
+    assert len(found) == 1 and element in found[0].message, found
+    assert web_check.main([str(web)]) == 1
 
 
 def test_web_check_refuses_a_fallback_without_the_runs_globs(tmp_path):

@@ -37,6 +37,15 @@ CONFIG_NAME = "staticwebapp.config.json"
 # held equal to agon.webrun.DESIGN_PREVIEW_LABEL by tests/test_web_runs.py.
 DESIGN_PREVIEW_LABEL = "Design preview: sample run written by hand, not produced by the pipeline."
 RUNS_DIR = "runs/"
+# Where the label must sit on the page, anchored to the element that shows it.
+# A bare substring check passed with the wall copy gone as long as any other
+# copy survived, so each screen's copy is pinned to its own id. The same three
+# strings are the demo target's markers in ci/readiness.json.
+PAGE_LABEL_MARKERS = (
+    ("Newsroom Wall", 'id="wall-label">' + DESIGN_PREVIEW_LABEL),
+    ("approval card", 'id="approve-label">' + DESIGN_PREVIEW_LABEL),
+    ("recap", 'id="recap-label">Not approved. ' + DESIGN_PREVIEW_LABEL),
+)
 
 # Characters and their escaped spellings. Built with chr() on purpose so this
 # file itself contains no dash characters, even after an editor round trip.
@@ -513,9 +522,13 @@ def scan(web_dir: Path) -> tuple[int, list[Violation]]:
     # The readiness gate reads index.html without running scripts, so the label
     # must be in the page itself whenever a design preview run ships.
     index = web_dir / "index.html"
-    if previews and index.is_file() and DESIGN_PREVIEW_LABEL not in index.read_text(encoding="utf-8"):
-        out.append(Violation("run-label-page", "index.html", 1,
-                             f"{', '.join(previews)} is a design preview, so the page must state {DESIGN_PREVIEW_LABEL!r}"))
+    if previews and index.is_file():
+        page = index.read_text(encoding="utf-8")
+        for screen, marker in PAGE_LABEL_MARKERS:
+            if marker not in page:
+                out.append(Violation("run-label-page", "index.html", 1,
+                                     f"{', '.join(previews)} is a design preview, so the {screen} must state "
+                                     f"the label in place: {marker!r}"))
     return len(files), out
 
 
