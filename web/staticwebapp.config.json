@@ -1,7 +1,7 @@
 {
   "navigationFallback": {
     "rewrite": "/index.html",
-    "exclude": ["/*.{css,js,svg,png,ico,json,xml,txt,webmanifest,mp3,ogg,vtt}"]
+    "exclude": ["/*.{css,js,svg,png,ico,json,xml,txt,webmanifest,mp3,ogg,vtt,ndjson}"]
   },
   "globalHeaders": {
     "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; media-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; upgrade-insecure-requests",
@@ -13,6 +13,7 @@
     "Strict-Transport-Security": "max-age=31536000"
   },
   "mimeTypes": {
-    ".webmanifest": "application/manifest+json"
+    ".webmanifest": "application/manifest+json",
+    ".ndjson": "application/x-ndjson"
   }
 }

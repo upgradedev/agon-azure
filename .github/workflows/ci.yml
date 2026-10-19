@@ -104,3 +104,28 @@ jobs:
         run: python -m pip install -r requirements/dev.txt
       - name: Run the readiness self-test
         run: python -m pytest -q tests/test_readiness.py
+
+  # Bicep compile and lint, no Azure login. Every error AND every warning fails
+  # (ci/bicep_check.py), after a negative control proves a known warning is caught.
+  # The CLI version matches deploy.yml, so what lints is what deploys.
+  bicep:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      BICEP_VERSION: v0.44.1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install the pinned Bicep CLI (no login needed)
+        run: |
+          az config set bicep.use_binary_from_path=false bicep.check_version=false --only-show-errors
+          az bicep install --version "$BICEP_VERSION"
+          "$HOME/.azure/bin/bicep" --version
+      - name: Negative control, a known linter warning must fail the check
+        run: python ci/bicep_check.py --runner bicep --bicep "$HOME/.azure/bin/bicep" --expect-fail ci/fixtures/bicep_warning.bicep
+      - name: Build and lint main.bicep and rbac.bicep, failing on any warning
+        run: python ci/bicep_check.py --runner bicep --bicep "$HOME/.azure/bin/bicep" infra/main.bicep infra/rbac.bicep
