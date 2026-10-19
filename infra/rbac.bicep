@@ -23,7 +23,6 @@
 // Not here yet, because the resources do not exist in any template yet (add them
 // with the resource, in this file):
 //   id-publisher: Key Vault Crypto User on the one signing key.
-//   pulls from a registry, if ACR is chosen over GHCR: AcrPull per app identity.
 // id-mcp holds no Azure RBAC role on storage; it reads Cosmos only
 // (cosmos-access.bicep). id-logicapp holds exactly one role: Message Sender on
 // the two inbound decision queues (spec 14 item 5), so the queue a decision
@@ -46,6 +45,10 @@ param apiPrincipalId string
 @description('Principal id of id-logicapp: the idLogicappPrincipalId output of main.bicep.')
 @minLength(1)
 param logicappPrincipalId string
+
+@description('Container registry name: the registryName output of main.bicep.')
+@minLength(5)
+param registryName string
 
 @description('Principal id of id-publisher: the idPublisherPrincipalId output of main.bicep.')
 @minLength(1)
@@ -92,6 +95,8 @@ var cognitiveServicesOpenAiUser = '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd'
 // also list keys, which buys nothing here: disableLocalAuth is true on every
 // account, so a key cannot authenticate a call.
 var cognitiveServicesUser = 'a97b65f3-24c7-4388-baec-2e87135dc908'
+// AcrPull: pull images only, no push and no delete.
+var acrPull = '7f951dda-4ed3-4680-a7ca-43fe172d538d'
 
 var queueGrants = [
   // Spec 14 item 5: the Teams and Outlook Logic Apps hand decisions over through
@@ -254,6 +259,42 @@ module containerAssignments 'modules/rbac-container.bicep' = [for (grant, i) in 
     principalId: grant.principalId
     roleDefinitionGuid: grant.role
     reason: grant.reason
+  }
+}]
+
+resource registry 'Microsoft.ContainerRegistry/registries@2023-07-01' existing = {
+  name: registryName
+}
+
+// Every job identity pulls the one image (infra/apps.bicep) with its own identity.
+// id-api runs the intake today; the fleet and publisher jobs follow.
+var registryPullers = [
+  {
+    principalId: apiPrincipalId
+    name: 'id-api'
+  }
+  {
+    principalId: fleetPrincipalId
+    name: 'id-fleet'
+  }
+  {
+    principalId: publisherPrincipalId
+    name: 'id-publisher'
+  }
+  {
+    principalId: publisherSandboxPrincipalId
+    name: 'id-publisher-sandbox'
+  }
+]
+
+resource registryPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for puller in registryPullers: {
+  scope: registry
+  name: guid(registry.id, puller.principalId, acrPull)
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', acrPull)
+    principalId: puller.principalId
+    principalType: 'ServicePrincipal'
+    description: 'spec 3.2 row 16: ${puller.name} pulls the job image (AcrPull, registry scope)'
   }
 }]
 

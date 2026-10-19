@@ -45,7 +45,10 @@ on:
     paths:
       - "infra/**"
       - "web/**"
-      - "src/agon/synth/**"
+      - "src/agon/**"
+      - "requirements/**"
+      - "Dockerfile"
+      - "pyproject.toml"
       - ".github/workflows/deploy.yml"
       - "ci/readiness.py"
       - "ci/readiness.json"
@@ -69,6 +72,8 @@ env:
   AI_DEPLOYMENT_NAME: agon-ai
   # infra/flows.bicep (approval Logic Apps) deploys under its own name (job flows).
   FLOWS_DEPLOYMENT_NAME: agon-flows
+  # infra/apps.bicep (Container Apps jobs) deploys under its own name (job apps).
+  APPS_DEPLOYMENT_NAME: agon-apps
   # Same Bicep CLI as the ci.yml bicep job, so what lints is what deploys.
   BICEP_VERSION: v0.44.1
   # The three published demo seeds. ci/readiness.json pins the same three in the
@@ -135,6 +140,11 @@ jobs:
       storage_account: ${{ steps.outputs.outputs.storage_account }}
       feed_base_url: ${{ steps.outputs.outputs.feed_base_url }}
       app_insights_name: ${{ steps.outputs.outputs.app_insights_name }}
+      registry_name: ${{ steps.outputs.outputs.registry_name }}
+      registry_login_server: ${{ steps.outputs.outputs.registry_login_server }}
+      container_env_name: ${{ steps.outputs.outputs.container_env_name }}
+      cosmos_account_name: ${{ steps.outputs.outputs.cosmos_account_name }}
+      cosmos_database_name: ${{ steps.outputs.outputs.cosmos_database_name }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -188,6 +198,11 @@ jobs:
               "storage_account": value("storageAccountName"),
               "feed_base_url": value("feedBaseUrl"),
               "app_insights_name": value("appInsightsName"),
+              "registry_name": value("registryName"),
+              "registry_login_server": value("registryLoginServer"),
+              "container_env_name": value("containerEnvName"),
+              "cosmos_account_name": value("cosmosAccountName"),
+              "cosmos_database_name": value("cosmosDatabaseName"),
           }
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
               for key, val in rows.items():
@@ -466,3 +481,65 @@ jobs:
         if: steps.gate.outputs.ready == 'true'
         run: |
           az deployment group create             --resource-group "$RESOURCE_GROUP"             --name "$FLOWS_DEPLOYMENT_NAME"             --template-file infra/flows.bicep             --parameters location="$LOCATION" storageAccountName="$STORAGE_ACCOUNT"                          teamsGroupId="$TEAMS_GROUP_ID" teamsChannelId="$TEAMS_CHANNEL_ID"                          ciClientId="$CI_CLIENT_ID" outlookConnected="${{ steps.outlook.outputs.connected }}"                          officerEmail="$OFFICER_EMAIL"             --mode Incremental --query "properties.outputs" --output json
+
+  # Spec 3.2 rows 2, 9, 11 and 16: build the one job image, push it to the registry
+  # as <registry>/agon:<commit sha>, then deploy infra/apps.bicep (deployment
+  # agon-apps). Independent of web and readiness. Until the owner-side rbac deploy
+  # grants AcrPull and the queue roles, the jobs exist but their executions fail
+  # to pull or to read the queues; the job summary says so.
+  apps:
+    needs: deploy
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: azure
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      REGISTRY_NAME: ${{ needs.deploy.outputs.registry_name }}
+      REGISTRY_LOGIN_SERVER: ${{ needs.deploy.outputs.registry_login_server }}
+      CONTAINER_ENV_NAME: ${{ needs.deploy.outputs.container_env_name }}
+      STORAGE_ACCOUNT: ${{ needs.deploy.outputs.storage_account }}
+      COSMOS_ACCOUNT: ${{ needs.deploy.outputs.cosmos_account_name }}
+      COSMOS_DATABASE: ${{ needs.deploy.outputs.cosmos_database_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check the agon-main inputs
+        run: |
+          for name in REGISTRY_NAME REGISTRY_LOGIN_SERVER CONTAINER_ENV_NAME STORAGE_ACCOUNT COSMOS_ACCOUNT COSMOS_DATABASE; do
+            if [ -z "${!name}" ]; then echo "deploy job returned no value for $name"; exit 1; fi
+          done
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0 (peeled tag, git ls-remote 2026-10-19)
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Pin the Bicep CLI
+        run: |
+          az config set bicep.use_binary_from_path=false bicep.check_version=false --only-show-errors
+          az bicep install --version "$BICEP_VERSION"
+          az bicep version
+      - name: Build and lint apps.bicep, failing on any warning
+        run: python3 ci/bicep_check.py --runner az infra/apps.bicep
+      - name: Build the image
+        run: docker build --pull --tag "$REGISTRY_LOGIN_SERVER/agon:$GITHUB_SHA" .
+      - name: Push the image (Entra token, no admin user)
+        run: |
+          az acr login --name "$REGISTRY_NAME"
+          docker push "$REGISTRY_LOGIN_SERVER/agon:$GITHUB_SHA"
+      - name: What-if apps.bicep (read only)
+        run: |
+          az deployment group what-if             --resource-group "$RESOURCE_GROUP"             --name "$APPS_DEPLOYMENT_NAME"             --template-file infra/apps.bicep             --parameters location="$LOCATION" image="$REGISTRY_LOGIN_SERVER/agon:$GITHUB_SHA"                          storageAccountName="$STORAGE_ACCOUNT" cosmosAccountName="$COSMOS_ACCOUNT"                          cosmosDatabaseName="$COSMOS_DATABASE" registryName="$REGISTRY_NAME"                          environmentName="$CONTAINER_ENV_NAME"
+      - name: Deploy apps.bicep (incremental only, never complete)
+        run: |
+          az deployment group create             --resource-group "$RESOURCE_GROUP"             --name "$APPS_DEPLOYMENT_NAME"             --template-file infra/apps.bicep             --parameters location="$LOCATION" image="$REGISTRY_LOGIN_SERVER/agon:$GITHUB_SHA"                          storageAccountName="$STORAGE_ACCOUNT" cosmosAccountName="$COSMOS_ACCOUNT"                          cosmosDatabaseName="$COSMOS_DATABASE" registryName="$REGISTRY_NAME"                          environmentName="$CONTAINER_ENV_NAME"             --mode Incremental --query "properties.outputs" --output json
+      - name: Image and jobs in the job summary
+        run: |
+          {
+            echo "### apps: image $REGISTRY_LOGIN_SERVER/agon:$GITHUB_SHA"
+            echo
+            echo "Jobs deployed by agon-apps. Executions need the owner-side rbac deploy (AcrPull, queue roles) before they can pull and drain."
+          } >> "$GITHUB_STEP_SUMMARY"

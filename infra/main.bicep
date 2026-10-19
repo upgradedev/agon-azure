@@ -86,6 +86,27 @@ module cosmos 'modules/cosmos.bicep' = {
   }
 }
 
+// Images and the jobs' environment (spec 3.2 rows 2, 9, 11, 16). The jobs that
+// use them are infra/apps.bicep (deployment agon-apps), after CI pushes the image.
+module registry 'modules/registry.bicep' = {
+  name: 'agon-registry'
+  params: {
+    location: location
+    tags: tags
+    name: 'cragon${suffix}'
+  }
+}
+
+module containerEnv 'modules/containerenv.bicep' = {
+  name: 'agon-containerenv'
+  params: {
+    location: location
+    tags: tags
+    name: 'cae-agon-${take(suffix, 8)}'
+    workspaceName: monitoring.outputs.workspaceName
+  }
+}
+
 module cosmosAccess 'modules/cosmos-access.bicep' = {
   name: 'agon-cosmos-access'
   params: {
@@ -124,6 +145,9 @@ output staticSiteName string = staticSite.outputs.name
 output staticSiteDefaultHostname string = staticSite.outputs.defaultHostname
 
 output logAnalyticsWorkspaceName string = monitoring.outputs.workspaceName
+output registryName string = registry.outputs.name
+output registryLoginServer string = registry.outputs.loginServer
+output containerEnvName string = containerEnv.outputs.name
 output appInsightsName string = monitoring.outputs.appInsightsName
 
 // Echoed so infra/rbac.bicep reads it from agon-main like the other identity inputs.

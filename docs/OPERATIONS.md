@@ -95,12 +95,12 @@ If a `TextTranslation` row appears outside `rg-agon-swc`, the Translator F0 slot
 **2. Check the built-in role ids used by `infra/rbac.bicep`.** Each line must print the role name in the comment beside it in the template:
 
 ```bash
-for id in ba92f5b4-2d11-453d-a403-e96b0029c9fe 19e7f393-937e-4f77-808e-94535e297925 8a0f0c08-91a1-4084-bc3d-661d67233fed c6a89b2d-59bc-44d0-9896-0f6e12d7b80a 53ca6127-db72-4b80-b1b0-d745d6d5456d 5e0bd9bd-7b93-4f28-af87-19fc36ad61bd a97b65f3-24c7-4388-baec-2e87135dc908; do
+for id in ba92f5b4-2d11-453d-a403-e96b0029c9fe 19e7f393-937e-4f77-808e-94535e297925 8a0f0c08-91a1-4084-bc3d-661d67233fed c6a89b2d-59bc-44d0-9896-0f6e12d7b80a 53ca6127-db72-4b80-b1b0-d745d6d5456d 5e0bd9bd-7b93-4f28-af87-19fc36ad61bd a97b65f3-24c7-4388-baec-2e87135dc908 7f951dda-4ed3-4680-a7ca-43fe172d538d; do
   az role definition list --name "$id" --query "[].roleName" --output tsv
 done
 ```
 
-Expected, in order: Storage Blob Data Contributor, Storage Queue Data Reader, Storage Queue Data Message Processor, Storage Queue Data Message Sender, Foundry User (spec 7.1 calls it by its earlier name, Azure AI User; the tenant may still print that name), Cognitive Services OpenAI User, Cognitive Services User.
+Expected, in order: Storage Blob Data Contributor, Storage Queue Data Reader, Storage Queue Data Message Processor, Storage Queue Data Message Sender, Foundry User (spec 7.1 calls it by its earlier name, Azure AI User; the tenant may still print that name), Cognitive Services OpenAI User, Cognitive Services User, AcrPull.
 
 **3. Deploy `infra/rbac.bicep` (after the first green CI deploy, and again whenever it changes).** It reads the outputs of two deployments: `agon-main` for the storage account and the identities, and `agon-ai` for the Foundry, Translator and Speech names.
 
@@ -114,6 +114,7 @@ What it grants (each at the narrowest scope; full list in the template):
 | `id-fleet` | Foundry User (Azure AI User) | the Foundry project `agon` | spec 7.1 |
 | `id-fleet` | Cognitive Services User | the Translator account; the Speech account | spec 7.1 |
 | CI (`agon-azure-ci`) | Cognitive Services OpenAI User | the Foundry account only | beyond spec 7.1: gate C2 smoke and the evals job |
+| `id-api`, `id-fleet`, `id-publisher`, `id-publisher-sandbox` | AcrPull | the registry `cragon<suffix>` | spec 3.2 row 16: each job pulls the one image with its own identity |
 | `id-logicapp` | Storage Queue Data Message Sender | `decisions-teams` and `decisions-outlook` only | spec 14 item 5: the queue names the channel |
 | `id-api` | Message Processor and Reader on both decision queues; Sender on `intake-poison` | one queue each | spec 14 item 5: the decision intake |
 
@@ -132,6 +133,7 @@ az deployment group create --resource-group "$rg" --name agon-rbac --template-fi
                fleetPrincipalId="$(out idFleetPrincipalId)" \
                apiPrincipalId="$(out idApiPrincipalId)" \
                logicappPrincipalId="$(out idLogicappPrincipalId)" \
+               registryName="$(out registryName)" \
                publisherPrincipalId="$(out idPublisherPrincipalId)" \
                publisherSandboxPrincipalId="$(out idPublisherSandboxPrincipalId)" \
                ciPrincipalId="$(out ciPrincipalId)" \
@@ -151,7 +153,7 @@ foreach ($d in "agon-main", "agon-ai") {
 }
 function Out-Agon($name) { az deployment group show --resource-group $rg --name agon-main --query "properties.outputs.$name.value" --output tsv }
 function Out-Ai($name) { az deployment group show --resource-group $rg --name agon-ai --query "properties.outputs.$name.value" --output tsv }
-az deployment group create --resource-group $rg --name agon-rbac --template-file infra/rbac.bicep --mode Incremental --parameters storageAccountName=$(Out-Agon storageAccountName) fleetPrincipalId=$(Out-Agon idFleetPrincipalId) apiPrincipalId=$(Out-Agon idApiPrincipalId) logicappPrincipalId=$(Out-Agon idLogicappPrincipalId) publisherPrincipalId=$(Out-Agon idPublisherPrincipalId) publisherSandboxPrincipalId=$(Out-Agon idPublisherSandboxPrincipalId) ciPrincipalId=$(Out-Agon ciPrincipalId) foundryAccountName=$(Out-Ai foundryAccountName) foundryProjectName=$(Out-Ai foundryProjectName) translatorAccountName=$(Out-Ai translatorAccountName) speechAccountName=$(Out-Ai speechAccountName)
+az deployment group create --resource-group $rg --name agon-rbac --template-file infra/rbac.bicep --mode Incremental --parameters storageAccountName=$(Out-Agon storageAccountName) fleetPrincipalId=$(Out-Agon idFleetPrincipalId) apiPrincipalId=$(Out-Agon idApiPrincipalId) logicappPrincipalId=$(Out-Agon idLogicappPrincipalId) registryName=$(Out-Agon registryName) publisherPrincipalId=$(Out-Agon idPublisherPrincipalId) publisherSandboxPrincipalId=$(Out-Agon idPublisherSandboxPrincipalId) ciPrincipalId=$(Out-Agon ciPrincipalId) foundryAccountName=$(Out-Ai foundryAccountName) foundryProjectName=$(Out-Ai foundryProjectName) translatorAccountName=$(Out-Ai translatorAccountName) speechAccountName=$(Out-Ai speechAccountName)
 ```
 
 `ciPrincipalId` is the object id of the `agon-azure-ci` service principal, not its appId. To cross-check it owner-side: `az ad sp show --id <appId> --query id --output tsv` must print the same value as `out ciPrincipalId`.
