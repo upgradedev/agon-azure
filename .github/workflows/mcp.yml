@@ -135,6 +135,17 @@ jobs:
           python -m pip install --disable-pip-version-check --no-build-isolation --no-deps -e .
       - name: Interpret tests, including the pinned output hash
         run: python -m pytest -q -p no:cacheprovider tests/test_interpret.py tests/test_wp_compare.py
+      - name: Negative control, a refit on the wrong seeds must fail the byte check
+        run: |
+          set +e
+          python -m agon.interpret.fit --seeds 1-3 --check
+          code=$?
+          set -e
+          if [ "$code" -ne 1 ]; then
+            echo "negative control failed: --check exited $code on seeds 1-3, expected 1"
+            exit 1
+          fi
+          echo "negative control passed: a refit on the wrong seeds is a mismatch"
       - name: Refit on seeds 1-500 and compare bytes with the committed model
         run: python -m agon.interpret.fit --seeds 1-500 --check
       - name: M6, interpret win probability against final results (self-measured)

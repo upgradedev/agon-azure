@@ -16,10 +16,12 @@ What is fitted, all from the generated event logs and match meta, never from eng
 - band thresholds: terciles of the training per-window values for control vs chaos, pressure and
   tempo.
 
-Determinism: the fitter uses floats, but its only transcendental call is exp, taken from
-`decimal` (correctly rounded) rather than libm, and IEEE + - * / are the same on every platform in
-CPython. Coefficients are then rounded to integer micro-units, so a refit on another OS gives the
-same bytes. The training-set identity is the combined sha256 of the generated bundles.
+Determinism: the fitter uses floats, but its transcendental calls (exp, ln) go through `decimal`
+(correctly rounded) rather than libm, every float sum of more than two terms is `math.fsum`
+(exactly rounded; the builtin `sum` over floats changed algorithm in Python 3.12), and single IEEE
++ - * / are the same on every platform in CPython. Coefficients are then rounded to integer
+micro-units. The design goal is the same bytes on every OS and Python version; mcp.yml checks it on
+ubuntu and windows with Python 3.12. The training-set identity is the combined sha256 of the generated bundles.
 Wall time goes to stderr.
 """
 
@@ -29,6 +31,7 @@ import argparse
 import os
 import sys
 import time
+from math import fsum
 from decimal import Decimal, localcontext
 from typing import Any, Iterable, Sequence
 
@@ -75,7 +78,7 @@ def _solve(a: list[list[float]], b: list[float]) -> list[float]:
                     m[r][c] -= f * m[col][c]
     x = [0.0] * n
     for r in range(n - 1, -1, -1):
-        s = m[r][n] - sum(m[r][c] * x[c] for c in range(r + 1, n))
+        s = m[r][n] - fsum(m[r][c] * x[c] for c in range(r + 1, n))
         x[r] = s / m[r][r]
     return x
 
@@ -92,9 +95,9 @@ def _objective(groups: dict[tuple[int, ...], list[int]], keys: list[tuple[int, .
     total = 0.0
     for k in keys:
         n, y = groups[k]
-        z = beta[0] + sum(b * xi for b, xi in zip(beta[1:], k))
+        z = fsum([beta[0], *(b * xi for b, xi in zip(beta[1:], k))])
         total += y * z - n * _softplus(z)
-    return total - RIDGE / 2 * sum(b * b for b in beta[1:])
+    return total - RIDGE / 2 * fsum(b * b for b in beta[1:])
 
 
 def fit_logistic(groups: dict[tuple[int, ...], list[int]], dim: int) -> tuple[list[float], int]:
@@ -119,7 +122,7 @@ def fit_logistic(groups: dict[tuple[int, ...], list[int]], dim: int) -> tuple[li
         for k in keys:
             n, y = groups[k]
             x = (1,) + k
-            z = sum(b * xi for b, xi in zip(beta, x))
+            z = fsum(b * xi for b, xi in zip(beta, x))
             p = 1.0 / (1.0 + _exp(-z))
             w = n * p * (1.0 - p)
             r = y - n * p
@@ -198,7 +201,7 @@ def fit_xt(views: Iterable[MatchView]) -> tuple[list[list[int]], int]:
                 continue
             val = goals[z] / acts  # s x g = (shots / acts) x (goals / shots)
             if moves[z]:
-                val += sum(c * xt[t] for t, c in sorted(trans[z].items())) / acts
+                val += fsum(c * xt[t] for t, c in sorted(trans[z].items())) / acts
             new[z] = val
         delta = max(abs(a - b) for a, b in zip(new, xt))
         xt = new
