@@ -223,3 +223,39 @@ def test_window_sums_ignore_the_other_period() -> None:
     by_minute = {(1, 46): 5, (2, 46): 7, (2, 50): 1, (1, 30): 2}
     assert L._window_sums(by_minute, 2, 48) == (7, 1)
     assert L._window_sums(by_minute, 1, 48) == (5, 0)
+
+
+def test_period_sweep_passes_on_the_reviewer_seeds(capsys) -> None:
+    from agon.referee import period_sweep as P
+
+    assert P.main(["--seeds", "2006,2034,2003"]) == 0
+    out = capsys.readouterr().out
+    assert "activated in period 1: 0;" in out
+    assert "label path mismatches: 0" in out
+    counts = P.sweep([2006, 2034, 2003])
+    assert counts["plans"] >= 3 and counts["minute_45_52"] >= 2
+
+
+def test_period_sweep_fails_when_a_label_lands_in_period_1(monkeypatch) -> None:
+    """Negative control: both paths agree, but on period 1. Only the period check can catch it."""
+    from agon.referee import period_sweep as P
+
+    def first_half(fn):
+        def wrapped(*args, **kwargs):
+            label = fn(*args, **kwargs)
+            return {**label, "period": 1}
+        return wrapped
+
+    monkeypatch.setattr(P, "labels_from_ledger", first_half(P.labels_from_ledger))
+    monkeypatch.setattr(P, "labels_from_log", first_half(P.labels_from_log))
+    counts = P.sweep([2006])
+    assert counts["mismatch"] == 0 and counts["in_period_1"] >= 1
+    assert P.main(["--seeds", "2006"]) == 1
+
+
+def test_period_sweep_fails_when_the_label_paths_disagree(monkeypatch) -> None:
+    from agon.referee import period_sweep as P
+
+    real = P.labels_from_log
+    monkeypatch.setattr(P, "labels_from_log", lambda *a, **k: {**real(*a, **k), "at_clock": -1})
+    assert P.main(["--seeds", "2006"]) == 1

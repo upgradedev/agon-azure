@@ -175,7 +175,7 @@ same two bands sat inside (0.5693 and 0.2484). On the like-for-like calibration 
 goals is about 0.022) or a real overshoot of the fatigue term; the data do not tell the two apart. We did not retune on the held-out seeds, because that would turn them into calibration seeds.
 The next fit must run on calibration seeds only, and the result is reported here as it stands.
 On the calibration seeds 1 to 200 at match index 0 the same command gives 20 of 22.
-Total wall time for the 200 held-out matches: about 41 s on this machine (printed on stderr).
+Total wall time for the 200 held-out matches: 28 to 41 s on this machine across runs (printed on stderr).
 
 ## 5. Labels
 
@@ -191,10 +191,13 @@ A plan carries a `period` as well as a minute: minutes 0 to 44 are period 1 and 
 period 2, and the engine activates a plan only once both its period and its clock are reached.
 Without that, 52 of the 161 red-card and tactical-shift plans in seeds 2001 to 2400 with a planned
 minute of 45 to 52 fired in first-half added time (for example seed 2006, a red card planned for 48
-shown at 48:17 of the first half). After the fix, 0 of the 600 period-2 red-card and tactical-shift
-plans in that range activate in period 1, and the two label paths agree on all 600 (self-measured,
-about 96 s; the sweep is a scratch script, not part of the test suite; the suite holds the seed 2006
-and 2034 repros as regression tests). The tactical shift now starts in minutes 60 to 74 (it was 30
+shown at 48:17 of the first half). That count was measured on commit a59658b with the same counting
+rule (anchor event in period 1); the sweep below cannot run on that commit, whose plans have no
+period. After the fix, `python -m agon.referee.period_sweep --seeds 2001-2400` reports 0 of the 600
+period-2 red-card and tactical-shift plans activating in period 1 (56 of them planned for minutes 45
+to 52), the two label paths agreeing on all 600, and exit 0 (self-measured, about 88 s). The test
+suite runs it on seeds 2006, 2034 and 2003, holds the seed 2006 and 2034 repros as regression tests,
+and has two negative controls that make the sweep exit 1. The tactical shift now starts in minutes 60 to 74 (it was 30
 to 60), so both 15-minute windows of its label fall inside period 2; the windows count only events
 of the activation period. This changed the storyline plans and the label hash, not any plain match:
 plain matches never activate an intervention and their bundle hashes are unchanged. The generator
