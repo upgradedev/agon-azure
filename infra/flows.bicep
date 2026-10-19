@@ -770,16 +770,69 @@ resource teamsFlow 'Microsoft.Logic/workflows@2019-05-01' = {
             }
           }
         }
+        Sent_destinations: {
+          type: 'Query'
+          runAfter: {
+            Post_card_and_wait: [
+              'Succeeded'
+            ]
+          }
+          inputs: {
+            from: '@coalesce(triggerBody()?[\'destinations\'], json(\'[]\'))'
+            where: '@equals(string(body(\'Post_card_and_wait\')?[\'data\']?[concat(\'dest:\', item()?[\'id\'])]), \'true\')'
+          }
+        }
+        Sent_labels: {
+          type: 'Select'
+          runAfter: {
+            Sent_destinations: [
+              'Succeeded'
+            ]
+          }
+          inputs: {
+            from: '@body(\'Sent_destinations\')'
+            select: '@item()?[\'label\']'
+          }
+        }
+        Unsent_destinations: {
+          type: 'Query'
+          runAfter: {
+            Post_card_and_wait: [
+              'Succeeded'
+            ]
+          }
+          inputs: {
+            from: '@coalesce(triggerBody()?[\'destinations\'], json(\'[]\'))'
+            where: '@not(equals(string(body(\'Post_card_and_wait\')?[\'data\']?[concat(\'dest:\', item()?[\'id\'])]), \'true\'))'
+          }
+        }
+        Unsent_labels: {
+          type: 'Select'
+          runAfter: {
+            Unsent_destinations: [
+              'Succeeded'
+            ]
+          }
+          inputs: {
+            from: '@body(\'Unsent_destinations\')'
+            select: '@item()?[\'label\']'
+          }
+        }
         Published_card: {
           type: 'Compose'
           runAfter: {
-            Post_card_and_wait: [
+            Sent_labels: [
+              'Succeeded'
+            ]
+            Unsent_labels: [
               'Succeeded'
             ]
           }
           inputs: statusCard('Published', [
             '@{concat(\'Approved by \', body(\'Post_card_and_wait\')?[\'responder\']?[\'displayName\'], \' at \', body(\'Post_card_and_wait\')?[\'responseTime\'], \'.\')}'
             '@{concat(\'Published bundle sha256: \', triggerBody()?[\'bundle_sha256\'])}'
+            '@{concat(\'Sent to: \', if(empty(body(\'Sent_labels\')), \'the club feed only\', join(body(\'Sent_labels\'), \', \')), \'.\')}'
+            '@{concat(\'Not sent, as you chose: \', if(empty(body(\'Unsent_labels\')), \'none\', join(body(\'Unsent_labels\'), \', \')), \'.\')}'
             '@{concat(\'Manifest: \', triggerBody()?[\'published_url\'])}'
             '@{concat(\'Recompute the hash in your browser: \', coalesce(triggerBody()?[\'verify_url\'], triggerBody()?[\'published_url\']))}'
           ])
