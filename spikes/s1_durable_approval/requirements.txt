@@ -1,0 +1,4 @@
+# Spike S1. Exact pin, verified on PyPI 2026-10-19 (agent-framework-core 1.22.0, uploaded 2026-10-15).
+# Its own requires (msgspec, typing-extensions, pydantic, python-dotenv, opentelemetry-api, pyyaml,
+# regex) resolve through pip; CI prints pip freeze so the resolved set is on record.
+agent-framework-core==1.22.0
