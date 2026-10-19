@@ -116,3 +116,32 @@ def test_gates_all_pass():
     assert not S.gates_all_pass({"gate_verdicts": {"a": "pass", "rights": "refused"}})
     assert not S.gates_all_pass({"gate_verdicts": {}})
     assert not S.gates_all_pass({})
+
+
+def test_seal_output_always_passes_the_shared_shape_validator():
+    sealed, _ = govkit.make_bundle()
+    assert S.manifest_shape_problems(sealed.manifest) == []
+    erratum, _ = govkit.make_bundle(kind="erratum", parent="d" * 64)
+    assert S.manifest_shape_problems(erratum.manifest) == []
+
+
+def test_shape_validator_rejects_what_seal_would_never_build():
+    sealed, _ = govkit.make_bundle()
+    m = json.loads(sealed.manifest_bytes)
+    broken = [
+        lambda d: d.pop("gate_verdicts"),
+        lambda d: d.update(extra=1),
+        lambda d: d.update(kind="press_release"),
+        lambda d: d.update(parent_bundle_sha256="d" * 64),
+        lambda d: d["artifacts"].update({"UPPER.txt": d["artifacts"]["audio-el.mp3"]}),
+        lambda d: d["artifacts"]["audio-el.mp3"].update(bytes=-1),
+        lambda d: d["artifacts"]["audio-el.mp3"].update(sha256="xyz"),
+        lambda d: d["author_tags"].update({"s9": "intern"}),
+        lambda d: d["attested_scope"].update(attested=["ghost.txt"]),
+    ]
+    for i, mutate in enumerate(broken):
+        d = json.loads(json.dumps(m))
+        mutate(d)
+        assert S.manifest_shape_problems(d), i
+        data = S.canonical_utf8(d)
+        assert not S.verify_manifest(data).ok, i

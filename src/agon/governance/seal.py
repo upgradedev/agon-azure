@@ -166,8 +166,97 @@ def seal(
         "parent_bundle_sha256": parent_bundle_sha256,
         "deployment_ids": dict(deployment_ids or {}),
     }
+    problems = manifest_shape_problems(manifest)
+    if problems:
+        raise SealError("; ".join(problems))
     data = canonical_utf8(manifest)
     return SealedBundle(manifest=manifest, manifest_bytes=data, bundle_sha256=sha256_hex(data))
+
+
+MANIFEST_KEYS = frozenset({
+    "schema", "kind", "match_id", "seed_sha256", "event_log_sha256", "charter_sha256", "artifacts",
+    "gate_verdicts", "author_tags", "attested_scope", "parent_bundle_sha256", "deployment_ids",
+})
+ARTIFACT_KEYS = frozenset({"bytes", "media_type", "role", "sha256"})
+
+
+def manifest_shape_problems(manifest: Any) -> list[str]:
+    """Every way a parsed manifest differs from what `seal()` builds. Empty means well formed.
+
+    One validator for both directions: `seal()` runs it on what it built, and `verify_manifest`
+    runs it on what it was handed, so a hand-built canonical manifest with an unsafe artifact name
+    or a missing field is refused before any consumer indexes into it.
+    """
+    if not isinstance(manifest, dict):
+        return ["manifest is not a JSON object"]
+    problems: list[str] = []
+    keys = set(manifest)
+    if keys != MANIFEST_KEYS:
+        problems.append(f"manifest keys differ: missing {sorted(MANIFEST_KEYS - keys)}, unexpected {sorted(keys - MANIFEST_KEYS)}")
+        return problems
+    if manifest["schema"] != MANIFEST_SCHEMA:
+        problems.append(f"unknown manifest schema {manifest['schema']!r}")
+    kind = manifest["kind"]
+    if kind not in BUNDLE_KINDS:
+        problems.append(f"unknown bundle kind {kind!r}")
+    if not isinstance(manifest["match_id"], str) or not manifest["match_id"]:
+        problems.append("match_id must be a non-empty string")
+    for key in ("seed_sha256", "event_log_sha256"):
+        if not is_sha256_hex(manifest[key]):
+            problems.append(f"{key} must be 64 lowercase hex characters")
+    if manifest["charter_sha256"] is not None and not is_sha256_hex(manifest["charter_sha256"]):
+        problems.append("charter_sha256 must be 64 lowercase hex characters or null")
+    parent = manifest["parent_bundle_sha256"]
+    if kind == "erratum" and not is_sha256_hex(parent):
+        problems.append("an erratum must name its parent bundle hash")
+    if kind != "erratum" and parent is not None:
+        problems.append("only an erratum names a parent bundle")
+    artifacts = manifest["artifacts"]
+    if not isinstance(artifacts, dict) or not artifacts:
+        problems.append("manifest needs a non-empty artifact table")
+        artifacts = {}
+    for name, entry in artifacts.items():
+        if not _ARTIFACT_NAME.match(name):
+            problems.append(f"artifact name {name!r} is not a safe lowercase file name")
+        if not isinstance(entry, dict):
+            problems.append(f"artifact {name!r} entry is not an object")
+            continue
+        extra = set(entry) - ARTIFACT_KEYS - {"language"}
+        missing = ARTIFACT_KEYS - set(entry)
+        if extra or missing:
+            problems.append(f"artifact {name!r} fields: missing {sorted(missing)}, unexpected {sorted(extra)}")
+            continue
+        if not is_sha256_hex(entry["sha256"]):
+            problems.append(f"artifact {name!r} sha256 must be 64 lowercase hex characters")
+        if not isinstance(entry["bytes"], int) or isinstance(entry["bytes"], bool) or entry["bytes"] < 0:
+            problems.append(f"artifact {name!r} bytes must be a non-negative int")
+        for field_name in ("media_type", "role"):
+            if not isinstance(entry[field_name], str) or not entry[field_name]:
+                problems.append(f"artifact {name!r} {field_name} must be a non-empty string")
+    verdicts = manifest["gate_verdicts"]
+    if not isinstance(verdicts, dict) or not verdicts or not all(isinstance(k, str) and isinstance(v, str) for k, v in verdicts.items()):
+        problems.append("gate_verdicts must be a non-empty map of strings")
+    tags = manifest["author_tags"]
+    if not isinstance(tags, dict) or not all(t in AUTHOR_TAGS for t in tags.values()):
+        problems.append("author_tags must map sentence ids to model, template or officer")
+        tags = {}
+    scope = manifest["attested_scope"]
+    if not isinstance(scope, dict) or set(scope) != {"attested", "gate_cleared"}:
+        problems.append("attested_scope must hold exactly attested and gate_cleared")
+    else:
+        att, clr = scope["attested"], scope["gate_cleared"]
+        if not all(isinstance(x, list) and all(isinstance(i, str) for i in x) for x in (att, clr)):
+            problems.append("attested_scope lists must be lists of strings")
+        else:
+            if set(att) & set(clr):
+                problems.append("an item cannot be both attested and gate-cleared only")
+            unknown = (set(att) | set(clr)) - set(artifacts) - set(tags)
+            if unknown:
+                problems.append(f"attested scope names unknown items {sorted(unknown)}")
+    deployment = manifest["deployment_ids"]
+    if not isinstance(deployment, dict) or not all(isinstance(v, str) for v in deployment.values()):
+        problems.append("deployment_ids must be a map of strings")
+    return problems
 
 
 def gates_all_pass(manifest: Mapping[str, Any]) -> bool:
@@ -191,6 +280,7 @@ def verify_manifest(
     """Recompute everything from bytes: canonical form, bundle hash, and each artifact's hash.
 
     With `artifacts` given, a missing or an extra artifact is a failure, as is any byte change.
+    The manifest's shape is checked by the same validator `seal()` uses, before anything reads it.
     """
     actual = sha256_hex(manifest_bytes)
     reasons: list[str] = []
@@ -205,13 +295,13 @@ def verify_manifest(
             reasons.append("manifest bytes are not in canonical form")
     except SealError as exc:
         reasons.append(f"manifest is not canonical: {exc}")
-    if manifest.get("schema") != MANIFEST_SCHEMA:
-        reasons.append(f"unknown manifest schema {manifest.get('schema')!r}")
+    shape = manifest_shape_problems(manifest)
+    reasons.extend(shape)
     if expected_sha256 is not None and actual != expected_sha256:
         reasons.append(f"bundle sha256 {actual} does not equal the expected {expected_sha256}")
     listed = manifest.get("artifacts")
-    if not isinstance(listed, dict):
-        reasons.append("manifest has no artifact table")
+    if shape or not isinstance(listed, dict):
+        pass  # a malformed manifest is already refused; never index into it
     elif artifacts is not None:
         for name in sorted(set(listed) - set(artifacts)):
             reasons.append(f"artifact {name} is listed but missing")

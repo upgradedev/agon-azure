@@ -138,3 +138,46 @@ def test_erratum_of_an_unpublished_parent_is_refused():
     ok = teams.handle(govkit.teams_payload(orphan), env.store, govkit.later(5))
     result = _publish(P.Publisher(env.store, P.InMemorySink(), "feed"), orphan, ok.approval_id)
     assert result.code == "parent_not_published"
+
+
+def _hand_built(mutate):
+    """A canonical manifest built by hand (not by seal()), approved by a planted record."""
+    sealed, files = govkit.make_bundle()
+    manifest = copy.deepcopy(sealed.manifest)
+    files = mutate(manifest, dict(files))
+    data = S.canonical_utf8(manifest)
+    sha = S.sha256_hex(data)
+    store = InMemoryStore()
+    verifier.register_sealed_bundle(store, data)
+    store.create(verifier.APPROVALS, "planted", {"decision": "approve", "bundle_sha256": sha, "target": "feed"})
+    return store, data, sha, files
+
+
+def _rename_to_traversal(manifest, files):
+    manifest["artifacts"]["../escape.txt"] = manifest["artifacts"].pop("report-el.txt")
+    manifest["attested_scope"]["gate_cleared"] = ["audio-el.mp3"]
+    files["../escape.txt"] = files.pop("report-el.txt")
+    return files
+
+
+def _drop_media_type(manifest, files):
+    del manifest["artifacts"]["audio-el.mp3"]["media_type"]
+    return files
+
+
+def test_hand_built_malformed_manifests_are_refused_with_nothing_written():
+    for mutate in (_rename_to_traversal, _drop_media_type):
+        store, data, sha, files = _hand_built(mutate)
+        sink = P.InMemorySink()
+        result = P.Publisher(store, sink, "feed").publish(
+            bundle_sha256=sha, approval_id="planted", manifest_bytes=data, artifacts=files, now=govkit.T0
+        )
+        assert result.code == "seal_mismatch", (mutate.__name__, result)
+        assert sink.blobs == {}
+        assert store.keys(P.PUBLISHED) == []
+        try:
+            verifier.issue_nonce(store, sha, target="feed", now=govkit.T0)
+        except verifier.IssueError:
+            pass
+        else:
+            raise AssertionError(f"{mutate.__name__}: a nonce was issued for a malformed manifest")
