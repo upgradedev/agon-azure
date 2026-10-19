@@ -49,10 +49,10 @@ from agon.governance.recompute import score_after
 TEAMS_KEYS: frozenset[str] = frozenset({
     "run_id", "bundle_sha256", "nonce", "title", "match_line", "expires_at", "editions", "attested",
     "gate_cleared", "confirm_rows", "destinations", "evidence_url", "published_url", "verify_url",
-    "parent_message_id", "erratum_note",
+    "parent_message_id", "erratum_note", "report",
 })
 TEAMS_REQUIRED: frozenset[str] = frozenset({"run_id", "bundle_sha256", "nonce", "title", "published_url"})
-OUTLOOK_KEYS: frozenset[str] = frozenset({"run_id", "bundle_sha256", "nonce", "subject", "summary", "confirm_rows", "verify_url"})
+OUTLOOK_KEYS: frozenset[str] = frozenset({"run_id", "bundle_sha256", "nonce", "subject", "summary", "confirm_rows", "verify_url", "report"})
 OUTLOOK_REQUIRED: frozenset[str] = frozenset({"run_id", "bundle_sha256", "nonce", "subject"})
 
 # Teams refuses a message over 28 KB (spec 3.4 step 4); the card template adds its own text.
@@ -171,6 +171,27 @@ def _confirm_rows(request: ApprovalRequest, report_en: Mapping[str, Any] | None,
     return rows
 
 
+# The headline report the officer attests, printed on the card and in the email (flows.bicep
+# `report`): at most this many characters per Confirm-row character budget, so _fit shrinks both.
+REPORT_CHARS_PER_ROW_CHAR = 20
+
+
+def report_text(report_en: Mapping[str, Any] | None, limit: int) -> str | None:
+    """The English headline report as plain text, sentences in order; None when it is unavailable.
+
+    Truncation is stated in the text itself, never silent, so the officer knows the card is short.
+    """
+    if report_en is None:
+        return None
+    sentences = [str(row.get("text", "")).strip() for row in report_en.get("sentences", [])]
+    text = " ".join(s for s in sentences if s)
+    if not text:
+        return None
+    if len(text) > limit:
+        text = text[: limit].rstrip() + " [shortened to fit the card; the full report is in the evidence link]"
+    return text
+
+
 def _destinations(request: ApprovalRequest, manifest: Mapping[str, Any]) -> list[dict[str, str]]:
     """The destinations this bundle offers, as the card's {id, label} toggles; [] means feed only.
 
@@ -228,6 +249,9 @@ def teams_payload(request: ApprovalRequest, inputs: CardInputs, match_ref: Mappi
             "destinations": _destinations(request, inputs.manifest),
             "published_url": published_url(context, request.target, request.bundle_sha256),
         }
+        report = report_text(inputs.report_en, limit * REPORT_CHARS_PER_ROW_CHAR)
+        if report is not None:
+            payload["report"] = report
         if context.site_url.startswith("https://"):
             payload["evidence_url"] = context.site_url.rstrip("/") + "/#/newsroom"
         return payload
@@ -241,7 +265,7 @@ def outlook_payload(request: ApprovalRequest, inputs: CardInputs, match_ref: Map
     score_line, league = _score_line(inputs.record)
 
     def build(limit: int) -> dict[str, Any]:
-        return {
+        payload: dict[str, Any] = {
             "run_id": request.run_id,
             "bundle_sha256": request.bundle_sha256,
             "nonce": request.nonce,
@@ -256,6 +280,10 @@ def outlook_payload(request: ApprovalRequest, inputs: CardInputs, match_ref: Map
             "confirm_rows": _confirm_rows(request, inputs.report_en, limit),
             "verify_url": published_url(context, request.target, request.bundle_sha256),
         }
+        report = report_text(inputs.report_en, limit * REPORT_CHARS_PER_ROW_CHAR)
+        if report is not None:
+            payload["report"] = report
+        return payload
 
     payload = _fit(build(ROW_TEXT_MAX), build)
     check_payload(payload, OUTLOOK_KEYS, OUTLOOK_REQUIRED)
