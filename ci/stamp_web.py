@@ -14,7 +14,9 @@ Rules, each a hard failure:
 * with --data-dir: manifest.json must exist, list exactly the --seeds given,
   and every file it lists must exist with the stated sha256 and event count (the web data contract in agon.webdata);
   every world file it lists must exist with the stated sha256 and pass agon.webdata.validate_world;
-  every file under the data directory other than manifest.json must be listed.
+  every file under the data directory other than manifest.json must be listed;
+  then the season files (agon.webseason) and the match analysis files (agon.webmatch, computed
+  by agon.interpret from the exact event logs just verified) are written and re-checked.
 
 * when the web directory holds runs/: every run listed in runs/index.json must
   pass agon.webrun.validate_run and its sealed bundle must recompute to the
@@ -176,6 +178,19 @@ def stamp_season(web_dir: Path) -> str:
     return f"wrote and verified {count} season files under {season_dir.as_posix()}"
 
 
+def stamp_match(web_dir: Path, data_dir: Path) -> str:
+    """Write web_dir/match (the match analysis files agon.webmatch defines) from the verified data, then re-check them."""
+    from agon.webmatch import MATCH_DIR, verify_match_dir, write_match_web
+
+    match_dir = web_dir / MATCH_DIR
+    try:
+        write_match_web(str(match_dir), str(data_dir))
+        count = verify_match_dir(match_dir, data_dir)
+    except (ValueError, OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise StampError(f"match: {exc}") from exc
+    return f"wrote and verified {count} match files under {match_dir.as_posix()}"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("web_dir", type=Path)
@@ -190,6 +205,7 @@ def main(argv: list[str] | None = None) -> int:
             count = verify_data(args.data_dir, parse_seeds(args.seeds))
             print(f"verified {count} data files against {args.data_dir.as_posix()}/manifest.json")
             print(stamp_season(args.web_dir))
+            print(stamp_match(args.web_dir, args.data_dir))
         runs = verify_runs(args.web_dir)
         print(f"verified {len(runs)} runs under {args.web_dir.as_posix()}/runs" + (f": {', '.join(runs)}" if runs else ""))
     except (StampError, KeyError, TypeError, ValueError) as exc:

@@ -87,6 +87,13 @@
   --color-ball: var(--ball);
   --color-ball-edge: var(--ball-edge);
   --color-backdrop: var(--backdrop);
+  --color-home: var(--home);
+  --color-home-text: var(--home-text);
+  --color-home-bg: var(--home-bg);
+  --color-away: var(--away);
+  --color-away-text: var(--away-text);
+  --color-away-bg: var(--away-bg);
+  --color-draw: var(--draw);
   --color-transparent: transparent;
   --color-current: currentColor;
   --shadow-card: 0 1px 2px hsl(var(--shadow-color) / 0.05), 0 1px 3px hsl(var(--shadow-color) / 0.06);
