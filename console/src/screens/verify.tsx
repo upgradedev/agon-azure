@@ -27,6 +27,7 @@ import {
   compareApproved,
   shortHash,
   validateRun,
+  withheldPayloads,
   type ApprovalComparison,
   type BundleCheck,
   type ComputedBundle,
@@ -97,7 +98,12 @@ async function checkBundle(file: string): Promise<BundleResult> {
   const manifestFile = await fetchBytes(bundleFileUrl(valid, BUNDLE_MANIFEST));
   const manifest = JSON.parse(manifestFile.text) as BundleManifest;
   const computed: ComputedBundle = { manifest: await sha256Hex(manifestFile.buffer), files: {} };
-  const names = Object.keys(manifest && typeof manifest.artifacts === "object" ? manifest.artifacts : {}).sort();
+  /* An unticked destination's payload was never published: it is not requested (a 404 would
+     prove nothing), and bundleCheck reports it as withheld by design, still named by its hash. */
+  const withheld = withheldPayloads(valid);
+  const names = Object.keys(manifest && typeof manifest.artifacts === "object" ? manifest.artifacts : {})
+    .filter((name) => !withheld.has(name))
+    .sort();
   await Promise.all(
     names.map(async (name) => {
       try {
