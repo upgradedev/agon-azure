@@ -12,9 +12,11 @@
 //
 // Keyless: disableLocalAuth is true, so the account keys cannot authenticate any
 // call. Every caller uses Microsoft Entra ID and a role from infra/rbac.bicep.
-// No managed identity on the account or the project: nothing here needs one yet.
-// If a later lane registers an Entra-authenticated MCP server through a Foundry
-// Toolbox, the project may need a system identity then; add it with that change.
+// System-assigned identity on the account and the project. The service requires
+// it: the first deploy (run 39268544603, 2026-10-19) failed with "Unsupported
+// configuration. To create projects, you must enable a managed identity on your
+// resource." It holds no role; spec trap 10 (MC1506728) also argues for having
+// it before the freeze rather than adding it later.
 //
 // Every write on one Cognitive Services account runs one at a time (project,
 // then luna, then terra, then the App Insights connection), because the
@@ -73,6 +75,9 @@ resource account 'Microsoft.CognitiveServices/accounts@2026-03-01' = {
   sku: {
     name: 'S0'
   }
+  identity: {
+    type: 'SystemAssigned'
+  }
   properties: {
     customSubDomainName: customSubDomainName
     disableLocalAuth: true
@@ -86,6 +91,9 @@ resource project 'Microsoft.CognitiveServices/accounts/projects@2026-03-01' = {
   name: projectName
   location: location
   tags: tags
+  identity: {
+    type: 'SystemAssigned'
+  }
   properties: {
     displayName: 'Agon'
     description: 'Agon match reports: analyst, writer, localiser-editor, triage and desk-editor (spec 3.2 row 4).'
