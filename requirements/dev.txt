@@ -1,0 +1,9 @@
+# Test tooling CI installs. Every line is an exact pin; ci/check_pins.py enforces it.
+pytest==9.0.2
+iniconfig==2.3.0
+packaging==26.0
+pluggy==1.6.0
+pygments==2.19.2
+colorama==0.4.6 ; sys_platform == "win32"
+# Build backend for "pip install --no-build-isolation -e .", same pin as pyproject.toml.
+setuptools==80.9.0
