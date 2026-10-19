@@ -126,11 +126,11 @@ Judges may open the public URL at any time until 2026-11-11 07:59 UTC. Until the
 * No teardown, no key or identity rotation, no identity redeploy and no recreation of the static site, Cosmos account or storage account.
 * Never make the repository private. A private flip can take a judge URL down, and making it public again does not always bring it back.
 * After the submission deadline, 2026-10-28 06:59 UTC, nothing changes in the repository or on the site. A defect is recorded, not fixed, unless the owner decides otherwise.
-* The readiness gate keeps checking the live URL. Today it runs on every deploy; the scheduled twice-a-day run of spec 9.4 is listed below as not built.
+* The readiness gate keeps checking the live URL: on every deploy (with the commit sha as a marker) and twice a day from `.github/workflows/readiness.yml` (05:17 and 17:17 UTC, read only, no commit marker because the deployed commit is not always the head of `main`). That workflow stops checking by itself after 2026-11-11 07:59 UTC; disable it then.
 
 ## Known gaps
 
-* The scheduled twice-a-day readiness run (spec 9.4) is not built yet; the gate runs on every deploy.
+* App Insights availability tests on the root and `feed.json` (spec 9.4) are not built yet; the scheduled readiness workflow covers the root and the data manifest meanwhile.
 * Application Insights still accepts telemetry with its connection string (local authentication is on). Keyless telemetry needs a Monitoring Metrics Publisher grant per app identity in `infra/rbac.bicep`; decide when the apps exist.
 * The Static Web Apps deploy action is pinned by commit, but it pulls a container image that the pin does not fix.
 * Anonymous blob read needs `allowBlobPublicAccess` on the account. If an Azure Policy in the subscription denies it, the storage deployment fails and the feed design needs another route.
