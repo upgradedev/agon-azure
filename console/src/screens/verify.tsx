@@ -261,13 +261,13 @@ export function Verify({ active }: { active: boolean }) {
             </p>
             {bundles.map((b) => (
               <div key={b.run.run_id} className="space-y-3">
-                <dl className="space-y-1.5 rounded-lg border border-line p-3">
-                  <HashRow label="Bundle hash on the approval card" value={b.run.bundle.sha256} />
-                  <HashRow label="sha256 of manifest.json, computed here" value={b.computed.manifest} />
-                  <div className="pt-1">
-                    <StatusBadge status={b.check.bundleMatches ? "match" : "mismatch"} />
-                  </div>
-                </dl>
+                <div className="space-y-2 rounded-lg border border-line p-3">
+                  <dl className="space-y-1.5">
+                    <HashRow label="Bundle hash on the approval card" value={b.run.bundle.sha256} />
+                    <HashRow label="sha256 of manifest.json, computed here" value={b.computed.manifest} />
+                  </dl>
+                  <StatusBadge status={b.check.bundleMatches ? "match" : "mismatch"} />
+                </div>
                 <Notice tone={b.approval.kind === "equal" ? "success" : b.approval.kind === "differs" ? "danger" : "info"}>
                   <strong className="font-semibold">Approved hash and published hash. </strong>
                   {b.approval.sentence}

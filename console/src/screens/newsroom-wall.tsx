@@ -128,7 +128,7 @@ export function NewsroomWall({ active, loaded, error, blownSeed, replayRequest }
 
   const current = run ? stateAt(run, shown) : "";
   const reached = current ? WALL_STATES.indexOf(current) : -1;
-  const names = run ? deskNames(run) : {};
+  const names: Record<string, string> = run ? deskNames(run) : {};
   const activeDesks = new Set(
     run && step !== "all" ? run.desks.filter((d) => d.lines.some((l) => l.step === step)).map((d) => d.desk) : [],
   );

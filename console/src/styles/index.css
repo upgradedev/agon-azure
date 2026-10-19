@@ -116,8 +116,12 @@
     outline-offset: 2px;
   }
 
+  /* Underlined by default, so a link in running text never relies on colour
+     alone; navigation and button-like links opt out with no-underline. */
   a {
     color: var(--link);
+    text-decoration-line: underline;
+    text-decoration-thickness: from-font;
     text-underline-offset: 3px;
   }
 

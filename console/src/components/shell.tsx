@@ -89,7 +89,13 @@ function ThemeToggle() {
 function MobileMenu({ view }: { view: ViewKey }) {
   const [open, setOpen] = useState(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
+  /* After choosing a page, focus belongs to that page's heading, not to the menu button. */
+  const navigating = useRef(false);
   const contentId = useId();
+  const choose = () => {
+    navigating.current = true;
+    setOpen(false);
+  };
   return (
     <>
       <button
@@ -99,7 +105,10 @@ function MobileMenu({ view }: { view: ViewKey }) {
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-controls={open ? contentId : undefined}
-        onClick={() => setOpen(true)}
+        onClick={() => {
+          navigating.current = false;
+          setOpen(true);
+        }}
         className="inline-flex size-9 items-center justify-center rounded-lg text-fg transition-colors hover:bg-surface-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus xl:hidden"
       >
         <Menu className="size-5" aria-hidden="true" />
@@ -109,7 +118,7 @@ function MobileMenu({ view }: { view: ViewKey }) {
         onOpenChange={setOpen}
         placement="sheet"
         contentId={contentId}
-        returnFocusRef={buttonRef}
+        returnFocusRef={navigating.current ? undefined : buttonRef}
         title="Menu"
         description="The five steps of the judge path, then the pages that explain how Agon works."
       >
@@ -119,7 +128,7 @@ function MobileMenu({ view }: { view: ViewKey }) {
               <li key={step.view}>
                 <a
                   href={hrefFor(step.view)}
-                  onClick={() => setOpen(false)}
+                  onClick={choose}
                   aria-current={view === step.view ? "page" : undefined}
                   className={cn(
                     "flex items-center gap-3 rounded-lg px-3 py-2.5 no-underline transition-colors",
@@ -142,7 +151,7 @@ function MobileMenu({ view }: { view: ViewKey }) {
               <li key={link.view}>
                 <a
                   href={hrefFor(link.view)}
-                  onClick={() => setOpen(false)}
+                  onClick={choose}
                   aria-current={view === link.view ? "page" : undefined}
                   className={cn(
                     "block rounded-lg px-3 py-2.5 text-sm font-medium no-underline transition-colors",

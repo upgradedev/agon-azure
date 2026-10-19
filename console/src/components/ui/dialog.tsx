@@ -35,14 +35,26 @@ interface DialogProps {
   closeLabel?: string;
 }
 
-function useScrollLock(open: boolean): void {
+/* While a dialog is open: the page under it cannot scroll (a class, so no
+   style is injected), and it is inert, so nothing behind the dialog can take
+   focus or be read out. The dialog itself is portaled outside #root. */
+function useModalBackground(open: boolean): void {
   useEffect(() => {
     if (!open) {
       return undefined;
     }
-    const root = document.documentElement;
-    root.classList.add("scroll-locked");
-    return () => root.classList.remove("scroll-locked");
+    const html = document.documentElement;
+    const app = document.getElementById("root");
+    html.classList.add("scroll-locked");
+    if (app) {
+      app.inert = true;
+    }
+    return () => {
+      html.classList.remove("scroll-locked");
+      if (app) {
+        app.inert = false;
+      }
+    };
   }, [open]);
 }
 
@@ -68,7 +80,7 @@ export function Dialog({
   footer,
   closeLabel = "Close",
 }: DialogProps) {
-  useScrollLock(open);
+  useModalBackground(open);
   return (
     <RadixDialog.Root open={open} onOpenChange={onOpenChange}>
       <RadixDialog.Portal>
