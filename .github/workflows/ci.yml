@@ -1,0 +1,106 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # gitleaks v8.30.1, pinned by image index digest (read from ghcr.io on 2026-10-19).
+  # The gitleaks GitHub Action needs a paid licence secret for organisation repos,
+  # so the official image is run directly instead.
+  GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks:v8.30.1@sha256:c00b6bd0aeb3071cbcb79009cb16a60dd9e0a7c60e2be9ab65d25e6bc8abbb7f
+
+jobs:
+  secrets:
+    name: secrets (gitleaks, full history)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Negative control, the scanner must catch a planted token
+        run: |
+          mkdir -p "$RUNNER_TEMP/canary"
+          # The token is assembled at run time so no secret-shaped literal is ever committed.
+          python3 -c "import random, string; print('token = ghp_' + ''.join(random.choices(string.ascii_letters + string.digits, k=36)))" > "$RUNNER_TEMP/canary/planted.txt"
+          set +e
+          docker run --rm -v "$RUNNER_TEMP/canary:/canary:ro" "$GITLEAKS_IMAGE" dir /canary --no-banner --redact --exit-code 1
+          code=$?
+          set -e
+          if [ "$code" -ne 1 ]; then
+            echo "negative control failed: gitleaks exited $code on a planted token, expected 1"
+            exit 1
+          fi
+          echo "negative control passed: planted token detected"
+      - name: Scan the full git history
+        run: docker run --rm -v "$GITHUB_WORKSPACE:/repo:ro" "$GITLEAKS_IMAGE" git /repo --no-banner --redact --verbose --exit-code 1
+
+  test:
+    name: test (pytest, Python 3.12)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install pinned test tooling
+        run: python -m pip install -r requirements/dev.txt
+      - name: Install the package (editable, pinned backend, no isolation)
+        run: python -m pip install --no-build-isolation --no-deps -e .
+      - name: Run tests
+        run: python -m pytest -q
+
+  pins:
+    name: pins (exact == pins only)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - run: python ci/check_pins.py
+
+  dashes:
+    name: dashes (no em or en dash in text files)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - run: python ci/check_dashes.py
+
+  readiness-selftest:
+    name: readiness-selftest (gate fails on broken fixtures)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install pinned test tooling
+        run: python -m pip install -r requirements/dev.txt
+      - name: Run the readiness self-test
+        run: python -m pytest -q tests/test_readiness.py
