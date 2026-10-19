@@ -1,0 +1,7 @@
+# Build and test output of the console; none of it is committed.
+node_modules/
+dist/
+dist-ssr/
+test-results/
+playwright-report/
+screenshots/

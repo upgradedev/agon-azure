@@ -1,0 +1,159 @@
+# The React console (console/): install from the lock, type-check, unit tests,
+# build and prerender, the static web checks on the built site, a rehearsal of
+# the deploy stamp and of the live readiness gate on the exact bytes that would
+# ship, then Playwright in Chromium (every screen at 375 and 1280 px, light and
+# dark, axe, keyboard path, fail on any CSP violation or console error).
+#
+# Nothing installs on a developer machine: every dependency installs here.
+# Dependencies are exact pins in console/package.json; npm resolves them, and
+# every transitive dependency, as of NPM_BEFORE (14 days before the lane
+# started), so nothing newer than that date can enter the lock.
+#
+# Lock bootstrap: while console/package-lock.json is not committed, this job
+# generates it with --package-lock-only, uploads it as the artifact
+# console-package-lock, runs every check against it, and then FAILS on purpose
+# with a sentence saying why, so a run is never green without a committed lock.
+#
+# No id-token, no secrets, contents read only. Actions are pinned by full commit
+# sha; the comment names the version (git ls-remote, 2026-10-19).
+
+name: console
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: console-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NPM_BEFORE: "2026-10-05T00:00:00Z"
+  PUBLISHED_SEEDS: "1,2,3"
+
+jobs:
+  console:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: console
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The evidence test reads cited files at a pinned commit of main.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - name: Exact pins in package.json
+        run: node scripts/check-deps.mjs
+
+      - name: Lock file, committed or generated once for the bootstrap
+        id: lock
+        run: |
+          node --version
+          npm --version
+          if [ -f package-lock.json ]; then
+            echo "bootstrap=false" >> "$GITHUB_OUTPUT"
+            echo "using the committed package-lock.json"
+          else
+            echo "bootstrap=true" >> "$GITHUB_OUTPUT"
+            npm install --package-lock-only --ignore-scripts --no-audit --no-fund --before="$NPM_BEFORE"
+            echo "generated package-lock.json with --before=$NPM_BEFORE"
+          fi
+
+      - name: Upload the lock file
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: console-package-lock
+          path: console/package-lock.json
+          if-no-files-found: error
+
+      - name: The lock agrees with package.json
+        run: node scripts/check-deps.mjs --lock
+
+      - name: Install from the lock (no install scripts)
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Type check
+        run: npx --no-install tsc --noEmit -p tsconfig.json
+
+      - name: Unit tests (validators held to the shared case lists, prerendered markup, evidence links)
+        run: npx --no-install vitest run
+
+      - name: Build and prerender every view into index.html
+        run: npm run build
+
+      - name: Upload the built site, as it would ship before the deploy stamp
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: console-dist
+          path: console/dist/
+          if-no-files-found: warn
+
+      - name: Static web checks on the built site
+        run: python ../ci/web_check.py dist
+
+      - name: Rehearse the deploy on a copy (data, stamp, checks) and the live readiness gate offline
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: |
+          site="$RUNNER_TEMP/site"
+          rm -rf "$site" "$RUNNER_TEMP/readiness"
+          cp -r dist "$site"
+          python -m agon.webdata --seeds "$PUBLISHED_SEEDS" --out "$site/data"
+          python ../ci/stamp_web.py "$site" --sha "$GITHUB_SHA" --data-dir "$site/data" --seeds "$PUBLISHED_SEEDS"
+          python ../ci/web_check.py "$site"
+          python scripts/readiness_offline.py "$site" "$RUNNER_TEMP/readiness" ../README.md
+          python ../ci/readiness.py --offline "$RUNNER_TEMP/readiness" --set-host agon.example --add-marker "demo=$GITHUB_SHA"
+
+      - name: Stamp the built site as the deploy would (data, season files, commit) for the end-to-end tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: |
+          python -m agon.webdata --seeds "$PUBLISHED_SEEDS" --out dist/data
+          python ../ci/stamp_web.py dist --sha "$GITHUB_SHA" --data-dir dist/data --seeds "$PUBLISHED_SEEDS"
+
+      - name: Install Chromium for Playwright (here only)
+        run: npx --no-install playwright install --with-deps chromium
+
+      - name: End-to-end tests (Chromium, axe, CSP violations, keyboard path, screenshots)
+        run: npx --no-install playwright test
+
+      - name: Upload the screenshots
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: console-screenshots
+          path: console/screenshots/
+          if-no-files-found: warn
+
+      - name: Upload the Playwright report
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: console-playwright-report
+          path: |
+            console/playwright-report/
+            console/test-results/
+          if-no-files-found: ignore
+
+      - name: A bootstrap run fails until the lock is committed
+        if: steps.lock.outputs.bootstrap == 'true'
+        run: |
+          echo "console/package-lock.json is not committed. Download the console-package-lock artifact of this run, commit it as console/package-lock.json and push; from then on CI installs with npm ci from the committed lock."
+          exit 1

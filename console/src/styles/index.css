@@ -1,0 +1,158 @@
+/*
+  Tailwind CSS v4 for the Agon console.
+
+  Colours come only from the tokens in public/app.css (light, and dark twice),
+  mapped here with @theme inline, so every utility follows the theme switch.
+  The default palette is removed, so a raw colour cannot sneak in.
+*/
+@import "tailwindcss";
+
+@custom-variant dark {
+  &:where([data-theme="dark"], [data-theme="dark"] *) {
+    @slot;
+  }
+  @media (prefers-color-scheme: dark) {
+    &:where(:root:not([data-theme="light"]), :root:not([data-theme="light"]) *) {
+      @slot;
+    }
+  }
+}
+
+@theme {
+  --color-*: initial;
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+
+  --animate-fade-in: agon-fade-in 160ms ease-out;
+  --animate-pop-in: agon-pop-in 180ms cubic-bezier(0.2, 0, 0, 1);
+  --animate-slide-up: agon-slide-up 240ms cubic-bezier(0.2, 0, 0, 1);
+  --animate-slide-left: agon-slide-left 240ms cubic-bezier(0.2, 0, 0, 1);
+  --animate-rise: agon-rise 320ms cubic-bezier(0.2, 0, 0, 1);
+  --animate-pulse-ring: agon-pulse-ring 1.6s ease-out infinite;
+
+  @keyframes agon-fade-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes agon-pop-in {
+    from { opacity: 0; transform: translateY(4px) scale(0.98); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes agon-slide-up {
+    from { transform: translateY(100%); }
+    to { transform: none; }
+  }
+  @keyframes agon-slide-left {
+    from { transform: translateX(100%); }
+    to { transform: none; }
+  }
+  @keyframes agon-rise {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes agon-pulse-ring {
+    0% { transform: scale(1); opacity: 0.55; }
+    100% { transform: scale(2.2); opacity: 0; }
+  }
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-fg: var(--text);
+  --color-muted: var(--text-muted);
+  --color-line: var(--border-subtle);
+  --color-line-strong: var(--border-strong);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-on-primary: var(--on-primary);
+  --color-accent-bg: var(--accent-bg);
+  --color-accent: var(--accent-text);
+  --color-focus: var(--focus);
+  --color-link: var(--link);
+  --color-notice-bg: var(--notice-bg);
+  --color-notice: var(--notice-text);
+  --color-danger-bg: var(--danger-bg);
+  --color-danger: var(--danger-text);
+  --color-info-bg: var(--info-bg);
+  --color-info: var(--info-text);
+  --color-preview-bg: var(--preview-bg);
+  --color-preview: var(--preview-text);
+  --color-grass: var(--pitch-grass);
+  --color-stripe: var(--pitch-stripe);
+  --color-pitch-line: var(--pitch-line);
+  --color-pressure: var(--pressure);
+  --color-ball: var(--ball);
+  --color-ball-edge: var(--ball-edge);
+  --color-backdrop: var(--backdrop);
+  --color-transparent: transparent;
+  --color-current: currentColor;
+  --shadow-card: 0 1px 2px hsl(var(--shadow-color) / 0.05), 0 1px 3px hsl(var(--shadow-color) / 0.06);
+  --shadow-raised: 0 4px 12px hsl(var(--shadow-color) / 0.08), 0 1px 3px hsl(var(--shadow-color) / 0.06);
+  --shadow-overlay: 0 24px 48px hsl(var(--shadow-color) / 0.22), 0 4px 12px hsl(var(--shadow-color) / 0.1);
+}
+
+@layer base {
+  html {
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: var(--font-sans);
+    font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    scrollbar-gutter: stable;
+  }
+
+  body {
+    min-height: 100dvh;
+    background-color: var(--bg);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+  }
+
+  /* Underlined by default, so a link in running text never relies on colour
+     alone; navigation and button-like links opt out with no-underline. */
+  a {
+    color: var(--link);
+    text-decoration-line: underline;
+    text-decoration-thickness: from-font;
+    text-underline-offset: 3px;
+  }
+
+  ::selection {
+    background-color: var(--accent-bg);
+    color: var(--text);
+  }
+
+  code,
+  kbd {
+    font-family: var(--font-mono);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
+@layer components {
+  .eyebrow {
+    @apply text-xs font-semibold tracking-wide text-accent uppercase;
+  }
+
+  .prose-reading {
+    @apply text-[1.0625rem] leading-8 text-fg;
+  }
+}

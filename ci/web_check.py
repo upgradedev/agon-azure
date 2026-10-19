@@ -66,8 +66,25 @@ UNSAFE_JS = (
     (re.compile(r"document\.write"), "document.write is forbidden"),
     (re.compile(r"\beval\s*\("), "eval is blocked by the CSP"),
     (re.compile(r"\bnew\s+Function\s*\("), "new Function is blocked by the CSP"),
-    (re.compile(r"setAttribute\(\s*['\"](?:style|on\w+)['\"]"), "style or handler attributes are blocked by the CSP"),
+    # Quotes, apostrophes or backticks: a minifier may print every string literal as a template.
+    (re.compile(r"setAttribute\(\s*['\"`](?:style|on\w+)['\"`]"), "style or handler attributes are blocked by the CSP"),
     (re.compile(r"set(?:Timeout|Interval)\(\s*['\"`]"), "string timers are blocked by the CSP"),
+)
+
+# Third-party code in the built React console (console/, bundled by Vite). React
+# DOM ships DOM sinks on code paths the console never takes, and no build can
+# drop them. They are allowed ONLY in the vendor chunk, which holds code from
+# node_modules alone (console/vite.config.ts, manualChunks), and only as the exact
+# text below, the exact number of times. Any other sink there, one occurrence
+# more or fewer, or any sink in any other file still fails. The console's CSP adds
+# Trusted Types (require-trusted-types-for 'script'), so a string reaching one of
+# these sinks throws in the browser instead of running; Playwright fails on that.
+# Pinned in tests/test_web_check.py as well; a dependency upgrade that changes the
+# list fails until a person reviews the new text and edits both.
+VENDOR_CHUNK = re.compile(r"^assets/vendor-[A-Za-z0-9_-]+\.js$")
+VENDOR_SINKS: tuple[tuple[str, int, str], ...] = (
+    (".innerHTML", 3, "react-dom: dangerouslySetInnerHTML (two code paths) and a <script> element made through a div; the console uses neither"),
+    ("setAttribute(`oninput`", 1, "react-dom: a feature test for the input event, run only when 'oninput' in document is false, never in a current browser"),
 )
 
 # Only the WCAG 2.2 AA thresholds are accepted, so a row cannot pass by
@@ -252,6 +269,30 @@ def check_js(rel: str, text: str) -> list[Violation]:
         for pattern, why in UNSAFE_JS:
             if pattern.search(line):
                 out.append(Violation("unsafe-js", rel, number, why))
+    return out
+
+
+def check_vendor_js(rel: str, text: str) -> list[Violation]:
+    """The vendor chunk: every sink match must be one of VENDOR_SINKS, at its exact count.
+
+    Matches are counted over the whole file, not per line, because a minified
+    bundle is a handful of very long lines.
+    """
+    out: list[Violation] = []
+    allowed = {needle: (count, why) for needle, count, why in VENDOR_SINKS}
+    seen: dict[str, int] = {}
+    for pattern, why in UNSAFE_JS:
+        for match in pattern.finditer(text):
+            found = match.group(0)
+            if found in allowed:
+                seen[found] = seen.get(found, 0) + 1
+            else:
+                line = text.count("\n", 0, match.start()) + 1
+                out.append(Violation("unsafe-js", rel, line, f"{why} (vendor code, not on the pinned list: {found!r})"))
+    for needle, (count, why) in allowed.items():
+        if seen.get(needle, 0) != count:
+            out.append(Violation("vendor-sink", rel, 1,
+                                 f"{needle!r} appears {seen.get(needle, 0)} times, the pinned list allows exactly {count} ({why})"))
     return out
 
 
@@ -527,7 +568,7 @@ def scan(web_dir: Path) -> tuple[int, list[Violation]]:
         if suffix == ".html":
             out.extend(check_html(rel, text, require_commit=(rel == "index.html")))
         elif suffix == ".js":
-            out.extend(check_js(rel, text))
+            out.extend(check_vendor_js(rel, text) if VENDOR_CHUNK.match(rel) else check_js(rel, text))
         elif suffix == ".css" and rel == "app.css":
             out.extend(check_css(rel, text))
         elif rel == CONFIG_NAME:
