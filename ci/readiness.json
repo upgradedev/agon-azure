@@ -68,7 +68,9 @@
     }
   ],
   "extra_forbidden_terms": [
-    "It calls the same decision endpoint"
+    "It calls the same decision endpoint",
+    "nothing deployed yet",
+    "Only the CI skeleton"
   ],
   "user_gated": [
     {
