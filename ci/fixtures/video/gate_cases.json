@@ -1,0 +1,20 @@
+{
+  "format": "agon.video-gate-fixture/1",
+  "about": "Cases for ci/video/sync_gate_selftest.py. Each renders a tiny synthetic mp4 with ffmpeg (two narrated beats, captions burned in the band) and lists the exact set of gate checks that must fail; an empty list must pass. composed_good goes through narrate.py (tone engine) and compose.py, so the composer and the gate are proven together. cap_seconds is this fixture's own copy of the cap; tests/test_video_beats.py checks it agrees with the gate and the workflows.",
+  "cap_seconds": 115,
+  "cases": [
+    {"name": "composed_good", "compose": true, "expect": []},
+    {"name": "good", "expect": []},
+    {"name": "at_cap", "seconds": 115.0, "expect": ["total"]},
+    {"name": "one_frame_under_cap", "seconds": 114.96, "expect": []},
+    {"name": "audio_short", "audio_trim_frames": 3, "expect": ["av_sync"]},
+    {"name": "cue_overlap", "srt": "overlap", "expect": ["captions_overlap"]},
+    {"name": "cue_past_end", "srt": "past_end", "expect": ["captions_bounds"]},
+    {"name": "captions_not_burned", "burn": false, "expect": ["captions_missing"]},
+    {"name": "no_cue_for_a_beat", "srt": "drop_b", "expect": ["captions_missing"]},
+    {"name": "receipt_says_not_burned", "receipt_burned": false, "expect": ["captions_missing"]},
+    {"name": "wrong_size", "size": [1280, 720], "expect": ["dimensions"]},
+    {"name": "wrong_rate", "fps": 30, "expect": ["frame_rate"]},
+    {"name": "receipt_hash_differs", "receipt_sha256": "tampered", "expect": ["receipt"]}
+  ]
+}

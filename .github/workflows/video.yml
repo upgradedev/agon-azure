@@ -1,0 +1,273 @@
+# The submission video (spec 10.1), built in CI from the LIVE site at a stated
+# release SHA. The rules want a video under two minutes; our cap is 115 s,
+# pinned here (VIDEO_CAP_SECONDS), in ci/video/sync_gate.py and in
+# ci/fixtures/video/gate_cases.json.
+#
+# Dispatch by hand, on main only, with the 40-hex commit the live site serves:
+#   sha="$(curl -fsS https://jolly-stone-0c9c8a003.4.azurestaticapps.net/ | grep -o 'data-commit="[0-9a-f]\{40\}"' | cut -d'"' -f2)"
+#   gh workflow run video.yml --repo upgradedev/agon-azure --ref main -f release_sha="$sha" -f beats=verify
+# beats is a comma-separated list of beat ids from video/beats.json, or all.
+#
+# Jobs:
+#   plan     checks the inputs, read through env (never inline in a script).
+#   narrate  Azure AI Speech, keyless: the CI identity's Entra token as
+#            "Bearer aad#<Speech resource id>#<token>" (ci/video/narrate.py). The
+#            only job that logs in to Azure (environment azure, id-token write).
+#            Until the owner deploys infra/rbac.bicep with the CI identity's
+#            Cognitive Services User grant on the Speech account
+#            (https://github.com/upgradedev/agon-azure/pull/37), this job fails with
+#            HTTP 401 or 403 and the step summary says so.
+#   capture  Playwright from console/ (its committed lock, its pinned Chromium)
+#            against the live site. Each clip first asserts the page's data-commit
+#            equals release_sha and that the beat's facts are on screen, and holds
+#            max_seconds plus a margin, so it does not wait for the narration and
+#            runs in parallel with it. No Azure.
+#   compose  the preview cut (every Teams beat is a labelled card), then the sync
+#            gate on the composed mp4. Uploads the mp4, receipt, timing, SRT, gate
+#            report and the per-beat clips. The final cut with the owner's Teams
+#            clips is composed locally from these artifacts (video/OWNER_CLIPS.txt).
+#
+# Never on pull_request: the Speech grant to the CI identity is given on that
+# condition, and the environment azure accepts main only. video-check.yml is the
+# pull request side (gate self-test, beat sheet, a stand-in rehearsal; no Azure).
+# Actions are pinned by full commit sha; the comment names the version.
+
+name: video
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_sha:
+        description: The 40-hex commit the live site serves (its body data-commit)
+        type: string
+        required: true
+      beats:
+        description: Beat ids from video/beats.json, comma-separated, or all
+        type: string
+        required: false
+        default: verify
+
+permissions:
+  contents: read
+
+concurrency:
+  group: video-main
+  cancel-in-progress: false
+
+env:
+  # The cap, pinned here, in ci/video/sync_gate.py and in ci/fixtures/video/gate_cases.json.
+  VIDEO_CAP_SECONDS: "115"
+  RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+  # infra/ai.bicep deploys under this name and outputs speechEndpoint and speechResourceId.
+  AI_DEPLOYMENT_NAME: agon-ai
+  TOKEN_RESOURCE: https://cognitiveservices.azure.com
+
+jobs:
+  plan:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      release_sha: ${{ steps.check.outputs.release_sha }}
+      beats: ${{ steps.check.outputs.beats }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Check the inputs
+        id: check
+        env:
+          RELEASE_SHA: ${{ inputs.release_sha }}
+          BEATS: ${{ inputs.beats }}
+        run: |
+          if ! [[ "$RELEASE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "release_sha must be the 40 lowercase hex characters of the commit the live site serves"
+            exit 1
+          fi
+          if ! [[ "$BEATS" =~ ^[a-z0-9,-]+$ ]]; then
+            echo "beats must be beat ids separated by commas, or all"
+            exit 1
+          fi
+          python - <<'PY'
+          import os, sys
+          from pathlib import Path
+          sys.path.insert(0, "ci/video")
+          import beatsheet
+          sheet = beatsheet.load_sheet(Path("video/beats.json"))
+          chosen = sheet.select(os.environ["BEATS"])
+          print("beats:", ", ".join(b.id for b in chosen))
+          PY
+          {
+            echo "release_sha=$RELEASE_SHA"
+            echo "beats=$BEATS"
+          } >> "$GITHUB_OUTPUT"
+          echo "Video for release \`$RELEASE_SHA\`, beats \`$BEATS\`." >> "$GITHUB_STEP_SUMMARY"
+
+  narrate:
+    needs: plan
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: azure
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: ffmpeg from the Ubuntu archive (version printed)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends ffmpeg
+          ffmpeg -hide_banner -version | head -1
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0 (peeled tag, git ls-remote 2026-10-19)
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Read the Speech outputs of agon-ai (only once it reads Succeeded)
+        id: speech
+        run: |
+          state="$(az deployment group show --resource-group "$RESOURCE_GROUP" --name "$AI_DEPLOYMENT_NAME" --query properties.provisioningState --output tsv)"
+          if [ "$state" != "Succeeded" ]; then
+            echo "$AI_DEPLOYMENT_NAME is '$state', not Succeeded: its outputs are not readable yet"
+            exit 1
+          fi
+          endpoint="$(az deployment group show --resource-group "$RESOURCE_GROUP" --name "$AI_DEPLOYMENT_NAME" --query properties.outputs.speechEndpoint.value --output tsv)"
+          resource="$(az deployment group show --resource-group "$RESOURCE_GROUP" --name "$AI_DEPLOYMENT_NAME" --query properties.outputs.speechResourceId.value --output tsv)"
+          if [ -z "$endpoint" ] || [ -z "$resource" ]; then
+            echo "agon-ai has no speechEndpoint or speechResourceId output: run the ai job of deploy.yml first"
+            exit 1
+          fi
+          echo "endpoint=$endpoint" >> "$GITHUB_OUTPUT"
+          echo "resource=$resource" >> "$GITHUB_OUTPUT"
+          echo "Speech endpoint: $endpoint"
+      - name: Narrate each beat with Azure Speech, measure it, write timing.json and the SRT
+        env:
+          AGON_SPEECH_ENDPOINT: ${{ steps.speech.outputs.endpoint }}
+          AGON_SPEECH_RESOURCE_ID: ${{ steps.speech.outputs.resource }}
+          BEATS: ${{ needs.plan.outputs.beats }}
+        run: |
+          AGON_SPEECH_TOKEN="$(az account get-access-token --resource "$TOKEN_RESOURCE" --query accessToken --output tsv)"
+          if [ -z "$AGON_SPEECH_TOKEN" ]; then
+            echo "no access token returned for $TOKEN_RESOURCE"
+            exit 1
+          fi
+          echo "::add-mask::$AGON_SPEECH_TOKEN"
+          export AGON_SPEECH_TOKEN
+          python ci/video/narrate.py --beats video/beats.json --out "$RUNNER_TEMP/narration" \
+            --only "$BEATS" --engine azure --summary "$GITHUB_STEP_SUMMARY"
+      - name: Upload the narration (mp3 per beat, timing.json, captions.srt)
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: video-narration
+          path: ${{ runner.temp }}/narration/
+          if-no-files-found: warn
+          retention-days: 30
+
+  capture:
+    needs: plan
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: console
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+      - name: Exact pins, and the lock agrees with package.json
+        run: node scripts/check-deps.mjs --lock
+      - name: Install the console from its lock (no install scripts)
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Chromium for Playwright (here only)
+        run: npx --no-install playwright install --with-deps chromium
+      - name: Record one clip per web beat from the live site at the release SHA
+        env:
+          AGON_VIDEO_BEATS: ${{ github.workspace }}/video/beats.json
+          AGON_VIDEO_RELEASE_SHA: ${{ needs.plan.outputs.release_sha }}
+          AGON_VIDEO_ONLY: ${{ needs.plan.outputs.beats }}
+          AGON_VIDEO_CLIPS: ${{ runner.temp }}/clips
+        run: npx --no-install playwright test -c playwright.video.config.ts
+      - name: Upload the clips and their receipts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: video-clips
+          path: |
+            ${{ runner.temp }}/clips/*.webm
+            ${{ runner.temp }}/clips/*.json
+          if-no-files-found: warn
+          retention-days: 30
+      - name: Upload the Playwright report
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: video-capture-report
+          path: |
+            console/playwright-report/video/
+            console/test-results/video/
+          if-no-files-found: ignore
+
+  compose:
+    needs: [plan, narrate, capture]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: ffmpeg and the caption font from the Ubuntu archive (version printed)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends ffmpeg fonts-dejavu-core
+          ffmpeg -hide_banner -version | head -1
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0 (git ls-remote 2026-10-19)
+        with:
+          name: video-narration
+          path: ${{ runner.temp }}/narration
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0 (git ls-remote 2026-10-19)
+        with:
+          name: video-clips
+          path: ${{ runner.temp }}/clips
+      - name: Compose the preview (Teams beats as labelled cards)
+        env:
+          RELEASE_SHA: ${{ needs.plan.outputs.release_sha }}
+        run: |
+          python ci/video/compose.py --beats video/beats.json --narration "$RUNNER_TEMP/narration" \
+            --clips "$RUNNER_TEMP/clips" --release-sha "$RELEASE_SHA" --out "$RUNNER_TEMP/preview" \
+            --summary "$GITHUB_STEP_SUMMARY"
+      - name: The sync gate on the composed mp4
+        run: |
+          python ci/video/sync_gate.py "$RUNNER_TEMP/preview/agon-video-preview.mp4" \
+            --receipt "$RUNNER_TEMP/preview/receipt.json" --srt "$RUNNER_TEMP/preview/captions.srt" \
+            --cap-seconds "$VIDEO_CAP_SECONDS" --report "$RUNNER_TEMP/preview/gate.json" --summary "$GITHUB_STEP_SUMMARY"
+      - name: Upload the preview (mp4, receipt, timing, SRT, gate report)
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: video-preview
+          path: |
+            ${{ runner.temp }}/preview/agon-video-preview.mp4
+            ${{ runner.temp }}/preview/receipt.json
+            ${{ runner.temp }}/preview/timing.json
+            ${{ runner.temp }}/preview/captions.srt
+            ${{ runner.temp }}/preview/gate.json
+          if-no-files-found: warn
+          retention-days: 30
