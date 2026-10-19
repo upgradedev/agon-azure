@@ -23,7 +23,7 @@ from typing import Any, Sequence
 
 from agon import __version__
 from agon.synth.engine import GENERATOR_VERSION, simulate_match
-from agon.synth.schema import canonical_bytes, sha256_hex
+from agon.synth.schema import COORDINATE_FRAME, canonical_bytes, sha256_hex
 from agon.synth.world import build_world
 
 DEFAULT_SEEDS: tuple[int, ...] = (1, 2, 3)
@@ -126,6 +126,7 @@ def write_outputs(out_dir: str, bundles: Sequence[SeedBundle], match_index: int)
     manifest = {
         "generator": GENERATOR_VERSION,
         "package_version": __version__,
+        "coordinate_frame": COORDINATE_FRAME,
         "match_index": match_index,
         "seeds": seeds,
         "combined_sha256": combined_hash([(s["seed"], s["sha256"]) for s in seeds]),

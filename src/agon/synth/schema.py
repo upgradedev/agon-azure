@@ -1,9 +1,16 @@
 """Event schema, canonical JSON and content-addressed event ids.
 
 Coordinate convention: x_dm and y_dm are integer decimetres on a 105 m by 68 m pitch, so
-0 <= x_dm <= 1050 and 0 <= y_dm <= 680. Coordinates are in the acting team's attacking frame:
-the acting team always attacks towards x_dm = 1050. Events by the defending side (pressure,
-tackle, foul) are therefore mirrored relative to the attacking team's events in the same chain.
+0 <= x_dm <= 1050 and 0 <= y_dm <= 680. Stored coordinates are in the ACTING team's attacking
+frame (`COORDINATE_FRAME`): the team named in `event.team` always attacks towards x_dm = 1050,
+in both periods. Events by the defending side (pressure, tackle, foul, card) are therefore the
+180 degree rotation of the attacking team's events in the same chain, and every away-team event
+is rotated relative to every home-team event.
+
+Anything that draws or compares events across teams must first call `to_fixed_frame`, which
+returns coordinates in `FIXED_FRAME`: the home club attacks towards x_dm = 1050 in BOTH periods
+(the generator never swaps ends at half time, so a consumer must not flip again by period).
+DATASET_CARD.md section 2 documents the same convention with a worked example.
 
 Why integers: decimetre quantisation keeps every value an integer, so canonical JSON is the same
 bytes on every platform and the sha256 over it is a stable identity.
@@ -23,6 +30,11 @@ from typing import Any
 PITCH_X_DM = 1050
 PITCH_Y_DM = 680
 EVENT_ID_HEX = 16
+
+# Frame of the stored x_dm/y_dm values. Recorded in every match meta so a reader never guesses.
+COORDINATE_FRAME = "acting_team_attacks_high_x"
+# Frame returned by `to_fixed_frame`: one pitch picture for both teams and both periods.
+FIXED_FRAME = "home_attacks_high_x_both_periods"
 
 EVENT_TYPES: tuple[str, ...] = (
     "pass",
@@ -124,6 +136,35 @@ class Event:
 
     def to_dict(self) -> dict[str, Any]:
         return {f.name: getattr(self, f.name) for f in fields(self)}
+
+
+FixedPoint = tuple[int, int, int | None, int | None]
+
+
+def rotate_point(x_dm: int, y_dm: int) -> tuple[int, int]:
+    """Rotate a point 180 degrees about the centre spot; this is how the engine swaps frames."""
+    return PITCH_X_DM - x_dm, PITCH_Y_DM - y_dm
+
+
+def to_fixed_frame(event: Event | dict[str, Any], home_id: str) -> FixedPoint:
+    """Return (x, y, end_x, end_y) in `FIXED_FRAME`, where the home club attacks towards x = 1050.
+
+    Why this exists: stored events use the acting team's frame (`COORDINATE_FRAME`), so drawing
+    raw x_dm for both teams puts every away event and every defensive event on the wrong half
+    with no error. Home events are returned unchanged; every other team's events are rotated 180
+    degrees (x -> 1050 - x and y -> 680 - y, not an x-only flip). Missing end points stay None.
+    Accepts an `Event` or a plain dict, because downstream readers load NDJSON dicts.
+    """
+    d = event.to_dict() if isinstance(event, Event) else event
+    x, y = d["x_dm"], d["y_dm"]
+    ex, ey = d.get("end_x_dm"), d.get("end_y_dm")
+    if d["team"] == home_id:
+        return x, y, ex, ey
+    rx, ry = rotate_point(x, y)
+    if ex is None or ey is None:
+        return rx, ry, None, None
+    rex, rey = rotate_point(ex, ey)
+    return rx, ry, rex, rey
 
 
 def compute_event_id(event_without_id: dict[str, Any]) -> str:

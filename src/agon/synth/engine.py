@@ -23,10 +23,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from agon.synth.rng import PPM, Stream, StreamId
-from agon.synth.schema import PITCH_X_DM, PITCH_Y_DM, Event, make_event
+from agon.synth.schema import COORDINATE_FRAME, PITCH_X_DM, PITCH_Y_DM, Event, make_event
 from agon.synth.world import Club, League, Player, Style, fixture_list
 
-GENERATOR_VERSION = "synth-v0"
+GENERATOR_VERSION = "synth-v0.1"  # v0.1: match meta records coordinate_frame
 GRID_X = 16
 GRID_Y = 12
 HALF_SECONDS = 2700
@@ -526,6 +526,7 @@ class MatchSimulator:
             "match_index": self.match_index,
             "matchday": self.matchday,
             "home": self.home.club_id,
+            "coordinate_frame": COORDINATE_FRAME,
             "away": self.away.club_id,
             "score": {"home": self.home.goals, "away": self.away.goals},
             "added_seconds": {"first_half": added[0], "second_half": added[1]},
