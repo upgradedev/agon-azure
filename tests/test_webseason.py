@@ -225,3 +225,20 @@ def test_unknown_or_mislabelled_payloads_are_refused():
     assert webseason.validate_payload("other.json", {}) == ["other.json is not a season file"]
     assert webseason.validate_payload("form.json", {"kind": "tables", "season": 1}) == ["form.json.kind must be form"]
     assert webseason.validate_payload("form.json", {"kind": "form", "season": 0}) == ["form.json.season must be a positive integer"]
+
+
+def test_cli_reads_the_index_file_and_writes_a_verified_folder(tmp_path: Path, capsys: pytest.CaptureFixture[str]):
+    from agon.synth.schema import canonical_bytes
+
+    stories = tmp_path / "build" / "storylines.json"
+    stories.parent.mkdir()
+    stories.write_bytes(canonical_bytes(index()) + b"\n")
+    out = tmp_path / "build" / "web-season"
+    assert webseason.main(["--season", "1", "--storylines", str(stories), "--out", str(out)]) == 0
+    assert webseason.verify_season_dir(out) == 7
+    assert capsys.readouterr().out.splitlines()[-1] == f"season 1 sha256 {seasonkit.season(1).sha256()} files 7"
+
+
+def test_datalab_regenerate_commands_have_no_placeholders():
+    for cmd in body("datalab.json")["regenerate"]:
+        assert "<" not in cmd["command"] and ">" not in cmd["command"], cmd

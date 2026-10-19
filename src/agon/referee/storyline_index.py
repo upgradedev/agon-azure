@@ -2,6 +2,7 @@
 
 Usage:
     python -m agon.referee.storyline_index --print
+    python -m agon.referee.storyline_index --out build/storylines.json
 
 Why it lives in the referee: it reads ground-truth labels, and nothing under src/agon outside this
 package may import the referee (ci/check_referee_isolation.py). CI (ci/stamp_web.py) builds the
@@ -28,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from typing import Any, Callable, Sequence
@@ -35,6 +37,7 @@ from typing import Any, Callable, Sequence
 from agon.referee.labels import labels_from_ledger, labels_from_log
 from agon.referee.storylines import run_storyline
 from agon.synth.engine import MatchResult
+from agon.synth.schema import canonical_bytes
 from agon.synth.world import build_world
 
 INDEX_SCHEMA = "agon.storylines/1"
@@ -139,12 +142,19 @@ def storyline_index(seeds: Sequence[int] = DEFAULT_SEEDS, per_category: int = DE
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m agon.referee.storyline_index", description=__doc__.splitlines()[0])
     parser.add_argument("--print", action="store_true", help="print the index as JSON")
+    parser.add_argument("--out", help="write the index as canonical JSON to this file (binary, LF, ASCII)")
     parser.add_argument("--per-category", type=int, default=DEFAULT_PER_CATEGORY)
     args = parser.parse_args(argv)
     started = time.perf_counter()
     index = storyline_index(per_category=args.per_category)
     if args.print:
         sys.stdout.write(json.dumps(index, indent=1, sort_keys=True) + "\n")
+    if args.out:
+        parent = os.path.dirname(args.out)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(args.out, "wb") as fh:
+            fh.write(canonical_bytes(index) + b"\n")
     for cat in index["categories"]:
         seeds = ", ".join(str(e["seed"]) for e in cat["entries"]) or "none"
         sys.stderr.write(f"{cat['category']}: seeds {seeds}\n")

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from functools import lru_cache
 
 import pytest
@@ -82,3 +83,13 @@ def test_an_empty_category_keeps_its_reason():
 def test_per_category_must_be_positive():
     with pytest.raises(ValueError):
         si.storyline_index(seeds=SCAN, per_category=0)
+
+
+def test_out_writes_canonical_json_that_the_season_writer_reads(tmp_path):
+    from agon.synth.schema import canonical_bytes
+
+    out = tmp_path / "build" / "storylines.json"
+    assert si.main(["--out", str(out), "--per-category", "1"]) == 0
+    raw = out.read_bytes()
+    assert raw == canonical_bytes(si.storyline_index(per_category=1)) + b"\n"
+    assert validate_storyline_index(json.loads(raw.decode("ascii"))) == []

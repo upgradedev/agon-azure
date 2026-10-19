@@ -1,8 +1,8 @@
 """Write and validate the season files the console reads (the season web data contract).
 
 Usage:
-    python -m agon.referee.storyline_index --print > build/storylines.json
-    python -m agon.webseason --season 1 --storylines build/storylines.json --out web/season
+    python -m agon.referee.storyline_index --out build/storylines.json
+    python -m agon.webseason --season 1 --storylines build/storylines.json --out build/web-season
 
 At deploy, ci/stamp_web.py does the same in one step: it builds the storyline index with the referee
 and calls `write_season_web`, then `verify_season_dir`. The storyline index is never built here,
@@ -65,8 +65,8 @@ SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
 def regenerate_commands(season: int) -> list[dict[str, str]]:
     return [
         {"what": "season matches and season sha256", "command": f"python -m agon.synth.season --season {season} --print-hash"},
-        {"what": "storyline index", "command": "python -m agon.referee.storyline_index --print"},
-        {"what": "season web files", "command": f"python -m agon.webseason --season {season} --storylines <index.json> --out web/season"},
+        {"what": "storyline index", "command": "python -m agon.referee.storyline_index --out build/storylines.json"},
+        {"what": "season web files", "command": f"python -m agon.webseason --season {season} --storylines build/storylines.json --out build/web-season"},
         {"what": "realism bands on the held-out seeds (M2)", "command": "python -m agon.synth.bands --seeds 1001-1200"},
         {"what": "published demo matches (M1)", "command": "python -m agon.synth.manifest --seeds 1,2,3 --print-hash"},
         {"what": "storyline labels", "command": "python -m agon.referee.storylines --seeds 1,2,3 --print-hash"},
@@ -587,7 +587,7 @@ def verify_season_dir(season_dir: str | os.PathLike[str]) -> int:
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m agon.webseason", description=__doc__.splitlines()[0])
     parser.add_argument("--season", type=int, default=DEFAULT_SEASON)
-    parser.add_argument("--storylines", required=True, help="JSON from python -m agon.referee.storyline_index --print")
+    parser.add_argument("--storylines", required=True, help="JSON from python -m agon.referee.storyline_index --out <file>")
     parser.add_argument("--out", required=True, help="the season folder, for example web/season")
     args = parser.parse_args(argv)
     with open(args.storylines, "rb") as fh:

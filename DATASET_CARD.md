@@ -330,7 +330,7 @@ python -m agon.synth.fixtures --seeds 1,2,3 --out build/fixtures.json
 python -m agon.referee.storylines --seeds 1,2,3 --out build/labels.ndjson
 python -m agon.synth.season --season 1 --print-hash
 python -m agon.synth.season --season 1 --hash-out build/season-1/hash.txt --out build/season-1
-python -m agon.referee.storyline_index --print > build/storylines.json
+python -m agon.referee.storyline_index --out build/storylines.json
 python -m agon.webseason --season 1 --storylines build/storylines.json --out build/web-season
 python -m agon.synth.bands --seeds 1001-1200 --json-out build/bands-heldout.json
 ```
