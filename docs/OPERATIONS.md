@@ -212,6 +212,12 @@ The `apps` job deploys `job-agon-fleet` beside the intake job, after `ai` and `f
 * **Start a run by hand** (until an api starts runs): Actions, `fleet-run`, Run workflow on `main`, with a seed, a match index and the target. It needs the rbac deploy above (CI Sender on `runs`).
 * **Before the first approval** the officer must hold the `approver` role in the Cosmos `approvers` container; no identity in this repository writes that container (see Known gaps).
 
+### The Publisher jobs: `job-agon-publisher` and `job-agon-publisher-sandbox` (spec 3.2 rows 11 and 11b)
+
+Both are event-driven Container Apps jobs in `infra/apps.bicep`, one per target, each with its own identity and trigger queue: `id-publisher` on `publish-requests` writes the `feed` container; `id-publisher-sandbox` on `sandbox-publish-requests` writes the `sandbox` container. Each runs `python -m agon.publish --target <feed|sandbox> --idle-exit 20`: it reads the sealed manifest from Cosmos `bundles`, refuses a hash mismatch before fetching anything, fetches the bytes from the private `artifacts` container, reads the approval record, and writes create-only with `If-None-Match: *`.
+
+What they hold: Storage Blob Data Contributor on their one container and Reader on `artifacts` (infra/rbac.bicep, owner side); Queue Message Processor and Reader on their trigger queue (rbac); Cosmos reader on `bundles` and `approvals`, contributor on `supersessions`, and create-only on `published` (and `provenance` for the feed publisher), all in `modules/cosmos-access.bicep`, deployed by CI.
+
 ### Never
 
 * Never deploy with `--mode Complete`. The resource group also holds the gate T spike (`agon-teams`, `la-agon-gate-t`, `la-agon-decision-stub`), and complete mode deletes every resource the template does not name.

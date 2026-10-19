@@ -69,6 +69,12 @@ var containerSpecs = [
     name: 'runs'
     partitionKey: '/id'
   }
+  // Publisher rule 6: an erratum claims its parent create-only, then marks the
+  // supersession published after its receipt exists (agon.governance.publisher).
+  {
+    name: 'supersessions'
+    partitionKey: '/id'
+  }
 ]
 
 resource account 'Microsoft.DocumentDB/databaseAccounts@2024-11-15' = {

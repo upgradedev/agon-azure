@@ -148,6 +148,29 @@ var builtInGrants = [
     role: 'reader'
     container: 'approvers'
   }
+  // The Publisher jobs (lane C6): each reads the approval record it publishes
+  // (publisher rule 2) and keeps the supersession record of an erratum, which it
+  // creates as "claimed" and replaces as "published" (publisher rule 6).
+  {
+    principalId: publisherPrincipalId
+    role: 'reader'
+    container: 'approvals'
+  }
+  {
+    principalId: publisherPrincipalId
+    role: 'contributor'
+    container: 'supersessions'
+  }
+  {
+    principalId: publisherSandboxPrincipalId
+    role: 'reader'
+    container: 'approvals'
+  }
+  {
+    principalId: publisherSandboxPrincipalId
+    role: 'contributor'
+    container: 'supersessions'
+  }
   // BEYOND THE SPEC 7.1 TABLE (spec 11.2 S1 "Cosmos once S0 passes"). The CI
   // identity runs the S1 durable-approval spike against a real Cosmos checkpoint
   // store, so it writes the checkpoints container and nothing else. It is not in
@@ -241,6 +264,11 @@ var createOnlyGrants = [
   {
     principalId: fleetPrincipalId
     container: 'nonces'
+  }
+  // The sandbox Publisher writes its own receipts, create-only like the feed's.
+  {
+    principalId: publisherSandboxPrincipalId
+    container: 'published'
   }
 ]
 
