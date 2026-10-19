@@ -67,6 +67,8 @@ env:
   DEPLOYMENT_NAME: agon-main
   # infra/ai.bicep deploys under its own name (job ai), so it can fail alone.
   AI_DEPLOYMENT_NAME: agon-ai
+  # infra/flows.bicep (approval Logic Apps) deploys under its own name (job flows).
+  FLOWS_DEPLOYMENT_NAME: agon-flows
   # Same Bicep CLI as the ci.yml bicep job, so what lints is what deploys.
   BICEP_VERSION: v0.44.1
   # The three published demo seeds. ci/readiness.json pins the same three in the
@@ -372,3 +374,95 @@ jobs:
             cat "$RUNNER_TEMP/readiness.txt" 2>/dev/null || echo "no readiness output"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # Spec 14 items 4 and 5: the Teams card lifecycle and the Outlook approval email
+  # as Logic Apps (infra/flows.bicep). Independent of web and readiness, so a red
+  # flows job never holds back the public site.
+  #
+  # User-gated until the owner sets the repository variables AGON_TEAMS_GROUP_ID
+  # and AGON_TEAMS_CHANNEL_ID (the ids of team "agon" and its approval channel);
+  # until then the job writes "user-gated" in its summary and deploys nothing.
+  # The Outlook connection is created once and never redeployed (its OAuth consent
+  # must survive); the Outlook flow deploys only once that connection is Connected
+  # and AGON_OFFICER_EMAIL is set.
+  flows:
+    needs: deploy
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: azure
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      STORAGE_ACCOUNT: ${{ needs.deploy.outputs.storage_account }}
+      TEAMS_GROUP_ID: ${{ vars.AGON_TEAMS_GROUP_ID }}
+      TEAMS_CHANNEL_ID: ${{ vars.AGON_TEAMS_CHANNEL_ID }}
+      OFFICER_EMAIL: ${{ vars.AGON_OFFICER_EMAIL }}
+      CI_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: User gate, the team and channel ids
+        id: gate
+        run: |
+          if [ -z "$TEAMS_GROUP_ID" ] || [ -z "$TEAMS_CHANNEL_ID" ]; then
+            msg="user-gated: set repository variables AGON_TEAMS_GROUP_ID and AGON_TEAMS_CHANNEL_ID (owner); nothing deployed"
+            echo "$msg"
+            echo "### flows: $msg" >> "$GITHUB_STEP_SUMMARY"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0 (peeled tag, git ls-remote 2026-10-19)
+        if: steps.gate.outputs.ready == 'true'
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Pin the Bicep CLI
+        if: steps.gate.outputs.ready == 'true'
+        run: |
+          az config set bicep.use_binary_from_path=false bicep.check_version=false --only-show-errors
+          az bicep install --version "$BICEP_VERSION"
+          az bicep version
+      - name: Build and lint flows.bicep and connections.bicep, failing on any warning
+        if: steps.gate.outputs.ready == 'true'
+        run: python3 ci/bicep_check.py --runner az infra/flows.bicep infra/connections.bicep
+      - name: Check the agon-main input
+        if: steps.gate.outputs.ready == 'true'
+        run: |
+          if [ -z "$STORAGE_ACCOUNT" ]; then
+            echo "deploy job returned no storageAccountName output"
+            exit 1
+          fi
+      - name: Create the Outlook connection once, never redeploy it
+        if: steps.gate.outputs.ready == 'true'
+        run: |
+          if az resource show --resource-group "$RESOURCE_GROUP" --resource-type Microsoft.Web/connections --name agon-outlook --output none 2>/dev/null; then
+            echo "agon-outlook exists; not redeployed"
+          else
+            az deployment group create               --resource-group "$RESOURCE_GROUP"               --name agon-connections               --template-file infra/connections.bicep               --parameters location="$LOCATION"               --mode Incremental --output none
+            echo "agon-outlook created; it needs the owner's consent (docs/OPERATIONS.md)"
+          fi
+      - name: Is the Outlook connection authorised?
+        if: steps.gate.outputs.ready == 'true'
+        id: outlook
+        run: |
+          status="$(az resource show --resource-group "$RESOURCE_GROUP" --resource-type Microsoft.Web/connections --name agon-outlook --query "properties.overallStatus" --output tsv 2>/dev/null || true)"
+          echo "agon-outlook status: ${status:-unknown}"
+          if [ "$status" = "Connected" ] && [ -n "$OFFICER_EMAIL" ]; then
+            echo "connected=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "connected=false" >> "$GITHUB_OUTPUT"
+            echo "### flows: Outlook approval flow not deployed (connection status '${status:-unknown}', officer email $([ -n "$OFFICER_EMAIL" ] && echo set || echo unset)); user-gated" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - name: What-if flows.bicep (read only)
+        if: steps.gate.outputs.ready == 'true'
+        run: |
+          az deployment group what-if             --resource-group "$RESOURCE_GROUP"             --name "$FLOWS_DEPLOYMENT_NAME"             --template-file infra/flows.bicep             --parameters location="$LOCATION" storageAccountName="$STORAGE_ACCOUNT"                          teamsGroupId="$TEAMS_GROUP_ID" teamsChannelId="$TEAMS_CHANNEL_ID"                          ciClientId="$CI_CLIENT_ID" outlookConnected="${{ steps.outlook.outputs.connected }}"                          officerEmail="$OFFICER_EMAIL"
+      - name: Deploy flows.bicep (incremental only, never complete)
+        if: steps.gate.outputs.ready == 'true'
+        run: |
+          az deployment group create             --resource-group "$RESOURCE_GROUP"             --name "$FLOWS_DEPLOYMENT_NAME"             --template-file infra/flows.bicep             --parameters location="$LOCATION" storageAccountName="$STORAGE_ACCOUNT"                          teamsGroupId="$TEAMS_GROUP_ID" teamsChannelId="$TEAMS_CHANNEL_ID"                          ciClientId="$CI_CLIENT_ID" outlookConnected="${{ steps.outlook.outputs.connected }}"                          officerEmail="$OFFICER_EMAIL"             --mode Incremental --query "properties.outputs" --output json
