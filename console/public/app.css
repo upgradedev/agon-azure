@@ -49,6 +49,19 @@
    --pitch-line     | --pitch-grass  | 3.0 |  4.57 |  6.60
    --pitch-line     | --pitch-stripe | 3.0 |  5.16 |  7.29
    --ball           | --pitch-grass  | 3.0 |  5.04 |  7.92
+   --home           | --surface      | 3.0 |  4.94 |  7.28
+   --home           | --surface-2    | 3.0 |  4.44 |  6.78
+   --home           | --bg           | 3.0 |  4.65 |  7.76
+   --away           | --surface      | 3.0 |  4.50 |  8.29
+   --away           | --surface-2    | 3.0 |  4.05 |  7.73
+   --away           | --bg           | 3.0 |  4.24 |  8.84
+   --draw           | --surface      | 3.0 |  3.58 |  5.91
+   --home-text      | --surface      | 4.5 |  7.33 | 10.31
+   --home-text      | --surface-2    | 4.5 |  6.59 |  9.61
+   --home-text      | --home-bg      | 4.5 |  6.43 |  9.01
+   --away-text      | --surface      | 4.5 |  6.80 | 11.19
+   --away-text      | --surface-2    | 4.5 |  6.12 | 10.43
+   --away-text      | --away-bg      | 4.5 |  6.04 | 10.06
 */
 
 :root {
@@ -83,6 +96,13 @@
   --pressure: #f59e0b;
   --ball: #ffffff;
   --ball-edge: #0c1118;
+  --home: #1f6fd1;
+  --home-text: #1554a8;
+  --home-bg: #e8f1fc;
+  --away: #c2570c;
+  --away-text: #9a3f06;
+  --away-bg: #fdefe4;
+  --draw: #7f8897;
   --shadow-color: 220 30% 10%;
   --backdrop: rgba(12, 17, 24, 0.5);
 }
@@ -120,6 +140,13 @@
     --pressure: #fbbf24;
     --ball: #ffffff;
     --ball-edge: #0b0e13;
+    --home: #5aa9f5;
+    --home-text: #93c8ff;
+    --home-bg: #10233b;
+    --away: #f59a4a;
+    --away-text: #ffbe86;
+    --away-bg: #2e1c0e;
+    --draw: #8a94a3;
     --shadow-color: 220 40% 2%;
     --backdrop: rgba(0, 0, 0, 0.6);
   }
@@ -157,6 +184,13 @@
     --pressure: #fbbf24;
     --ball: #ffffff;
     --ball-edge: #0b0e13;
+    --home: #5aa9f5;
+    --home-text: #93c8ff;
+    --home-bg: #10233b;
+    --away: #f59a4a;
+    --away-text: #ffbe86;
+    --away-bg: #2e1c0e;
+    --draw: #8a94a3;
     --shadow-color: 220 40% 2%;
     --backdrop: rgba(0, 0, 0, 0.6);
 }

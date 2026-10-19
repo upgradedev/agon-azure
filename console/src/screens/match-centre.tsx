@@ -49,10 +49,19 @@ import { runForBlow } from "../lib/runs";
 import { GLOSSARY, GLOSSARY_ORDER } from "../lib/glossary";
 import { cn } from "../lib/cn";
 import { useReducedMotion } from "../hooks/stores";
-import type { ManifestEntry, MatchEvent, RunsData, World } from "../lib/types";
+import { usePreferences } from "../hooks/preferences";
+import { axisSeconds, liveAt, loadAnalysis, type AnalysisLoad, type MatchClub, type Side } from "../lib/match";
+import { cueAt, cueText, loadCues, type CueLoad } from "../lib/cues";
+import { Scoreboard } from "../components/match/scoreboard";
+import { MatchTimeline } from "../components/match/timeline";
+import { Analysis } from "../components/match/analysis";
+import { YourView } from "../components/match/your-view";
+import { SideBadge } from "../components/match/marks";
+import type { TrailPoint } from "../components/pitch";
+import type { Club, ManifestEntry, MatchEvent, RunsData, World } from "../lib/types";
 
 type Speed = "1" | "8" | "60";
-type Mode = "analyst" | "casual";
+const TRAIL = 8;
 
 const SPEEDS: Record<Speed, number> = { "1": 1, "8": 8, "60": 60 };
 const BAND_WIDTH_M = 17;
@@ -69,11 +78,6 @@ const TYPE_WORDS: Record<string, string> = {
   sub: "substitution",
   card: "card",
   possession_change: "possession change",
-};
-
-const MODE_HINTS: Record<Mode, string> = {
-  analyst: "Analyst mode shows the pressure readout and the ids from the event log under the pitch.",
-  casual: "Casual mode keeps to the story: the score, the clock and one plain sentence per event.",
 };
 
 interface Derived {
@@ -151,22 +155,6 @@ const MOMENT_MARK: Record<Moment["kind"], string> = {
   sub: "fill-info",
 };
 
-/* The full club name, shortened to its three-letter code on a phone; screen
-   readers always hear the full name. */
-function ClubName({ name, short, className }: { name: string; short: string | null; className?: string }) {
-  if (!short) {
-    return <span className={cn("truncate text-sm font-medium text-fg", className)}>{name}</span>;
-  }
-  return (
-    <span className={cn("min-w-0 truncate text-sm font-medium text-fg", className)}>
-      <span className="sm:hidden" aria-hidden="true">
-        {short}
-      </span>
-      <span className="sr-only sm:not-sr-only">{name}</span>
-    </span>
-  );
-}
-
 interface Props {
   active: boolean;
   runs: RunsData | null;
@@ -182,7 +170,10 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
   const [t, setT] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState<Speed>("8");
-  const [mode, setMode] = useState<Mode>("analyst");
+  const prefs = usePreferences();
+  const mode = prefs.mode;
+  const [analysis, setAnalysis] = useState<AnalysisLoad>({ status: "loading" });
+  const [cues, setCues] = useState<CueLoad>({ status: "loading" });
   const [scoreNews, setScoreNews] = useState("");
   const reduceMotion = useReducedMotion();
   const tRef = useRef(0);
@@ -192,7 +183,7 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
     scrubber: useId(),
     scrubberHint: useId(),
     seedHint: useId(),
-    modeHint: useId(),
+    analysisHint: useId(),
     liveReason: useId(),
     liveLabel: useId(),
     blowHint: useId(),
@@ -253,6 +244,53 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
     };
   }, [resolved, seed]);
 
+  /* The seed's match analysis (agon.webmatch), only for the event log being replayed. */
+  useEffect(() => {
+    if (match.status !== "ready") {
+      setAnalysis({ status: "loading" });
+      return undefined;
+    }
+    let cancelled = false;
+    setAnalysis({ status: "loading" });
+    loadAnalysis(match.seed, match.entry.sha256)
+      .then((value) => {
+        if (!cancelled) {
+          setAnalysis(value);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setAnalysis({ status: "error", message: message(error) });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [match]);
+
+  /* Live cues for the seed, when a cue file exists under an approved charter. */
+  useEffect(() => {
+    if (seed === null) {
+      return undefined;
+    }
+    let cancelled = false;
+    setCues({ status: "loading" });
+    loadCues(seed)
+      .then((value) => {
+        if (!cancelled) {
+          setCues(value);
+        }
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setCues({ status: "error", message: message(error) });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [seed]);
+
   /* Playback on animation frames; at most a quarter second per frame. */
   useEffect(() => {
     if (!playing || match.status !== "ready") {
@@ -307,10 +345,23 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
         pressureLeft = Math.min(105 - BAND_WIDTH_M, Math.max(0, p[0] / 10 - BAND_WIDTH_M / 2));
       }
     }
-    const score = scoreAt(derived.score, index);
     const press = pressureWindow(events, derived.timeline, index, derived.home);
-    return { index, clock, minute, ball: { x: ball.x / 10, y: ball.y / 10 }, event, path, pressureLeft, score, press };
-  }, [ready, t, reduceMotion]);
+    const file = analysis.status === "ready" ? analysis.file : null;
+    const seq = event ? event.seq : null;
+    const nowS = file && event ? axisSeconds(file, event.period, event.minute, event.second) : null;
+    /* With the analysis loaded the score is read from its goals; otherwise from the replay. */
+    const score = file ? { home: file.goals.filter((g) => seq !== null && g.seq <= seq && g.side === "home").length, away: file.goals.filter((g) => seq !== null && g.seq <= seq && g.side === "away").length } : scoreAt(derived.score, index);
+    const trail: TrailPoint[] = [];
+    for (let i = Math.max(0, index - TRAIL + 1); i <= index; i += 1) {
+      const e = events[i];
+      if (e && e.type !== "possession_change") {
+        const q = toFixedFrame(e, derived.home);
+        trail.push({ x: q[0] / 10, y: q[1] / 10, side: e.team === derived.home ? "home" : "away" });
+      }
+    }
+    const ballSide: Side | null = event ? (event.team === derived.home ? "home" : "away") : null;
+    return { index, clock, minute, ball: { x: ball.x / 10, y: ball.y / 10 }, event, path, pressureLeft, score, press, seq, nowS, trail, ballSide };
+  }, [ready, t, reduceMotion, analysis]);
 
   /* The score is announced only when it changes, never on the ticking clock,
      and not on the first render of a match. */
@@ -407,11 +458,21 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
   }
 
   const names = ready?.derived.names ?? null;
+  const file = analysis.status === "ready" ? analysis.file : null;
   const homeName = ready && names ? names.club(ready.derived.home) : "Home";
   const awayName = ready && names ? (ready.derived.away ? names.club(ready.derived.away) : "Away") : "Away";
   const homeKit = ready && names ? names.clubRecord(ready.derived.home) : null;
   const awayKit = ready && names ? names.clubRecord(ready.derived.away) : null;
   const total = ready ? Math.max(1, ready.derived.timeline.total - 1) : 1;
+  const sideNames: Record<Side, string> = { home: homeName, away: awayName };
+  const clubOf = (record: Club | null): MatchClub | null =>
+    record ? { club_id: record.club_id, name: record.name, short: record.short, kit_primary_hex: record.kit_primary_hex, kit_secondary_hex: record.kit_secondary_hex } : null;
+  const clubs: Record<Side, MatchClub | null> = file ? file.clubs : { home: clubOf(homeKit), away: clubOf(awayKit) };
+  const live = file && view ? liveAt(file, view.seq) : null;
+  const focusPlayer = prefs.focus && prefs.player && file?.players.some((p) => p.player_id === prefs.player) ? prefs.player : null;
+  const cue = cues.status === "ready" && view ? cueAt(cues.cues, view.nowS) : null;
+  const cueLine = cue ? cueText(cue, prefs.language) : null;
+  const clubChoices = file ? [file.clubs.home, file.clubs.away] : [clubs.home, clubs.away].filter((c): c is MatchClub => c !== null);
 
   let dataChip = <Badge tone="neutral">Loading</Badge>;
   if (manifestError) {
@@ -477,33 +538,41 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
             {match.status === "error" ? <Notice tone="danger">The match file could not be read: {match.message}</Notice> : null}
             {notices.length ? <Notice tone="warning">{notices.join(" ")}</Notice> : null}
 
-            <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-3 rounded-lg bg-surface-2 px-3 py-2.5">
-              <p className="flex min-w-0 items-center gap-2">
-                <svg viewBox="0 0 12 12" className="size-3 shrink-0" aria-hidden="true" focusable="false">
-                  {homeKit ? <circle cx="6" cy="6" r="4.5" fill={homeKit.kit_primary_hex} stroke={homeKit.kit_secondary_hex} strokeWidth="1.5" /> : null}
-                </svg>
-                <ClubName name={homeName} short={homeKit?.short ?? null} />
-                <span className="ml-auto text-2xl font-semibold tabular-nums text-fg">{view ? view.score.home : 0}</span>
-              </p>
-              <p className="flex flex-col items-center px-2 text-center">
-                <span className="text-base font-semibold tabular-nums text-fg">{view ? view.minute : "1'"}</span>
-                <span className="text-[0.6875rem] tracking-wide text-muted uppercase">
-                  {view ? (view.clock.period === 1 ? "1st half" : "2nd half") : "1st half"}
-                </span>
-              </p>
-              <p className="flex min-w-0 items-center gap-2">
-                <span className="text-2xl font-semibold tabular-nums text-fg">{view ? view.score.away : 0}</span>
-                <ClubName name={awayName} short={awayKit?.short ?? null} className="ml-auto text-right" />
-                <svg viewBox="0 0 12 12" className="size-3 shrink-0" aria-hidden="true" focusable="false">
-                  {awayKit ? <circle cx="6" cy="6" r="4.5" fill={awayKit.kit_primary_hex} stroke={awayKit.kit_secondary_hex} strokeWidth="1.5" /> : null}
-                </svg>
-              </p>
-            </div>
+            <Scoreboard
+              clubs={clubs}
+              names={sideNames}
+              score={view ? view.score : { home: 0, away: 0 }}
+              minute={view ? view.minute : "1'"}
+              half={view ? (view.clock.period === 1 ? "1st half" : "2nd half") : "1st half"}
+              live={live}
+              goals={file && view ? file.goals.filter((g) => view.seq !== null && g.seq <= view.seq) : null}
+              possessionRule={file ? file.rules.possession : null}
+              favourite={prefs.club === clubs.home?.club_id ? "home" : prefs.club === clubs.away?.club_id ? "away" : null}
+            />
             <p className="sr-only" aria-live="polite" aria-atomic="true">
               {scoreNews}
             </p>
 
-            <Pitch ball={view ? view.ball : null} path={view ? view.path : null} pressureLeft={view ? view.pressureLeft : null} summary={pitchSummary} />
+            <Pitch
+              ball={view ? view.ball : null}
+              path={view ? view.path : null}
+              pressureLeft={view ? view.pressureLeft : null}
+              summary={pitchSummary}
+              trail={view ? view.trail : []}
+              ballSide={view ? view.ballSide : null}
+              focusRing={Boolean(focusPlayer && view?.event?.player === focusPlayer)}
+              overlay={
+                cue && cueLine && cues.status === "ready" ? (
+                  <div className="pointer-events-none absolute inset-x-2 bottom-2 motion-safe:animate-rise sm:inset-x-4 sm:bottom-4" aria-live="polite">
+                    <div className="max-w-xl rounded-lg border border-line bg-surface/95 px-3 py-2 shadow-raised backdrop-blur" lang={cueLine.language === "easy" ? "en" : cueLine.language}>
+                      <p className="text-sm font-semibold text-fg">{cueLine.text}</p>
+                      <p className="mt-0.5 font-mono text-[0.6875rem] text-muted">Live cue, charter {cues.charter.slice(0, 12)}</p>
+                    </div>
+                  </div>
+                ) : null
+              }
+            />
+            {cues.status === "missing" || cues.status === "error" ? <p className="text-xs leading-5 text-muted">{cues.message}</p> : null}
 
             <p className="min-h-6 text-sm leading-6 text-fg">
               {view?.event && ready ? caption(view.event, ready.derived.names) : ready ? "Kick-off has not happened yet." : "No match is loaded yet."}
@@ -524,7 +593,14 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
                 <span className="inline-block size-2.5 rounded-full border border-ball-edge bg-ball" aria-hidden="true" />
                 Ball
               </li>
-              <li>{ready ? `${homeName} (home) attack to the right in both halves.` : "The home club attacks to the right in both halves."}</li>
+              <li className="flex items-center gap-1.5">
+                <SideBadge side="home" compact />
+                {ready ? `${homeName} attack to the right in both halves.` : "The home club attacks to the right in both halves."}
+              </li>
+              <li className="flex items-center gap-1.5">
+                <SideBadge side="away" compact />
+                {ready ? `${awayName} attack to the left.` : "The away club attacks to the left."}
+              </li>
             </ul>
 
             <div className="space-y-3 rounded-lg border border-line p-3">
@@ -560,7 +636,12 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
                 <label htmlFor={ids.scrubber} className="text-sm font-medium text-fg">
                   Match time
                 </label>
-                <svg viewBox="0 0 1000 12" preserveAspectRatio="none" className="mt-1 block h-3 w-full" aria-hidden="true" focusable="false">
+                {file ? (
+                  <div className="mt-2">
+                    <MatchTimeline file={file} nowS={view ? view.nowS : null} names={sideNames} fan={mode === "fan"} focusPlayer={focusPlayer} />
+                  </div>
+                ) : null}
+                <svg viewBox="0 0 1000 12" preserveAspectRatio="none" className={cn("mt-1 block h-3 w-full", file && "hidden")} aria-hidden="true" focusable="false">
                   {ready?.derived.moments.map((m) => {
                     const height = m.kind === "goal" ? 12 : m.kind === "card" ? 9 : 6;
                     return (
@@ -646,23 +727,6 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
                 </p>
               </div>
 
-              <div>
-                <Segmented<Mode>
-                  name="mode"
-                  legend="Mode"
-                  value={mode}
-                  onChange={setMode}
-                  describedBy={ids.modeHint}
-                  options={[
-                    { value: "analyst", label: "Analyst" },
-                    { value: "casual", label: "Casual" },
-                  ]}
-                />
-                <p id={ids.modeHint} className="mt-1.5 text-xs leading-5 text-muted" aria-live="polite">
-                  {MODE_HINTS[mode]}
-                </p>
-              </div>
-
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
                   <p id={ids.liveLabel} className="text-sm font-medium text-fg">
@@ -684,6 +748,16 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
                   <span className="size-4 rounded-full bg-line-strong" aria-hidden="true" />
                 </button>
               </div>
+            </CardBody>
+          </Card>
+
+          <Card aria-labelledby="h-your-view">
+            <CardHeader>
+              <CardTitle id="h-your-view">Your view</CardTitle>
+              <Badge tone="neutral">{mode === "fan" ? "Fan" : "Analyst"}</Badge>
+            </CardHeader>
+            <CardBody>
+              <YourView prefs={prefs} file={file} clubs={clubChoices} />
             </CardBody>
           </Card>
 
@@ -729,6 +803,26 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
           </Card>
         </div>
       </div>
+
+      <section aria-labelledby="h-analysis" className="mt-8" data-analysis={analysis.status}>
+        <p className="eyebrow">Match analysis</p>
+        <h2 id="h-analysis" className="mt-1 text-xl font-semibold tracking-tight text-fg">
+          {mode === "fan" ? "The match, told for a fan" : "The match in numbers"}
+        </h2>
+        <p id={ids.analysisHint} className="mt-1 max-w-3xl text-sm leading-6 text-muted">
+          Every figure below is computed at deploy by agon.interpret and the Fact Gate&apos;s own counts from the synthetic event log being replayed; the
+          browser only draws it. The time charts follow the replay above.
+        </p>
+        <div className="mt-4">
+          {analysis.status === "ready" && view !== null ? (
+            <Analysis file={analysis.file} names={sideNames} prefs={prefs} nowS={view.nowS} nowSeq={view.seq} />
+          ) : analysis.status === "ready" ? null : (
+            <Notice tone={analysis.status === "loading" ? "loading" : analysis.status === "error" ? "danger" : "info"}>
+              {analysis.status === "loading" ? "Loading the match analysis for this seed." : analysis.message}
+            </Notice>
+          )}
+        </div>
+      </section>
 
       <Card aria-labelledby="h-reads" className="mt-6">
         <CardHeader>

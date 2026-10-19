@@ -6,7 +6,9 @@
       "/data/*.{json,ndjson}",
       "/data-fixture/*.{json,ndjson,txt}",
       "/runs/*",
-      "/season/*"
+      "/season/*",
+      "/match/*",
+      "/cues/*"
     ]
   },
   "globalHeaders": {

@@ -18,6 +18,7 @@ import { Dialog } from "../components/ui/dialog";
 import { Notice } from "../components/ui/notice";
 import { LabelLine, ScreenHeader, SeedNotice, StepNav, View } from "../components/screen";
 import { editionLabel, isApproved, matchLine, sentenceById, why, type Why } from "../lib/runs";
+import { usePreferences } from "../hooks/preferences";
 import { hrefFor, type Route } from "../lib/router";
 import { cn } from "../lib/cn";
 import { VERDICT_TONE } from "./newsroom-wall";
@@ -109,6 +110,14 @@ export function Recap({ active, route, loaded, error, blownSeed }: Props) {
   const sentenceRefs = useRef(new Map<number, HTMLElement>());
   const panelId = useId();
   const tabIdBase = useId().replace(/[^A-Za-z0-9_-]/g, "");
+  const language = usePreferences().language;
+
+  /* The viewer's language (Your view on the Match Centre) opens that edition, when the run has it. */
+  useEffect(() => {
+    if (run && !route.query.s && run.editions.some((e) => e.edition === language)) {
+      setEdition(language);
+    }
+  }, [language, run, route.query.s]);
 
   /* #/recap/<run>?s=en-05 opens that sentence's drawer on arrival. */
   useEffect(() => {
