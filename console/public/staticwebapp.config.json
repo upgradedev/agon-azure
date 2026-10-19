@@ -1,0 +1,26 @@
+{
+  "navigationFallback": {
+    "rewrite": "/index.html",
+    "exclude": [
+      "/*.{css,js,svg,png,ico,json,ndjson,xml,txt,webmanifest,mp3,ogg,vtt,woff2}",
+      "/assets/*",
+      "/data/*.{json,ndjson}",
+      "/data-fixture/*.{json,ndjson,txt}",
+      "/runs/*"
+    ]
+  },
+  "globalHeaders": {
+    "Content-Security-Policy": "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; connect-src 'self'; media-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; upgrade-insecure-requests; require-trusted-types-for 'script'; trusted-types 'none'",
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "X-Frame-Options": "DENY",
+    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+    "Cross-Origin-Opener-Policy": "same-origin",
+    "Strict-Transport-Security": "max-age=31536000"
+  },
+  "mimeTypes": {
+    ".webmanifest": "application/manifest+json",
+    ".ndjson": "application/x-ndjson",
+    ".woff2": "font/woff2"
+  }
+}

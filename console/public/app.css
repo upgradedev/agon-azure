@@ -1,0 +1,184 @@
+/*
+  Agon console design tokens.
+
+  This file is copied into the build verbatim (Vite public folder), so
+  ci/web_check.py can recompute the contrast table below from the shipped
+  tokens. The Tailwind stylesheet reads these variables through @theme; no
+  component uses a raw colour.
+
+  Themes: light tokens live on :root. Dark tokens are declared twice, once for
+  the OS preference (when the visitor has not chosen) and once for the theme
+  switch. The two dark blocks must stay identical; ci/web_check.py fails if
+  they drift.
+
+  CONTRAST TABLE
+  Ratios against the WCAG 2.2 AA thresholds (4.5 for text, 3.0 for focus
+  rings, control borders and pitch markings), recomputed by ci/web_check.py
+  from the tokens below. Regenerate with:
+      python ci/web_check.py console/public --print-contrast
+   fg token         | bg token       | min | light | dark
+   --text           | --bg           | 4.5 | 17.82 | 16.30
+   --text           | --surface      | 4.5 | 18.94 | 15.29
+   --text           | --surface-2    | 4.5 | 17.03 | 14.25
+   --text           | --surface-3    | 4.5 | 15.85 | 12.97
+   --text-muted     | --bg           | 4.5 |  5.55 |  7.66
+   --text-muted     | --surface      | 4.5 |  5.90 |  7.19
+   --text-muted     | --surface-2    | 4.5 |  5.31 |  6.70
+   --text-muted     | --surface-3    | 4.5 |  4.94 |  6.10
+   --link           | --bg           | 4.5 |  6.31 |  9.25
+   --link           | --surface      | 4.5 |  6.70 |  8.68
+   --link           | --surface-2    | 4.5 |  6.03 |  8.09
+   --on-primary     | --primary      | 4.5 |  6.52 |  7.69
+   --on-primary     | --primary-hover| 4.5 |  8.24 |  8.67
+   --accent-text    | --accent-bg    | 4.5 |  7.28 |  9.88
+   --accent-text    | --surface      | 4.5 |  8.23 | 11.60
+   --notice-text    | --notice-bg    | 4.5 |  7.73 | 11.17
+   --danger-text    | --danger-bg    | 4.5 |  6.93 |  9.10
+   --danger-text    | --surface      | 4.5 |  8.15 |  9.55
+   --info-text      | --info-bg      | 4.5 |  7.61 |  9.54
+   --preview-text   | --preview-bg   | 4.5 |  7.63 |  9.87
+   --focus          | --bg           | 3.0 |  4.86 |  8.10
+   --focus          | --surface      | 3.0 |  5.17 |  7.60
+   --focus          | --surface-2    | 3.0 |  4.65 |  7.08
+   --border-strong  | --surface      | 3.0 |  3.58 |  3.94
+   --border-strong  | --surface-2    | 3.0 |  3.22 |  3.67
+   --border-strong  | --bg           | 3.0 |  3.37 |  4.20
+   --primary        | --surface      | 3.0 |  6.52 |  9.08
+   --primary        | --surface-2    | 3.0 |  5.86 |  8.47
+   --primary        | --bg           | 3.0 |  6.13 |  9.68
+   --pitch-line     | --pitch-grass  | 3.0 |  4.57 |  6.60
+   --pitch-line     | --pitch-stripe | 3.0 |  5.16 |  7.29
+   --ball           | --pitch-grass  | 3.0 |  5.04 |  7.92
+*/
+
+:root {
+  color-scheme: light;
+
+  --bg: #f7f8fa;
+  --surface: #ffffff;
+  --surface-2: #f1f3f6;
+  --surface-3: #e8ebf0;
+  --text: #0c1118;
+  --text-muted: #5b6574;
+  --border-subtle: #e3e6eb;
+  --border-strong: #7f8897;
+  --primary: #0b6b4c;
+  --primary-hover: #095a40;
+  --on-primary: #ffffff;
+  --accent-bg: #e7f4ee;
+  --accent-text: #0b5a40;
+  --focus: #2563eb;
+  --link: #1d4ed8;
+  --notice-bg: #fdf4dc;
+  --notice-text: #6b4500;
+  --danger-bg: #fce8e8;
+  --danger-text: #9b1c1c;
+  --info-bg: #e8f0fe;
+  --info-text: #1e40af;
+  --preview-bg: #f1e9fe;
+  --preview-text: #5b21b6;
+  --pitch-grass: #2f7d50;
+  --pitch-stripe: #2b744a;
+  --pitch-line: #eef6f0;
+  --pressure: #f59e0b;
+  --ball: #ffffff;
+  --ball-edge: #0c1118;
+  --shadow-color: 220 30% 10%;
+  --backdrop: rgba(12, 17, 24, 0.5);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    --bg: #0b0e13;
+    --surface: #12161d;
+    --surface-2: #181d26;
+    --surface-3: #1f2530;
+    --text: #e8ecf2;
+    --text-muted: #9aa4b2;
+    --border-subtle: #242b36;
+    --border-strong: #6b7686;
+    --primary: #3ecf8e;
+    --primary-hover: #5ad9a0;
+    --on-primary: #052b1c;
+    --accent-bg: #10291f;
+    --accent-text: #7ee2b5;
+    --focus: #7aa7ff;
+    --link: #8ab4ff;
+    --notice-bg: #2a210d;
+    --notice-text: #f5d58a;
+    --danger-bg: #2d1316;
+    --danger-text: #fca5a5;
+    --info-bg: #131d33;
+    --info-text: #a5c4ff;
+    --preview-bg: #22173a;
+    --preview-text: #d4bbff;
+    --pitch-grass: #1f5c3a;
+    --pitch-stripe: #1c5535;
+    --pitch-line: #dfeee4;
+    --pressure: #fbbf24;
+    --ball: #ffffff;
+    --ball-edge: #0b0e13;
+    --shadow-color: 220 40% 2%;
+    --backdrop: rgba(0, 0, 0, 0.6);
+  }
+}
+
+:root[data-theme="dark"] {
+    color-scheme: dark;
+
+    --bg: #0b0e13;
+    --surface: #12161d;
+    --surface-2: #181d26;
+    --surface-3: #1f2530;
+    --text: #e8ecf2;
+    --text-muted: #9aa4b2;
+    --border-subtle: #242b36;
+    --border-strong: #6b7686;
+    --primary: #3ecf8e;
+    --primary-hover: #5ad9a0;
+    --on-primary: #052b1c;
+    --accent-bg: #10291f;
+    --accent-text: #7ee2b5;
+    --focus: #7aa7ff;
+    --link: #8ab4ff;
+    --notice-bg: #2a210d;
+    --notice-text: #f5d58a;
+    --danger-bg: #2d1316;
+    --danger-text: #fca5a5;
+    --info-bg: #131d33;
+    --info-text: #a5c4ff;
+    --preview-bg: #22173a;
+    --preview-text: #d4bbff;
+    --pitch-grass: #1f5c3a;
+    --pitch-stripe: #1c5535;
+    --pitch-line: #dfeee4;
+    --pressure: #fbbf24;
+    --ball: #ffffff;
+    --ball-edge: #0b0e13;
+    --shadow-color: 220 40% 2%;
+    --backdrop: rgba(0, 0, 0, 0.6);
+}
+
+/*
+  Before the scripts load, public/boot.js copies the route from the address
+  into data-boot-route, so the prerendered page shows the view the visitor
+  asked for instead of the Match Centre. The app removes the attribute once it
+  has taken over. Every view is in the page with the hidden attribute; these
+  rules outrank the hidden rule only while data-boot-route is set.
+*/
+html[data-boot-route]:not([data-boot-route="home"]) [data-view="home"] { display: none !important; }
+html[data-boot-route="newsroom"] [data-view="newsroom"][hidden],
+html[data-boot-route="approve"] [data-view="approve"][hidden],
+html[data-boot-route="recap"] [data-view="recap"][hidden],
+html[data-boot-route="verify"] [data-view="verify"][hidden],
+html[data-boot-route="data-lab"] [data-view="data-lab"][hidden],
+html[data-boot-route="how-it-works"] [data-view="how-it-works"][hidden],
+html[data-boot-route="about"] [data-view="about"][hidden] { display: block !important; }
+
+/* A visitor who skipped the guide never sees it flash in before the app loads. */
+html[data-guide="skipped"] [data-guide-card] { display: none !important; }
+
+/* Scroll lock while a dialog or sheet is open, set by class so no style is injected. */
+html.scroll-locked { overflow: hidden; }
