@@ -1,7 +1,7 @@
-"""Agon: the governed full-time report for a fictional club's media office.
+"""Agon: governed full-time match reports built on a seeded synthetic football world.
 
-Only the package skeleton exists so far; it lets CI prove that an editable
-install from the src layout imports cleanly before any feature code lands.
+The version here is read by the synthetic data manifest, so a release that
+changes generated data changes this string too.
 """
 
-__version__ = "0.0.0"
+__version__ = "0.1.0"
