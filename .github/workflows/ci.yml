@@ -84,6 +84,13 @@ jobs:
           code=$?
           set -e
           if [ "$code" -ne 2 ]; then echo "expected exit 2 without configuration, got $code"; exit 1; fi
+      - name: The fleet worker refuses to start without its configuration
+        run: |
+          set +e
+          docker run --rm agon:ci python -m agon.fleet.worker --once
+          code=$?
+          set -e
+          if [ "$code" -ne 2 ]; then echo "expected exit 2 without configuration, got $code"; exit 1; fi
       - name: The image runs as a non-root user
         run: |
           uid="$(docker run --rm agon:ci id -u)"
