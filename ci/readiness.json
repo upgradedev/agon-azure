@@ -67,7 +67,9 @@
       "scan_assets": false
     }
   ],
-  "extra_forbidden_terms": [],
+  "extra_forbidden_terms": [
+    "It calls the same decision endpoint"
+  ],
   "user_gated": [
     {
       "item": "Public demo video under 2 minutes",

@@ -53,7 +53,7 @@ export const BUNDLE_MANIFEST = "manifest.json";
    ci/readiness.json; tests fail if they drift. */
 export const DESIGN_PREVIEW_LABEL = "Design preview: sample run written by hand, not produced by the pipeline.";
 export const STANDIN_HEADER =
-  "Stand-in for the Microsoft Teams card. It calls the same decision endpoint. The real Teams card is in the video.";
+  "Stand-in for the Microsoft Teams card. In this public build it sends no decision; the real card is posted in the Microsoft Teams channel of the club media office.";
 export const APPROVED_LABEL_PREFIX =
   "AI-drafted. Numbers and names checked by code. Headline report and flagged sentences approved by the club media office at ";
 export const NOT_DEPLOYED_SENTENCE =

@@ -28,7 +28,7 @@
   /* Pinned with agon.webrun.DESIGN_PREVIEW_LABEL, ci/web_check.py,
      ci/readiness.json and web/index.html; tests fail if they drift. */
   var DESIGN_PREVIEW_LABEL = "Design preview: sample run written by hand, not produced by the pipeline.";
-  var STANDIN_HEADER = "Stand-in for the Microsoft Teams card. It calls the same decision endpoint. The real Teams card is in the video.";
+  var STANDIN_HEADER = "Stand-in for the Microsoft Teams card. In this public build it sends no decision; the real card is posted in the Microsoft Teams channel of the club media office.";
   var APPROVED_LABEL_PREFIX = "AI-drafted. Numbers and names checked by code. Headline report and flagged sentences approved by the club media office at ";
   var STATES = ["DRAFT", "CHECKED", "SEALED", "AWAITING_APPROVAL", "APPROVED", "PUBLISHED", "CHANGES_REQUESTED"];
   /* The four states the wall walks through before a person decides. */
