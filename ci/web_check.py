@@ -296,7 +296,9 @@ def check_config(rel: str, text: str) -> list[Violation]:
     return out
 
 
-FALLBACK_EXCLUDED = {"css", "js", "svg", "json"}
+# ndjson: the match event files. Without it a missing data/<seed>.ndjson would
+# come back as index.html with a 200, and the Verify page would hash a web page.
+FALLBACK_EXCLUDED = {"css", "js", "svg", "json", "ndjson"}
 
 
 def _excluded_extensions(patterns: list[str]) -> set[str]:

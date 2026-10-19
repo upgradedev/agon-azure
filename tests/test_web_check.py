@@ -89,7 +89,8 @@ MUTATIONS = [
     ("img-alt", "index.html", "</main>", '<img src="favicon.svg"></main>'),
     ("button-name", "index.html", "</main>", '<button type="button"><svg aria-hidden="true"></svg></button></main>'),
     ("button-name", "index.html", 'aria-label="Switch to dark theme"', ""),
-    ("disabled-reason", "index.html", 'aria-disabled="true" aria-describedby="recompute-reason"', 'aria-disabled="true"'),
+    ("disabled-reason", "index.html", 'aria-disabled="true" aria-describedby="approved-reason"', 'aria-disabled="true"'),
+    ("disabled-reason", "index.html", 'disabled aria-describedby="play-reason"', "disabled"),
     ("disabled-reason", "index.html", "</main>", '<button type="button" disabled>Go</button></main>'),
     ("broken-ref", "index.html", 'aria-describedby="seed-hint"', 'aria-describedby="seed-hint-gone"'),
     ("duplicate-id", "index.html", 'id="h-pitch"', 'id="h-setup"'),
@@ -129,6 +130,16 @@ def test_each_rule_fails_on_a_broken_copy(tmp_path, rule, name, old, new):
     web = _copy_web(tmp_path)
     _mutate(web, name, old, new)
     assert rule in _rules(web)
+
+
+def test_fallback_must_exclude_ndjson(tmp_path):
+    """A missing data/<seed>.ndjson must 404, not come back as index.html with a 200."""
+    web = _copy_web(tmp_path)
+    path = web / "staticwebapp.config.json"
+    text = path.read_text(encoding="utf-8")
+    assert "ndjson" in text, "mutation anchor went stale"
+    path.write_text(text.replace(",ndjson", "").replace("{ndjson,", "{"), encoding="utf-8")
+    assert "spa-fallback" in _rules(web)
 
 
 def test_missing_required_file_fails(tmp_path):
