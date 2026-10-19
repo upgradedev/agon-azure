@@ -119,9 +119,19 @@ def test_minute_claim_is_checked_against_period_and_minute(facts):
     assert reasons and "is at" in reasons[0]
 
 
+def _first_stoppage_time_goal(max_seed: int = 300):
+    # Search instead of naming one seed: an engine retune moves goals between
+    # seeds, and the test must keep covering a 90+ minute goal, not one seed.
+    for seed in range(1, max_seed + 1):
+        _, _, match_facts = govkit.match(seed)
+        late = [g for g in recompute.events_of_kind(match_facts.events, "goal") if g.period == 2 and g.minute >= 90]
+        if late:
+            return match_facts, late[0]
+    raise AssertionError(f"no stoppage-time goal in seeds 1 to {max_seed}")
+
+
 def test_stoppage_time_goal_minute(facts):
-    _, _, f11 = govkit.match(11)
-    late = [g for g in recompute.events_of_kind(f11.events, "goal") if g.period == 2 and g.minute >= 90][0]
+    f11, late = _first_stoppage_time_goal()
     shown = display_minute(late.period, late.minute)
     assert shown.startswith("90+")
     sentence = Sentence(
