@@ -30,7 +30,7 @@ from agon.fleet.contracts import (
 )
 from agon.fleet.local import fake_deps
 from agon.governance import verifier
-from agon.governance.channels import teams
+from agon.governance.channels import outlook, teams
 from agon.governance.claims import Claim, Sentence
 from agon.governance.factgate import GateReport, SentenceVerdict, check_translation
 from agon.governance.recompute import recompute_stat
@@ -416,11 +416,16 @@ def test_the_console_stand_in_cannot_approve_the_public_feed() -> None:
 # ----------------------------------------------------------------- decided first by the intake (spec 3.4 step 5)
 
 
+TICKED = 2  # the officer ticks the first two offered destinations, not all of them
+
+
 def _intake_decides(deps, request, decision: str):
     """What the api's intake does before any pointer reaches the worker: the Teams adapter verifies."""
     data = {"decision": decision, "bundle_sha256": request.bundle_sha256, "nonce": request.nonce}
     if decision == "approve":
         data.update({f"{teams.CONFIRM_PREFIX}{row}": "true" for row in request.confirm_rows})
+        offered = [d["id"] for d in request.destinations]
+        data.update({f"{teams.DESTINATION_PREFIX}{d}": "true" if i < TICKED else "false" for i, d in enumerate(offered)})
     result = teams.handle({"responder": {"userPrincipalName": OFFICER}, "data": data}, deps.store, datetime.now(timezone.utc))
     assert result.ok, result
     return deps.store.read(verifier.APPROVALS, result.approval_id).body
@@ -438,12 +443,42 @@ def test_changes_verified_by_the_intake_ends_the_run_as_changes_requested() -> N
 def test_approve_verified_by_the_intake_gives_one_publish_request_and_notes_it() -> None:
     deps, ref = _awaiting()
     record = _intake_decides(deps, ref.request, "approve")
-    out = run(steps.decide(deps, ref.request, steps.envelope_from_record(record, ref.request.nonce), ref.sealed.manifest_json))
+    assert record["destinations"] == [d["id"] for d in ref.request.destinations][:TICKED]
+    envelope = steps.envelope_from_record(record, ref.request.nonce)
+    assert envelope.destinations == record["destinations"] and envelope.destinations_as_offered is False
+    out = run(steps.decide(deps, ref.request, envelope, ref.sealed.manifest_json))
     assert isinstance(out, PublishRequest) and out.approval_id == record["approval_id"]
     assert deps.ledger.status("run-1") == stores.APPROVED
     assert "publish_enqueued" not in deps.ledger.record("run-1")
     assert run(steps.enqueue_publish(deps, out)).status == PUBLISH_REQUESTED
     assert deps.ledger.record("run-1")["publish_enqueued"] == record["approval_id"]
+
+
+def test_an_outlook_approve_as_offered_resumes_with_no_ticks_and_the_offered_flag() -> None:
+    """The record lists every offered id; the envelope must carry the flag and no ids, the only
+    form the verifier's shape check accepts for an approve as offered."""
+    deps, ref = _awaiting()
+    payload = {
+        "bundle_sha256": ref.request.bundle_sha256, "nonce": ref.request.nonce, "confirm_rows": list(ref.request.confirm_rows),
+        "response": {"SelectedOption": outlook.OPTION_APPROVE_CONFIRM, "UserEmailAddress": OFFICER},
+    }
+    result = outlook.handle(payload, deps.store, datetime.now(timezone.utc))
+    assert result.ok, result
+    record = deps.store.read(verifier.APPROVALS, result.approval_id).body
+    assert record["destinations_as_offered"] is True and record["destinations"] == [d["id"] for d in ref.request.destinations]
+    envelope = steps.envelope_from_record(record, ref.request.nonce)
+    assert envelope.destinations == [] and envelope.destinations_as_offered is True
+    out = run(steps.decide(deps, ref.request, envelope, ref.sealed.manifest_json))
+    assert isinstance(out, PublishRequest) and deps.ledger.status("run-1") == stores.APPROVED
+
+
+def test_a_recorded_approve_with_other_destinations_is_not_rebuilt() -> None:
+    """Negative control: the recovery rebuilds only the recorded subset, never a wider one."""
+    deps, ref = _awaiting()
+    record = _intake_decides(deps, ref.request, "approve")
+    wider = steps.envelope_from_record({**record, "destinations": [d["id"] for d in ref.request.destinations]}, ref.request.nonce)
+    out = run(steps.decide(deps, ref.request, wider, ref.sealed.manifest_json))
+    assert out.code == "already_consumed" and deps.ledger.status("run-1") == stores.AWAITING_APPROVAL
 
 
 def test_a_different_decision_on_a_nonce_the_intake_consumed_stays_refused() -> None:

@@ -82,6 +82,8 @@ def intake_decides(w, request: ApprovalRequest, queues: MemQueues, decision: str
     data = {"decision": decision, "bundle_sha256": request.bundle_sha256, "nonce": request.nonce}
     if decision == "approve":
         data.update({f"confirm:{row}": "true" for row in request.confirm_rows})
+        # Tick the first two offered destinations (agon.governance.channels.teams reads dest:<id>).
+        data.update({f"dest:{d['id']}": "true" if i < 2 else "false" for i, d in enumerate(request.destinations)})
     payload = {"responder": {"userPrincipalName": OFFICER}, "data": data}
     outcome = intake.handle_message(
         "decisions-teams", intake.encode_message(request.run_id, payload), w.deps.store, datetime.now(timezone.utc), queues

@@ -796,7 +796,14 @@ def envelope_from_record(record: dict[str, Any], nonce: str) -> DecisionEnvelope
     The record is written only by `verifier.verify` and carries no nonce (only its sha256), so the
     nonce comes from the pending ApprovalRequest in the pause checkpoint. The caller must already
     have checked that sha256(nonce) equals the record's `nonce_sha256`.
+
+    Destinations are carried in the form the verifier's shape check accepts: an approve "as
+    offered" (Outlook) records every offered id but was decided with no ticks, so its envelope
+    carries `destinations_as_offered` and no ids; a ticked approve carries the recorded subset; a
+    "changes" decision carries neither.
     """
+    as_offered = bool(record.get("destinations_as_offered", False))
+    ticked = [] if as_offered else [str(d) for d in record.get("destinations", [])]
     return DecisionEnvelope(
         bundle_sha256=str(record["bundle_sha256"]),
         nonce=nonce,
@@ -805,6 +812,8 @@ def envelope_from_record(record: dict[str, Any], nonce: str) -> DecisionEnvelope
         channel=str(record["channel"]),
         received_at=str(record["received_at"]),
         confirmed_rows=[str(r) for r in record.get("confirmed_rows", [])],
+        destinations=ticked,
+        destinations_as_offered=as_offered,
     )
 
 
@@ -817,8 +826,9 @@ def _recover_from_record(
     the decision before the pointer resumed the run, and a worker that died after `verify`
     consumed the nonce but before `publish_request` ran. Either way the approval record is the
     evidence. It must name this bundle and this target, and the delivered decision must be the
-    recorded one (same decision, channel and approver); a different decision on a consumed nonce,
-    for example an Outlook approve after a Teams "changes", stays refused as already consumed:
+    recorded one (same decision, channel, approver and destinations); a different decision on a
+    consumed nonce, for example an Outlook approve after a Teams "changes", stays refused as
+    already consumed:
 
     * "approve": the publish request is emitted again. The Publisher's receipt is create-only by
       bundle hash, so a repeated request can never publish twice;
@@ -837,6 +847,11 @@ def _recover_from_record(
     if recorded not in verifier.DECISIONS or (recorded, body.get("channel"), body.get("approver")) != (
         decision.decision, decision.channel, verifier.normalize_principal(decision.approver)
     ):
+        return None
+    recorded_as_offered = bool(body.get("destinations_as_offered", False))
+    if recorded_as_offered != decision.destinations_as_offered:
+        return None
+    if not recorded_as_offered and frozenset(body.get("destinations", [])) != decision.destinations:
         return None
     status = deps.ledger.status(request.run_id)
     if status == stores.SEALED:

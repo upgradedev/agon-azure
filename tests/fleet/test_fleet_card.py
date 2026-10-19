@@ -134,7 +134,8 @@ def test_the_teams_payload_is_filled_from_the_sealed_bundle(sealed_run):
     assert [row["id"] for row in payload["confirm_rows"]] == list(ref.request.confirm_rows)
     assert all(row["text"] == english[row["id"]] for row in payload["confirm_rows"])
     assert payload["published_url"] == f"{CONTEXT.feed_base_url}{ref.request.bundle_sha256}/manifest.json"
-    assert payload["destinations"] == []
+    assert payload["destinations"] == [{"id": d["id"], "label": d["label"]} for d in ref.request.destinations]
+    assert len(payload["destinations"]) == len(inputs.manifest["destinations"]) == 6
     assert len(json.dumps(payload).encode("utf-8")) < card.MAX_PAYLOAD_BYTES
 
 
@@ -259,13 +260,14 @@ def test_offered_destinations_become_card_toggles_in_every_shape(sealed_run):
     import dataclasses
 
     _, ri, ref, inputs = sealed_run
+    bare = dataclasses.replace(ref.request, destinations=[])  # so the manifest shapes are read
     as_list = {**inputs.manifest, "destinations": ["club_site", {"id": "feeds", "label": "RSS and JSON Feed"}]}
     as_table = {**inputs.manifest, "destinations": {"feeds": {"artifact": "destination-feeds.json"}, "club_site": {}}}
     for manifest, expected in (
         (as_list, [{"id": "club_site", "label": "Club site"}, {"id": "feeds", "label": "RSS and JSON Feed"}]),
         (as_table, [{"id": "club_site", "label": "Club site"}, {"id": "feeds", "label": "Feeds"}]),
     ):
-        payload = card.teams_payload(ref.request, card.CardInputs(manifest, inputs.record, inputs.report_en), ri.match_ref, CONTEXT)
+        payload = card.teams_payload(bare, card.CardInputs(manifest, inputs.record, inputs.report_en), ri.match_ref, CONTEXT)
         assert payload["destinations"] == expected
 
     @dataclasses.dataclass
