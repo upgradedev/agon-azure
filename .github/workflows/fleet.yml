@@ -1,0 +1,91 @@
+# Fleet: the W-fulltime Microsoft Agent Framework workflow, offline, with fake ports and file
+# checkpoints. Graph build, end to end to the approval pause, process kill and resume in a fresh
+# interpreter, exactly one publish request, the changes-requested path and the failure rules.
+#
+# The live Cosmos DB kill-and-resume job lives in fleet-cosmos.yml, not here: ci/check_oidc.py
+# fails any workflow that a pull request can trigger and that grants id-token: write.
+name: fleet
+
+on:
+  pull_request:
+    paths:
+      - "src/agon/**"
+      - "tests/fleet/**"
+      - "requirements/fleet.txt"
+      - "requirements/dev.txt"
+      - ".github/workflows/fleet.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/agon/**"
+      - "tests/fleet/**"
+      - "requirements/fleet.txt"
+      - "requirements/dev.txt"
+      - ".github/workflows/fleet.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fleet-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fleet:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      AGON_REQUIRE_AF: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install exact pins
+        run: python -m pip install --disable-pip-version-check -r requirements/fleet.txt
+      - name: Install the package (editable, pinned backend, no isolation)
+        run: python -m pip install --disable-pip-version-check --no-build-isolation --no-deps -e .
+      - name: No dependency conflicts
+        run: python -m pip check --disable-pip-version-check
+      - name: Record the resolved package set
+        run: python -m pip freeze --disable-pip-version-check | tee "${RUNNER_TEMP}/fleet-pip-freeze.txt"
+      - name: Prompt manifest matches the prompt files
+        run: python -m agon.agents.prompts
+      - name: Fleet tests (Agent Framework required, live Cosmos test excluded)
+        run: >
+          python -m pytest -q -p no:cacheprovider -rs tests/fleet
+          --ignore=tests/fleet/test_fleet_cosmos_live.py
+          --basetemp "${RUNNER_TEMP}/fleet-runs"
+          --junitxml "${RUNNER_TEMP}/fleet-junit.xml"
+      - name: No test may skip here (a skip would hide a missing Agent Framework)
+        run: |
+          python3 - "${RUNNER_TEMP}/fleet-junit.xml" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+          root = ET.parse(sys.argv[1]).getroot()
+          cases = root.iter("testcase")
+          total = skipped = 0
+          for case in cases:
+              total += 1
+              if case.find("skipped") is not None:
+                  skipped += 1
+                  print(f"skipped: {case.get('classname')}::{case.get('name')}")
+          print(f"fleet tests: {total}, skipped: {skipped}")
+          sys.exit(1 if skipped or total == 0 else 0)
+          PY
+      - name: Keep run directories, junit and pip freeze as evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fleet-evidence
+          path: |
+            ${{ runner.temp }}/fleet-runs
+            ${{ runner.temp }}/fleet-junit.xml
+            ${{ runner.temp }}/fleet-pip-freeze.txt
+          if-no-files-found: warn
+          retention-days: 30

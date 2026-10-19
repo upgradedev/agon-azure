@@ -1,0 +1,104 @@
+# LIVE: spike S1 on Cosmos DB (spec 11.2). Process A runs W-fulltime to its approval pause with the
+# checkpoint in the live agon/checkpoints container, is killed, and a fresh process B resumes from
+# Cosmos DB and publishes exactly once; a replay is refused; a deleted checkpoint fails the resume.
+# Ports are fakes and governance state is a directory: only the checkpoints are live.
+#
+# Main only, environment azure, OIDC, keyless (DefaultAzureCredential over the az login session).
+# It is a separate file from fleet.yml because ci/check_oidc.py forbids id-token: write in any
+# workflow a pull request can trigger. If the CI identity has no Cosmos DB data-plane role on the
+# checkpoints container yet, the probe step fails and says so (lane A3 adds that role).
+name: fleet-cosmos
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/agon/fleet/**"
+      - "src/agon/agents/**"
+      - "src/agon/governance/**"
+      - "tests/fleet/**"
+      - "requirements/fleet.txt"
+      - ".github/workflows/fleet-cosmos.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fleet-cosmos-main
+  cancel-in-progress: false
+
+jobs:
+  s1-cosmos:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: azure
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      AGON_REQUIRE_AF: "1"
+      AGON_REQUIRE_LIVE: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUTF8: "1"
+      RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install exact pins
+        run: python -m pip install --disable-pip-version-check -r requirements/fleet.txt
+      - name: Install the package (editable, pinned backend, no isolation)
+        run: python -m pip install --disable-pip-version-check --no-build-isolation --no-deps -e .
+      - name: Record the resolved package set
+        run: python -m pip freeze --disable-pip-version-check | tee "${RUNNER_TEMP}/fleet-cosmos-pip-freeze.txt"
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0 (peeled tag, git ls-remote 2026-10-19)
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Find the Cosmos DB endpoint (from the account, not from deployment outputs)
+        id: cosmos
+        run: |
+          endpoint="$(az cosmosdb list --resource-group "$RESOURCE_GROUP" --query "[?tags.app=='agon'].documentEndpoint | [0]" --output tsv)"
+          if [ -z "$endpoint" ]; then
+            echo "::error::no Cosmos DB account tagged app=agon in $RESOURCE_GROUP"
+            exit 1
+          fi
+          echo "endpoint=$endpoint" >> "$GITHUB_OUTPUT"
+          echo "Cosmos DB endpoint: $endpoint"
+      - name: Probe the CI identity's data-plane role on agon/checkpoints
+        env:
+          AGON_COSMOS_ENDPOINT: ${{ steps.cosmos.outputs.endpoint }}
+        run: |
+          set +e
+          python -m agon.fleet.runner probe | tee "${RUNNER_TEMP}/fleet-cosmos-probe.json"
+          code="${PIPESTATUS[0]}"
+          set -e
+          if [ "$code" -eq 5 ]; then
+            echo "::error::CI identity agon-azure-ci lacks a Cosmos DB data-plane role on agon/checkpoints (lane A3 adds Cosmos DB Built-in Data Contributor scoped to that container)"
+          fi
+          exit "$code"
+      - name: Live kill and resume against Cosmos DB checkpoints
+        env:
+          AGON_LIVE_COSMOS_ENDPOINT: ${{ steps.cosmos.outputs.endpoint }}
+        run: >
+          python -m pytest -q -p no:cacheprovider -rs tests/fleet/test_fleet_cosmos_live.py
+          --basetemp "${RUNNER_TEMP}/fleet-cosmos-runs"
+          --junitxml "${RUNNER_TEMP}/fleet-cosmos-junit.xml"
+      - name: Keep run directories, junit, probe and pip freeze as evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: fleet-cosmos-evidence
+          path: |
+            ${{ runner.temp }}/fleet-cosmos-runs
+            ${{ runner.temp }}/fleet-cosmos-junit.xml
+            ${{ runner.temp }}/fleet-cosmos-probe.json
+            ${{ runner.temp }}/fleet-cosmos-pip-freeze.txt
+          if-no-files-found: warn
+          retention-days: 30
