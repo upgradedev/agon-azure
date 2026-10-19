@@ -158,6 +158,24 @@ def verify_runs(web_dir: Path) -> list[str]:
         raise StampError(f"runs: {exc}") from exc
 
 
+def stamp_season(web_dir: Path) -> str:
+    """Write web_dir/season (the season files agon.webseason defines), then re-hash and check them.
+
+    The storyline index is built here, in CI, because it reads referee labels and nothing under
+    src/agon outside the referee may import it (ci/check_referee_isolation.py).
+    """
+    from agon.referee.storyline_index import storyline_index
+    from agon.webseason import SEASON_DIR, verify_season_dir, write_season_web
+
+    season_dir = web_dir / SEASON_DIR
+    try:
+        write_season_web(season_dir, storyline_index())
+        count = verify_season_dir(season_dir)
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise StampError(f"season: {exc}") from exc
+    return f"wrote and verified {count} season files under {season_dir.as_posix()}"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("web_dir", type=Path)
@@ -171,6 +189,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.data_dir is not None:
             count = verify_data(args.data_dir, parse_seeds(args.seeds))
             print(f"verified {count} data files against {args.data_dir.as_posix()}/manifest.json")
+            print(stamp_season(args.web_dir))
         runs = verify_runs(args.web_dir)
         print(f"verified {len(runs)} runs under {args.web_dir.as_posix()}/runs" + (f": {', '.join(runs)}" if runs else ""))
     except (StampError, KeyError, TypeError, ValueError) as exc:
