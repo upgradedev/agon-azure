@@ -1,1 +1,1 @@
-{"files":[{"events":199,"name":"1.ndjson","seed":1,"sha256":"4e6ec848552618df71b00824f35b3632ac308a1f7f5d8edf6a8a236de8848da8"}],"generator":"synth-v0.2"}
+{"files":[{"events":199,"name":"1.ndjson","seed":1,"sha256":"4e6ec848552618df71b00824f35b3632ac308a1f7f5d8edf6a8a236de8848da8","world":"1.world.json","world_sha256":"0fce61b7d2987992a66b2acb8f8194efaf98d2d8a50eebe0b87dfefdbd1e8c09"}],"generator":"synth-v0.2"}

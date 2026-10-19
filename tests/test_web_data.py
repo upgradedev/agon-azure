@@ -19,13 +19,17 @@ import pytest
 from agon.synth.engine import GENERATOR_VERSION
 from agon.synth.manifest import build_bundle
 from agon.synth.schema import PITCH_X_DM, PITCH_Y_DM, sha256_hex, to_fixed_frame, validate_event
+from agon.synth.world import KIT_COLOURS
 from agon.webdata import (
     FILE_KEYS,
+    KIT_HEX,
     MANIFEST_KEYS,
     build_web_data,
     main,
     manifest_bytes,
     validate_manifest,
+    validate_world,
+    web_world,
     write_web_data,
 )
 
@@ -48,6 +52,7 @@ def test_fixture_manifest_matches_the_contract():
     assert manifest["generator"] == GENERATOR_VERSION
     assert [e["seed"] for e in manifest["files"]] == FIXTURE_SEEDS
     assert [e["name"] for e in manifest["files"]] == ["1.ndjson"]
+    assert [e["world"] for e in manifest["files"]] == ["1.world.json"]
 
 
 def test_fixture_hashes_and_counts_recompute():
@@ -58,6 +63,10 @@ def test_fixture_hashes_and_counts_recompute():
         data.decode("ascii")
         assert data.endswith(b"\n")
         assert data.count(b"\n") == entry["events"]
+        world = (FIXTURE / entry["world"]).read_bytes()
+        assert sha256_hex(world) == entry["world_sha256"], f"{entry['world']}: sha256 differs from the manifest"
+        assert b"\r" not in world
+        assert validate_world(json.loads(world.decode("utf-8"))) == []
 
 
 def test_fixture_events_are_valid_and_inside_the_first_ten_minutes():
@@ -91,7 +100,8 @@ def test_fixture_is_a_prefix_of_the_synth_cli_events_file():
 
 def test_fixture_folder_holds_only_contract_files_and_the_readme():
     names = sorted(p.name for p in FIXTURE.iterdir())
-    assert names == sorted(["README.txt", "manifest.json"] + [e["name"] for e in _manifest()["files"]])
+    listed = [e["name"] for e in _manifest()["files"]] + [e["world"] for e in _manifest()["files"]]
+    assert names == sorted(["README.txt", "manifest.json"] + listed)
 
 
 @pytest.mark.parametrize("seed", [1, 2, 3])
@@ -177,7 +187,9 @@ def test_readme_documents_the_contract():
     text = (FIXTURE / "README.txt").read_text(encoding="ascii")
     for needle in (
         '{"generator": str,',
-        '"files": [{"name": str, "sha256": str, "seed": int, "events": int}]}',
+        '"files": [{"name": str, "sha256": str, "seed": int, "events": int,',
+        '"world": str, "world_sha256": str}]}',
+        "<seed>.world.json",
         "python -m agon.webdata --seeds 1 --max-minute 10 --out web/data-fixture",
         "to_fixed_frame",
         "1050 - x AND y to 680 - y",
@@ -196,3 +208,68 @@ def test_fixture_copy_with_a_flipped_byte_fails_the_hash(tmp_path):
     path.write_bytes(bytes(data))
     entry = _manifest()["files"][0]
     assert sha256_hex(path.read_bytes()) != entry["sha256"]
+
+
+# ---------------------------------------------------------------- world files
+
+WORLD_CASES = json.loads((JS_TESTS / "world_cases.json").read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("case", WORLD_CASES, ids=[c["case"] for c in WORLD_CASES])
+def test_world_cases_shared_with_the_browser(case):
+    problems = validate_world(case["world"])
+    assert (problems == []) is case["valid"], problems
+    if "problem" in case:
+        assert any(case["problem"] in p for p in problems), problems
+
+
+def test_world_cases_cover_both_outcomes():
+    assert {c["valid"] for c in WORLD_CASES} == {True, False}
+    assert sum(1 for c in WORLD_CASES if not c["valid"]) >= 15
+    assert all("problem" in c for c in WORLD_CASES if not c["valid"])
+
+
+def test_every_kit_colour_has_a_display_colour():
+    assert set(KIT_COLOURS) <= set(KIT_HEX), sorted(set(KIT_COLOURS) - set(KIT_HEX))
+
+
+@pytest.mark.parametrize("seed", [1, 2, 3])
+def test_published_world_names_every_id_in_the_events(seed):
+    bundle = build_bundle(seed)
+    world = web_world(bundle.world, bundle.match)
+    assert validate_world(world) == []
+    clubs = {c["club_id"] for c in world["clubs"]}
+    players = {p["player_id"] for c in world["clubs"] for p in c["players"]}
+    assert world["home"] == bundle.match["home"] and world["away"] == bundle.match["away"]
+    for event in bundle.events:
+        assert event["team"] in clubs
+        for key in ("player", "related_player"):
+            assert event[key] is None or event[key] in players, event["event_id"]
+
+
+@pytest.mark.parametrize("seed", [1, 2, 3])
+def test_published_world_names_pass_the_rights_name_screen(seed):
+    """Every name a page shows goes through the same screen the Rights Guard applies to name fields."""
+    from agon.governance.rights import screen_name_field
+
+    bundle = build_bundle(seed)
+    world = web_world(bundle.world, bundle.match)
+    names = [world["league"]] + [c["name"] for c in world["clubs"]]
+    names += [p["name"] for c in world["clubs"] for p in c["players"]]
+    refusals = [r for i, name in enumerate(names) for r in screen_name_field(name, f"name {i}")]
+    assert refusals == []
+    assert len(names) == 1 + 6 + 6 * 18
+
+
+def test_world_file_carries_no_attributes_or_style():
+    """The web projection shows names only; the engine's attributes and style vectors stay out."""
+    text = (FIXTURE / "1.world.json").read_text(encoding="utf-8")
+    for word in ("passing", "finishing", "press_height", "directness", "stamina", "keeping"):
+        assert word not in text
+
+
+def test_name_screen_can_fail():
+    """The screen above is only evidence if it refuses a real name."""
+    from agon.governance.rights import screen_name_field
+
+    assert screen_name_field("Arsenal", "probe")

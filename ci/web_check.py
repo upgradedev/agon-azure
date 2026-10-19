@@ -32,6 +32,21 @@ SCANNED_SUFFIXES = (".html", ".css", ".js", ".json", ".svg")
 COMMIT_PLACEHOLDER = "__AGON_COMMIT__"
 CONFIG_NAME = "staticwebapp.config.json"
 
+# The exact sentence a hand-written run must carry, on the run file and on the
+# page. Pinned here as a literal (this checker imports nothing from src/) and
+# held equal to agon.webrun.DESIGN_PREVIEW_LABEL by tests/test_web_runs.py.
+DESIGN_PREVIEW_LABEL = "Design preview: sample run written by hand, not produced by the pipeline."
+RUNS_DIR = "runs/"
+# Where the label must sit on the page, anchored to the element that shows it.
+# A bare substring check passed with the wall copy gone as long as any other
+# copy survived, so each screen's copy is pinned to its own id. The same three
+# strings are the demo target's markers in ci/readiness.json.
+PAGE_LABEL_MARKERS = (
+    ("Newsroom Wall", 'id="wall-label">' + DESIGN_PREVIEW_LABEL),
+    ("approval card", 'id="approve-label">' + DESIGN_PREVIEW_LABEL),
+    ("recap", 'id="recap-label">Not approved. ' + DESIGN_PREVIEW_LABEL),
+)
+
 # Characters and their escaped spellings. Built with chr() on purpose so this
 # file itself contains no dash characters, even after an editor round trip.
 DASH_CHARS = {chr(0x2014): "em dash", chr(0x2013): "en dash", chr(0x2015): "horizontal bar"}
@@ -293,12 +308,55 @@ def check_config(rel: str, text: str) -> list[Violation]:
     if fallback.get("rewrite") != "/index.html" or missing:
         detail = f"; not excluded: {', '.join(missing)}" if missing else ""
         out.append(Violation("spa-fallback", rel, 1, f"navigationFallback must rewrite to /index.html and exclude asset files{detail}"))
+    missing_dirs = [d for d in FALLBACK_JSON_DIRS if d not in _excluded_dirs(fallback.get("exclude") or [])]
+    if missing_dirs:
+        out.append(Violation("spa-fallback-dirs", rel, 1, f"navigationFallback must exclude JSON in each data folder; missing {', '.join(missing_dirs)}"))
     return out
+
+
+# ---------------------------------------------------------------- run label rules
+
+
+def check_run_label(rel: str, text: str) -> tuple[list[Violation], bool]:
+    """A run marked as a design preview must carry the exact label. Returns (violations, is_preview)."""
+    try:
+        run = json.loads(text)
+    except json.JSONDecodeError as err:
+        return [Violation("run-json", rel, err.lineno, f"invalid JSON: {err.msg}")], False
+    if not isinstance(run, dict) or "provenance" not in run:
+        return [Violation("run-label", rel, 1, "a run file needs a provenance and a label")], False
+    preview = run.get("provenance") == "design_preview"
+    if preview and run.get("label") != DESIGN_PREVIEW_LABEL:
+        return [Violation("run-label", rel, 1, f"a design preview run must carry the label {DESIGN_PREVIEW_LABEL!r}")], True
+    return [], preview
+
+
+def _is_run_file(rel: str) -> bool:
+    """runs/<id>.json, not the index and not a file inside a bundle folder."""
+    return rel.startswith(RUNS_DIR) and rel.count("/") == 1 and rel.endswith(".json") and rel != RUNS_DIR + "index.json"
 
 
 # ndjson: the match event files. Without it a missing data/<seed>.ndjson would
 # come back as index.html with a 200, and the Verify page would hash a web page.
 FALLBACK_EXCLUDED = {"css", "js", "svg", "json", "ndjson"}
+
+# Folders whose JSON the pages fetch. Each needs its own exclude glob, because a
+# root glob such as /*.json is not relied on to reach into folders: a missing
+# runs/<id>/edition-en.json must be a 404, never index.html with a 200.
+FALLBACK_JSON_DIRS = ("/data/", "/data-fixture/", "/runs/", "/runs/*/")
+
+
+def _excluded_dirs(patterns: list[str]) -> set[str]:
+    """Folder prefixes whose pattern ends in *.json or *.{...json...}."""
+    found: set[str] = set()
+    for pattern in patterns:
+        for prefix in FALLBACK_JSON_DIRS:
+            rest = pattern[len(prefix):] if pattern.startswith(prefix) else None
+            if rest is None or "/" in rest:
+                continue
+            if "json" in _excluded_extensions(["/" + rest]):
+                found.add(prefix)
+    return found
 
 
 def _excluded_extensions(patterns: list[str]) -> set[str]:
@@ -442,10 +500,16 @@ def scan(web_dir: Path) -> tuple[int, list[Violation]]:
         if required not in names:
             out.append(Violation("missing-file", required, 0, "required web file is missing"))
 
+    previews: list[str] = []
     for path in files:
         rel = path.relative_to(web_dir).as_posix()
         text = path.read_text(encoding="utf-8")
         out.extend(check_dashes(rel, text))
+        if _is_run_file(rel):
+            found, preview = check_run_label(rel, text)
+            out.extend(found)
+            if preview:
+                previews.append(rel)
         suffix = path.suffix.lower()
         if suffix == ".html":
             out.extend(check_html(rel, text, require_commit=(rel == "index.html")))
@@ -455,6 +519,16 @@ def scan(web_dir: Path) -> tuple[int, list[Violation]]:
             out.extend(check_css(rel, text))
         elif rel == CONFIG_NAME:
             out.extend(check_config(rel, text))
+    # The readiness gate reads index.html without running scripts, so the label
+    # must be in the page itself whenever a design preview run ships.
+    index = web_dir / "index.html"
+    if previews and index.is_file():
+        page = index.read_text(encoding="utf-8")
+        for screen, marker in PAGE_LABEL_MARKERS:
+            if marker not in page:
+                out.append(Violation("run-label-page", "index.html", 1,
+                                     f"{', '.join(previews)} is a design preview, so the {screen} must state "
+                                     f"the label in place: {marker!r}"))
     return len(files), out
 
 

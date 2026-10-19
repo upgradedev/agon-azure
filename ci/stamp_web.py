@@ -13,7 +13,13 @@ Rules, each a hard failure:
   stamping no file under the web directory may still hold it;
 * with --data-dir: manifest.json must exist, list exactly the --seeds given,
   and every file it lists must exist with the stated sha256 and event count (the web data contract in agon.webdata);
+  every world file it lists must exist with the stated sha256 and pass agon.webdata.validate_world;
   every file under the data directory other than manifest.json must be listed.
+
+* when the web directory holds runs/: every run listed in runs/index.json must
+  pass agon.webrun.validate_run and its sealed bundle must recompute to the
+  bundle hash the run states (agon.webrun.verify_run_dir); a file in runs/
+  that the index does not list fails.
 
 Stdlib only. Writes are binary, so line endings never change.
 
@@ -76,10 +82,11 @@ def verify_data(data_dir: Path, seeds: list[int]) -> int:
 
     The contract lives in agon.webdata (validate_manifest): the browser refuses any
     other shape and falls back to the fixture, so the deploy must refuse it first.
-    Every listed file is re-hashed and its event lines counted; unlisted files fail.
-    Returns the number of files verified.
+    Every listed file is re-hashed and its event lines counted, every listed
+    world file is re-hashed and shape-checked; unlisted files fail.
+    Returns the number of files verified (event files plus world files).
     """
-    from agon.webdata import validate_manifest  # the one definition of the contract
+    from agon.webdata import validate_manifest, validate_world  # the one definition of the contract
 
     manifest_path = data_dir / "manifest.json"
     if not manifest_path.is_file():
@@ -109,6 +116,24 @@ def verify_data(data_dir: Path, seeds: list[int]) -> int:
         if lines != int(entry["events"]):
             raise StampError(f"{rel}: {lines} event lines, manifest says {entry['events']}")
         listed.add(rel)
+        world_rel = str(entry["world"])
+        world_path = data_dir / world_rel
+        if not world_path.is_file():
+            raise StampError(f"manifest lists {world_rel}, which does not exist")
+        world_data = world_path.read_bytes()
+        world_digest = hashlib.sha256(world_data).hexdigest()
+        if world_digest != entry["world_sha256"]:
+            raise StampError(f"{world_rel}: sha256 {world_digest}, manifest says {entry['world_sha256']}")
+        try:
+            world = json.loads(world_data.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise StampError(f"{world_rel} is not UTF-8 JSON: {exc}") from exc
+        world_problems = validate_world(world)
+        if world_problems:
+            raise StampError(f"{world_rel} breaks the world contract: " + "; ".join(world_problems))
+        if world["seed"] != entry["seed"]:
+            raise StampError(f"{world_rel} is for seed {world['seed']}, manifest entry is seed {entry['seed']}")
+        listed.add(world_rel)
     present = {
         p.relative_to(data_dir).as_posix()
         for p in data_dir.rglob("*")
@@ -118,6 +143,19 @@ def verify_data(data_dir: Path, seeds: list[int]) -> int:
     if stray:
         raise StampError(f"files not listed in the manifest: {', '.join(stray)}")
     return len(listed)
+
+
+def verify_runs(web_dir: Path) -> list[str]:
+    """Verify web_dir/runs when it exists; returns the run ids verified (none without runs/)."""
+    runs_dir = web_dir / "runs"
+    if not runs_dir.is_dir():
+        return []
+    from agon.webrun import verify_run_dir  # the one definition of the run format
+
+    try:
+        return verify_run_dir(runs_dir)
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise StampError(f"runs: {exc}") from exc
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -133,6 +171,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.data_dir is not None:
             count = verify_data(args.data_dir, parse_seeds(args.seeds))
             print(f"verified {count} data files against {args.data_dir.as_posix()}/manifest.json")
+        runs = verify_runs(args.web_dir)
+        print(f"verified {len(runs)} runs under {args.web_dir.as_posix()}/runs" + (f": {', '.join(runs)}" if runs else ""))
     except (StampError, KeyError, TypeError, ValueError) as exc:
         print(f"stamp_web: FAIL: {exc}")
         return 1

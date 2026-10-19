@@ -3,14 +3,24 @@
     "__AGON_SWA_HOSTNAME__ stands for the Static Web Apps default hostname. A target URL that still holds it FAILS without any fetch.",
     "The deploy workflow replaces it with the staticSiteDefaultHostname output of infra/main.bicep (--set-host) and adds the deployed commit sha to the demo markers (--add-marker demo=<sha>).",
     "demo markers: 'Agon' (the brand in the top bar), 'Match Centre' (the S1 landing view and nav item), plus the full 40-character commit sha stamped into data-commit at deploy.",
-    "demo-data markers: the web data contract written by agon.webdata (the generator key and one file entry per published seed), so the recorded synthetic data the browser accepts must have shipped with the page.",
+    "demo markers also hold 'Newsroom Wall' (the S2 view) and the exact design preview label anchored to each screen that shows it (id=wall-label, id=approve-label, id=recap-label): while the only run is the hand-written sample, each of those screens must say so in the same sentence, and the gate fails if any one copy is missing, even while another copy survives. ci/web_check.py PAGE_LABEL_MARKERS holds the same three strings; tests/test_web_runs.py keeps them equal.",
+    "demo-data markers: the web data contract written by agon.webdata (the generator key, one file entry per published seed and its world file of fictional names), so the recorded synthetic data the browser accepts must have shipped with the page.",
+    "demo-run: the one hand-written sample run (web/runs/sample-s1.json). Its markers are the run id, the provenance and the exact design preview label, so a run file that drops the label, or a deploy without runs, fails live. tests/test_readiness_config.py holds the run id to web/runs/index.json.",
+    "demo-bundle: the sealed manifest of that run (agon.governance.seal, schema agon.bundle/1), which Verify hashes in the browser; a missing bundle folder or an HTML fallback page in its place fails live.",
     "The published seeds are pinned in two places: PUBLISHED_SEEDS in .github/workflows/deploy.yml and the demo-data markers below. Change both together."
   ],
   "targets": [
     {
       "name": "demo",
       "url": "https://__AGON_SWA_HOSTNAME__/",
-      "markers": ["Agon", "Match Centre"],
+      "markers": [
+        "Agon",
+        "Match Centre",
+        "Newsroom Wall",
+        "id=\"wall-label\">Design preview: sample run written by hand, not produced by the pipeline.",
+        "id=\"approve-label\">Design preview: sample run written by hand, not produced by the pipeline.",
+        "id=\"recap-label\">Not approved. Design preview: sample run written by hand, not produced by the pipeline."
+      ],
       "scan_assets": true
     },
     {
@@ -20,14 +30,39 @@
         "\"generator\":\"synth-v",
         "\"name\":\"1.ndjson\"",
         "\"name\":\"2.ndjson\"",
-        "\"name\":\"3.ndjson\""
+        "\"name\":\"3.ndjson\"",
+        "\"world\":\"1.world.json\"",
+        "\"world\":\"2.world.json\"",
+        "\"world\":\"3.world.json\""
+      ],
+      "scan_assets": false
+    },
+    {
+      "name": "demo-run",
+      "url": "https://__AGON_SWA_HOSTNAME__/runs/sample-s1.json",
+      "markers": [
+        "\"run_id\":\"sample-s1\"",
+        "\"provenance\":\"design_preview\"",
+        "Design preview: sample run written by hand, not produced by the pipeline."
+      ],
+      "scan_assets": false
+    },
+    {
+      "name": "demo-bundle",
+      "url": "https://__AGON_SWA_HOSTNAME__/runs/sample-s1/manifest.json",
+      "markers": [
+        "\"schema\":\"agon.bundle/1\"",
+        "\"edition-en.json\":"
       ],
       "scan_assets": false
     },
     {
       "name": "repo-readme",
       "url": "https://raw.githubusercontent.com/upgradedev/agon-azure/main/README.md",
-      "markers": ["# Agon", "synthetic"],
+      "markers": [
+        "# Agon",
+        "synthetic"
+      ],
       "scan_assets": false
     }
   ],

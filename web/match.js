@@ -6,6 +6,12 @@
   match's event log on the SVG pitch at 1x, 8x or 60x. Every coordinate goes
   through AgonCore.toFixedFrame, so the home club always attacks to the right.
 
+  Names: each seed ships its world file (<seed>.world.json) with the
+  fictional club and player names. Every sentence on screen uses those names;
+  the raw ids (C1, C1P09, event ids) appear only in the "Ids in the event
+  log" details row. If the world file cannot be used, a notice says so and
+  the sentences say "Home club" and "a player" instead of showing ids.
+
   Accessibility: every control is a native button, radio or range input. The
   score sits in a polite live region that changes only when the score does,
   never on the ticking clock. Under prefers-reduced-motion the ball jumps from
@@ -45,6 +51,8 @@
     timeline: null,
     home: "",
     away: "",
+    world: null,
+    names: null,
     score: null,
     moments: [],
     t: 0,
@@ -160,7 +168,9 @@
 
   function sourceLabel() {
     var r = state.resolved;
-    return "Synthetic match, generator " + r.manifest.generator + ", seed " + state.entry.seed + ". The newsroom is not connected yet.";
+    var league = state.names && state.names.league ? state.names.league + ", " : "";
+    return "Synthetic match, " + league + "generator " + r.manifest.generator + ", seed " + state.entry.seed +
+      ". Fictional clubs and players. The newsroom is not connected to this replay.";
   }
 
   /* Nothing from the previous seed may stay on screen while the next one
@@ -171,8 +181,13 @@
     state.moments = [];
     state.index = -2;
     state.scoreKey = "";
+    state.world = null;
+    state.names = null;
     setText(el.homeName, "Home");
     setText(el.awayName, "Away");
+    setKit(el.homeKit, null);
+    setKit(el.awayKit, null);
+    setText(el.eventIds, "No event is shown yet.");
     setText(el.homeGoals, "0");
     setText(el.awayGoals, "0");
     setText(el.clockMinute, "1'");
@@ -200,6 +215,7 @@
     setAvailable(false, "Play and the match time slider are unavailable while seed " + entry.seed + " loads.");
     setText(el.label, "Loading seed " + entry.seed + ".");
     var url = core.fileUrl(state.resolved.base, entry.name);
+    var worldLoad = loadWorld(entry);
     window
       .fetch(url, { cache: "no-store" })
       .then(function (response) {
@@ -211,15 +227,30 @@
         });
       })
       .then(function (text) {
+        return worldLoad.then(function (worldResult) {
+          return { text: text, world: worldResult };
+        });
+      })
+      .then(function (loaded) {
         if (token !== state.loadToken) {
           return;
         }
-        var events = core.parseNdjson(text);
-        prepare(events);
+        var events = core.parseNdjson(loaded.text);
+        prepare(events, loaded.world.world);
         setText(el.label, sourceLabel());
         var notes = [];
         if (state.resolved.notice) {
           notes.push(state.resolved.notice);
+        }
+        if (loaded.world.problem) {
+          notes.push("The names file for this seed could not be used (" + loaded.world.problem +
+            "), so clubs and players are called Home club, Away club and a player. Their ids are in the details row under the pitch.");
+        } else {
+          var unknown = core.unknownIds(events, loaded.world.world);
+          if (unknown.length) {
+            notes.push("The names file does not name " + unknown.length + " id" + (unknown.length === 1 ? "" : "s") +
+              " used in the event file: " + unknown.slice(0, 5).join(", ") + ".");
+          }
         }
         if (state.resolved.source === "fixture") {
           notes.push("Fixture data: this is the small file committed for development, not the deployed match files. It ends at " +
@@ -242,18 +273,67 @@
       });
   }
 
-  function prepare(events) {
+  /* Resolves to {world, problem}; never rejects, so a names problem can
+     never stop the replay. */
+  function loadWorld(entry) {
+    var url;
+    try {
+      url = core.worldUrl(state.resolved.base, entry.world);
+    } catch (error) {
+      return Promise.resolve({ world: null, problem: error.message });
+    }
+    return window
+      .fetch(url, { cache: "no-store" })
+      .then(function (response) {
+        return response.text().then(function (text) {
+          if (!response.ok || core.looksLikeHtml(text)) {
+            throw new Error(url + " answered " + response.status);
+          }
+          var world = core.parseWorldText(text);
+          if (world.seed !== entry.seed) {
+            throw new Error(url + " is for seed " + world.seed + ", not seed " + entry.seed);
+          }
+          return { world: world, problem: "" };
+        });
+      })
+      .catch(function (error) {
+        return { world: null, problem: error.message };
+      });
+  }
+
+  function setKit(node, club) {
+    if (!node) {
+      return;
+    }
+    if (!club) {
+      node.setAttribute("visibility", "hidden");
+      return;
+    }
+    node.setAttribute("fill", club.kit_primary_hex);
+    node.setAttribute("stroke", club.kit_secondary_hex);
+    node.setAttribute("visibility", "visible");
+  }
+
+  function clubName(id) {
+    return state.names ? state.names.club(id) : id;
+  }
+
+  function prepare(events, world) {
     state.events = events;
     state.home = core.homeTeam(events);
     state.away = core.awayTeam(events, state.home);
+    state.world = world || null;
+    state.names = core.nameIndex(state.world, state.home);
     state.timeline = core.buildTimeline(events);
     state.score = core.runningScore(events, state.home);
-    state.moments = core.keyMoments(events, state.timeline);
+    state.moments = core.keyMoments(events, state.timeline, state.names);
     state.index = -2;
     state.scoreKey = "";
-    setText(el.homeName, state.home);
-    setText(el.awayName, state.away || "Away");
-    setText(el.direction, "Home club " + state.home + " attacks to the right in both halves.");
+    setText(el.homeName, clubName(state.home));
+    setText(el.awayName, state.away ? clubName(state.away) : "Away");
+    setKit(el.homeKit, state.names.clubRecord(state.home));
+    setKit(el.awayKit, state.names.clubRecord(state.away));
+    setText(el.direction, clubName(state.home) + " (home) attack to the right in both halves.");
     el.scrubber.max = String(Math.max(1, state.timeline.total - 1));
     renderMoments();
     renderStrip();
@@ -330,7 +410,8 @@
   /* ---------------------------------------------------------- drawing */
 
   function caption(event) {
-    var parts = [core.eventMinute(event), event.team + (event.player ? ", " + event.player : "") + ":", TYPE_WORDS[event.type] || words(event.type)];
+    var who = clubName(event.team) + (event.player ? ", " + state.names.player(event.player) : "");
+    var parts = [core.eventMinute(event), who + ":", TYPE_WORDS[event.type] || words(event.type)];
     var details = [];
     if (event.qualifier) {
       details.push(words(event.qualifier));
@@ -345,10 +426,11 @@
   }
 
   function side(team, part) {
+    var name = clubName(team);
     if (!part.total) {
-      return team + " none on the ball yet";
+      return name + " none on the ball yet";
     }
-    return team + " " + core.percent(part) + " (" + part.under + " of " + part.total + ")";
+    return name + " " + core.percent(part) + " (" + part.under + " of " + part.total + ")";
   }
 
   function drawBall() {
@@ -366,6 +448,7 @@
       el.band.setAttribute("visibility", "hidden");
       el.path.setAttribute("visibility", "hidden");
       setText(el.caption, "Kick-off has not happened yet.");
+      setText(el.eventIds, "No event is shown yet.");
       return;
     }
     var event = state.events[index];
@@ -389,9 +472,10 @@
       el.band.setAttribute("visibility", "hidden");
     }
     setText(el.caption, caption(event));
+    setText(el.eventIds, core.eventIds(event) + ".");
     var w = core.pressureWindow(state.events, state.timeline, index, state.home);
     setText(el.pressure, "Passes, carries and shots made under pressure, last 5 minutes of play: " +
-      side(state.home, w.home) + "; " + side(state.away || "away", w.away) + ".");
+      side(state.home, w.home) + "; " + side(state.away, w.away) + ".");
   }
 
   function drawScore(index) {
@@ -404,7 +488,7 @@
     }
     var first = state.scoreKey === "" || state.scoreKey.split(":")[0] !== String(state.entry.seed);
     state.scoreKey = key;
-    var line = "Score: " + state.home + " " + s.home + ", " + state.away + " " + s.away + ".";
+    var line = "Score: " + clubName(state.home) + " " + s.home + ", " + clubName(state.away) + " " + s.away + ".";
     /* The first render of a match is not news; later changes are announced. */
     setText(el.scoreLive, first ? "" : line);
   }
@@ -526,7 +610,8 @@
       clockPeriod: "clock-period", ball: "ball", ring: "ball-ring", band: "pressure-band", bandFill: "pressure-fill",
       bandHatch: "pressure-hatch-rect", path: "event-path", caption: "event-caption", pressure: "pressure-readout",
       direction: "pitch-direction", moments: "moments", momentsCount: "moments-count", momentsEmpty: "moments-empty",
-      strip: "moment-strip", seedGroup: "seed-group", seedHint: "seed-hint"
+      strip: "moment-strip", seedGroup: "seed-group", seedHint: "seed-hint", eventIds: "event-ids",
+      homeKit: "home-kit", awayKit: "away-kit"
     };
     for (var key in ids) {
       if (Object.prototype.hasOwnProperty.call(ids, key)) {

@@ -4,7 +4,9 @@
     "exclude": [
       "/*.{css,js,svg,png,ico,json,ndjson,xml,txt,webmanifest,mp3,ogg,vtt}",
       "/data/*.{json,ndjson}",
-      "/data-fixture/*.{json,ndjson,txt}"
+      "/data-fixture/*.{json,ndjson,txt}",
+      "/runs/*.{json,txt}",
+      "/runs/*/*.json"
     ]
   },
   "globalHeaders": {

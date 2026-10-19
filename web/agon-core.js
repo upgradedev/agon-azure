@@ -9,8 +9,11 @@
 
   Data contract (web/data-fixture/README.txt):
     manifest.json = {"generator": str,
-                     "files": [{"name": str, "sha256": str, "seed": int, "events": int}]}
-    <seed>.ndjson = one canonical event per line.
+                     "files": [{"name": str, "sha256": str, "seed": int, "events": int,
+                                "world": str, "world_sha256": str}]}
+    <seed>.ndjson     = one canonical event per line.
+    <seed>.world.json = the fictional league, clubs and players the events
+                        refer to by id (agon.webdata.validate_world).
 */
 (function (root, factory) {
   "use strict";
@@ -30,9 +33,18 @@
   var FIXTURE_BASE = "data-fixture/";
   var MANIFEST_NAME = "manifest.json";
   var MANIFEST_KEYS = ["files", "generator"];
-  var FILE_KEYS = ["events", "name", "seed", "sha256"];
+  var FILE_KEYS = ["events", "name", "seed", "sha256", "world", "world_sha256"];
   var FILE_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]*\.ndjson$/;
+  var WORLD_NAME = /^[A-Za-z0-9][A-Za-z0-9_-]*\.world\.json$/;
   var SHA256_HEX = /^[0-9a-f]{64}$/;
+  var WORLD_KEYS = ["away", "clubs", "generator", "home", "league", "match_id", "seed"];
+  var CLUB_KEYS = ["club_id", "kit_primary", "kit_primary_hex", "kit_secondary", "kit_secondary_hex", "name", "players", "short"];
+  var PLAYER_KEYS = ["name", "player_id", "position", "shirt"];
+  var CLUB_ID = /^C[0-9]{1,2}$/;
+  var PLAYER_ID = /^C[0-9]{1,2}P[0-9]{2}$/;
+  var SHORT_CODE = /^[A-Z]{3}$/;
+  var HEX_COLOUR = /^#[0-9a-f]{6}$/;
+  var POSITIONS = { GK: true, DF: true, MF: true, FW: true };
   var ON_BALL = { pass: true, carry: true, shot: true };
   var PRESSURE_WINDOW_SECONDS = 300;
 
@@ -86,7 +98,7 @@
         continue;
       }
       if (!sameKeys(entry, FILE_KEYS)) {
-        problems.push(where + " keys must be exactly events, name, seed and sha256");
+        problems.push(where + " keys must be exactly events, name, seed, sha256, world and world_sha256");
         continue;
       }
       if (!isSafeFileName(entry.name)) {
@@ -116,8 +128,199 @@
       if (!isInt(entry.events) || entry.events < 1) {
         problems.push(where + ".events must be a positive integer");
       }
+      if (!isSafeWorldName(entry.world)) {
+        problems.push(where + ".world must be a bare <seed>.world.json file name");
+      } else if (isInt(entry.seed) && entry.world !== entry.seed + ".world.json") {
+        problems.push(where + ".world " + entry.world + " does not match seed " + entry.seed + ", expected " + entry.seed + ".world.json");
+      }
+      if (typeof entry.world_sha256 !== "string" || !SHA256_HEX.test(entry.world_sha256)) {
+        problems.push(where + ".world_sha256 must be 64 lowercase hex characters");
+      }
     }
     return problems;
+  }
+
+  function nonEmptyString(value) {
+    return typeof value === "string" && value.replace(/\s+/g, "") !== "";
+  }
+
+  /* Same rules as agon.webdata.validate_world; tests/js/world_cases.json holds
+     both sides to one case list. */
+  function validateWorld(world) {
+    if (!isObject(world)) {
+      return ["world must be a JSON object"];
+    }
+    if (!sameKeys(world, WORLD_KEYS)) {
+      return ["world keys must be exactly " + WORLD_KEYS.join(", ")];
+    }
+    var problems = [];
+    ["generator", "match_id", "league"].forEach(function (key) {
+      if (!nonEmptyString(world[key])) {
+        problems.push("world." + key + " must be a non-empty string");
+      }
+    });
+    if (!isInt(world.seed) || world.seed < 0) {
+      problems.push("world.seed must be a non-negative integer");
+    }
+    var clubs = world.clubs;
+    if (!Array.isArray(clubs) || clubs.length < 2) {
+      problems.push("world.clubs must list at least two clubs");
+      return problems;
+    }
+    var clubIds = {};
+    var playerIds = {};
+    for (var i = 0; i < clubs.length; i += 1) {
+      var club = clubs[i];
+      var where = "clubs[" + i + "]";
+      if (!isObject(club) || !sameKeys(club, CLUB_KEYS)) {
+        problems.push(where + " keys must be exactly " + CLUB_KEYS.join(", "));
+        continue;
+      }
+      var cid = club.club_id;
+      if (typeof cid !== "string" || !CLUB_ID.test(cid)) {
+        problems.push(where + ".club_id must look like C1");
+        cid = "";
+      } else if (Object.prototype.hasOwnProperty.call(clubIds, cid)) {
+        problems.push(where + ".club_id " + cid + " is listed twice");
+      } else {
+        clubIds[cid] = true;
+      }
+      if (!nonEmptyString(club.name)) {
+        problems.push(where + ".name must be a non-empty string");
+      }
+      if (typeof club.short !== "string" || !SHORT_CODE.test(club.short)) {
+        problems.push(where + ".short must be three capital letters");
+      }
+      ["kit_primary", "kit_secondary"].forEach(function (key) {
+        if (typeof club[key] !== "string" || !club[key]) {
+          problems.push(where + "." + key + " must be a non-empty string");
+        }
+        if (typeof club[key + "_hex"] !== "string" || !HEX_COLOUR.test(club[key + "_hex"])) {
+          problems.push(where + "." + key + "_hex must be #rrggbb in lowercase hex");
+        }
+      });
+      var players = club.players;
+      if (!Array.isArray(players) || players.length === 0) {
+        problems.push(where + ".players must be a non-empty list");
+        continue;
+      }
+      var shirts = {};
+      for (var j = 0; j < players.length; j += 1) {
+        var player = players[j];
+        var pwhere = where + ".players[" + j + "]";
+        if (!isObject(player) || !sameKeys(player, PLAYER_KEYS)) {
+          problems.push(pwhere + " keys must be exactly " + PLAYER_KEYS.join(", "));
+          continue;
+        }
+        var pid = player.player_id;
+        if (typeof pid !== "string" || !PLAYER_ID.test(pid) || pid.indexOf(cid + "P") !== 0) {
+          problems.push(pwhere + ".player_id must start with its club id and look like C1P01");
+        } else if (Object.prototype.hasOwnProperty.call(playerIds, pid)) {
+          problems.push(pwhere + ".player_id " + pid + " is listed twice");
+        } else {
+          playerIds[pid] = true;
+        }
+        if (!nonEmptyString(player.name)) {
+          problems.push(pwhere + ".name must be a non-empty string");
+        }
+        var shirt = player.shirt;
+        if (!isInt(shirt) || shirt < 1 || shirt > 99) {
+          problems.push(pwhere + ".shirt must be an integer from 1 to 99");
+        } else if (Object.prototype.hasOwnProperty.call(shirts, String(shirt))) {
+          problems.push(pwhere + ".shirt " + shirt + " is used twice in one club");
+        } else {
+          shirts[String(shirt)] = true;
+        }
+        if (typeof player.position !== "string" || !Object.prototype.hasOwnProperty.call(POSITIONS, player.position)) {
+          problems.push(pwhere + ".position must be one of DF, FW, GK, MF");
+        }
+      }
+    }
+    ["home", "away"].forEach(function (key) {
+      if (typeof world[key] !== "string" || !Object.prototype.hasOwnProperty.call(clubIds, world[key])) {
+        problems.push("world." + key + " must be one of the listed club ids");
+      }
+    });
+    if (world.home === world.away) {
+      problems.push("world.home and world.away must differ");
+    }
+    return problems;
+  }
+
+  /* Names for the ids in the event log. With no world (it failed to load)
+     every lookup answers a plain role word, never an id, so an id never
+     reaches a sentence on screen; ids are shown only in the details rows. */
+  function nameIndex(world, homeId) {
+    var clubs = {};
+    var players = {};
+    var league = "";
+    if (world) {
+      league = world.league;
+      for (var i = 0; i < world.clubs.length; i += 1) {
+        var record = world.clubs[i];
+        clubs[record.club_id] = record;
+        for (var j = 0; j < record.players.length; j += 1) {
+          players[record.players[j].player_id] = record.players[j];
+        }
+      }
+    }
+    function club(id) {
+      if (Object.prototype.hasOwnProperty.call(clubs, id)) {
+        return clubs[id].name;
+      }
+      return id === homeId ? "Home club" : "Away club";
+    }
+    function player(id) {
+      if (!id) {
+        return "";
+      }
+      if (Object.prototype.hasOwnProperty.call(players, id)) {
+        return players[id].name + " (" + players[id].shirt + ")";
+      }
+      return "a player";
+    }
+    function clubRecord(id) {
+      return Object.prototype.hasOwnProperty.call(clubs, id) ? clubs[id] : null;
+    }
+    return { known: !!world, league: league, club: club, player: player, clubRecord: clubRecord };
+  }
+
+  /* Ids that appear in the events but not in the world. */
+  function unknownIds(events, world) {
+    var index = nameIndex(world, "");
+    var missing = {};
+    for (var i = 0; i < events.length; i += 1) {
+      var e = events[i];
+      if (!index.clubRecord(e.team)) {
+        missing[e.team] = true;
+      }
+      [e.player, e.related_player].forEach(function (pid) {
+        if (pid && index.player(pid) === "a player") {
+          missing[pid] = true;
+        }
+      });
+    }
+    return Object.keys(missing).sort();
+  }
+
+  function isSafeWorldName(name) {
+    return typeof name === "string" && WORLD_NAME.test(name);
+  }
+
+  function worldUrl(base, name) {
+    if (!isSafeWorldName(name)) {
+      throw new Error("refusing an unsafe world file name in the manifest");
+    }
+    return base + name;
+  }
+
+  function parseWorldText(text) {
+    var world = JSON.parse(text);
+    var problems = validateWorld(world);
+    if (problems.length) {
+      throw new Error(problems.join("; "));
+    }
+    return world;
   }
 
   /* A bare file name only: the browser builds a same-origin URL from it. */
@@ -373,8 +576,10 @@
   var SHOT_WORDS = { goal: "Goal", saved: "Shot saved", off_target: "Shot off target", blocked: "Shot blocked" };
   var CARD_WORDS = { yellow: "Yellow card", second_yellow: "Second yellow card", red: "Red card" };
 
-  /* Goals, shots, cards and substitutions, in match order. */
-  function keyMoments(events, timeline) {
+  /* Goals, shots, cards and substitutions, in match order. `names` is a
+     nameIndex; the ids stay on each moment for the details row. */
+  function keyMoments(events, timeline, names) {
+    var n = names || nameIndex(null, homeTeam(events));
     var out = [];
     for (var i = 0; i < events.length; i += 1) {
       var e = events[i];
@@ -382,19 +587,31 @@
       var text = null;
       if (e.type === "shot") {
         kind = isGoal(e) ? "goal" : "shot";
-        text = (SHOT_WORDS[e.outcome] || "Shot") + ", " + e.team + " " + (e.player || "");
+        text = (SHOT_WORDS[e.outcome] || "Shot") + ", " + n.club(e.team) + (e.player ? ", " + n.player(e.player) : "");
       } else if (e.type === "card") {
         kind = "card";
-        text = (CARD_WORDS[e.outcome] || "Card") + ", " + e.team + " " + (e.player || "");
+        text = (CARD_WORDS[e.outcome] || "Card") + ", " + n.club(e.team) + (e.player ? ", " + n.player(e.player) : "");
       } else if (e.type === "sub") {
         kind = "sub";
-        text = "Substitution, " + e.team + ": " + (e.related_player || "") + " on for " + (e.player || "");
+        text = "Substitution, " + n.club(e.team) + ": " + n.player(e.related_player) + " on for " + n.player(e.player);
       }
       if (kind) {
-        out.push({ kind: kind, index: i, time: timeline.times[i], minute: eventMinute(e), text: text.replace(/\s+$/, "") });
+        out.push({ kind: kind, index: i, time: timeline.times[i], minute: eventMinute(e), text: text, ids: eventIds(e) });
       }
     }
     return out;
+  }
+
+  /* The raw ids of one event, for the details row under a caption. */
+  function eventIds(e) {
+    var parts = ["event " + (e.event_id || "seq " + e.seq), "team " + e.team];
+    if (e.player) {
+      parts.push("player " + e.player);
+    }
+    if (e.related_player) {
+      parts.push("related player " + e.related_player);
+    }
+    return parts.join(", ");
   }
 
   /* Share of on-ball actions (pass, carry, shot) made under pressure, per
@@ -461,8 +678,15 @@
     FIXTURE_BASE: FIXTURE_BASE,
     MANIFEST_NAME: MANIFEST_NAME,
     validateManifest: validateManifest,
+    validateWorld: validateWorld,
+    nameIndex: nameIndex,
+    unknownIds: unknownIds,
     isSafeFileName: isSafeFileName,
+    isSafeWorldName: isSafeWorldName,
     fileUrl: fileUrl,
+    worldUrl: worldUrl,
+    parseWorldText: parseWorldText,
+    eventIds: eventIds,
     looksLikeHtml: looksLikeHtml,
     resolveManifest: resolveManifest,
     parseNdjson: parseNdjson,
