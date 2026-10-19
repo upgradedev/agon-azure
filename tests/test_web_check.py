@@ -178,12 +178,11 @@ def test_no_dash_characters_in_shipped_or_check_files():
 
 # The pinned list, repeated here on purpose: editing web_check.VENDOR_SINKS alone
 # fails this test, so a widened allowance cannot slip through in one file.
-PINNED_VENDOR_SINKS = {".innerHTML": 3, 'setAttribute("oninput"': 1}
+PINNED_VENDOR_SINKS = {".innerHTML": 3}
 
 
-def _vendor_text(inner: int = 3, oninput: int = 1, extra: str = "") -> str:
-    parts = ["function a(e,t){e.innerHTML=t}"] * inner + ['b.setAttribute("oninput","return;")'] * oninput
-    return ";".join(parts) + ";" + extra + "\n"
+def _vendor_text(inner: int = 3, extra: str = "") -> str:
+    return ";".join(["function a(e,t){e.innerHTML=t}"] * inner) + ";" + extra + "\n"
 
 
 def _with_assets(tmp_path: Path, files: dict[str, str]) -> Path:
@@ -203,14 +202,15 @@ def test_vendor_chunk_with_exactly_the_pinned_sinks_passes(tmp_path):
     assert _rules(web) == set()
 
 
-@pytest.mark.parametrize(("inner", "oninput"), [(4, 1), (2, 1), (3, 0), (3, 2)])
-def test_vendor_chunk_with_one_sink_more_or_less_fails(tmp_path, inner, oninput):
-    web = _with_assets(tmp_path, {"vendor-Ab12.js": _vendor_text(inner, oninput)})
+@pytest.mark.parametrize("inner", [4, 2, 0])
+def test_vendor_chunk_with_one_sink_more_or_less_fails(tmp_path, inner):
+    web = _with_assets(tmp_path, {"vendor-Ab12.js": _vendor_text(inner)})
     assert "vendor-sink" in _rules(web)
 
 
 @pytest.mark.parametrize("extra", ['document.write("x")', "eval(s)", "new Function(s)", 'e.setAttribute("onclick","go()")',
-                                   "e.outerHTML=t", 'setTimeout("go()",1)', "e.insertAdjacentHTML(p,t)"])
+                                   'b.setAttribute("oninput","return;")', "e.outerHTML=t", 'setTimeout("go()",1)',
+                                   "e.insertAdjacentHTML(p,t)"])
 def test_vendor_chunk_with_any_other_sink_fails(tmp_path, extra):
     web = _with_assets(tmp_path, {"vendor-Ab12.js": _vendor_text(extra=extra)})
     assert "unsafe-js" in _rules(web)

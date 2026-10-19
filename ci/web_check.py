@@ -83,7 +83,6 @@ UNSAFE_JS = (
 VENDOR_CHUNK = re.compile(r"^assets/vendor-[A-Za-z0-9_-]+\.js$")
 VENDOR_SINKS: tuple[tuple[str, int, str], ...] = (
     (".innerHTML", 3, "react-dom: dangerouslySetInnerHTML (two code paths) and a <script> element made through a div; the console uses neither"),
-    ('setAttribute("oninput"', 1, "react-dom: a feature test for the input event, run only when 'oninput' in document is false, never in a current browser"),
 )
 
 # Only the WCAG 2.2 AA thresholds are accepted, so a row cannot pass by
