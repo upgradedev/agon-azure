@@ -172,3 +172,57 @@ def test_no_dash_characters_in_shipped_or_check_files():
     for path in files:
         text = path.read_text(encoding="utf-8")
         assert EM not in text and EN not in text, path
+
+
+# ---------------------------------------------------------------- vendor chunk of the React console
+
+# The pinned list, repeated here on purpose: editing web_check.VENDOR_SINKS alone
+# fails this test, so a widened allowance cannot slip through in one file.
+PINNED_VENDOR_SINKS = {".innerHTML": 3, 'setAttribute("oninput"': 1}
+
+
+def _vendor_text(inner: int = 3, oninput: int = 1, extra: str = "") -> str:
+    parts = ["function a(e,t){e.innerHTML=t}"] * inner + ['b.setAttribute("oninput","return;")'] * oninput
+    return ";".join(parts) + ";" + extra + "\n"
+
+
+def _with_assets(tmp_path: Path, files: dict[str, str]) -> Path:
+    web = _copy_web(tmp_path)
+    (web / "assets").mkdir()
+    for name, text in files.items():
+        (web / "assets" / name).write_text(text, encoding="utf-8")
+    return web
+
+
+def test_vendor_allowance_is_pinned_in_two_places():
+    assert {needle: count for needle, count, _ in web_check.VENDOR_SINKS} == PINNED_VENDOR_SINKS
+
+
+def test_vendor_chunk_with_exactly_the_pinned_sinks_passes(tmp_path):
+    web = _with_assets(tmp_path, {"vendor-Ab12_c.js": _vendor_text(), "index-Zz9.js": "export const x=1;\n"})
+    assert _rules(web) == set()
+
+
+@pytest.mark.parametrize(("inner", "oninput"), [(4, 1), (2, 1), (3, 0), (3, 2)])
+def test_vendor_chunk_with_one_sink_more_or_less_fails(tmp_path, inner, oninput):
+    web = _with_assets(tmp_path, {"vendor-Ab12.js": _vendor_text(inner, oninput)})
+    assert "vendor-sink" in _rules(web)
+
+
+@pytest.mark.parametrize("extra", ['document.write("x")', "eval(s)", "new Function(s)", 'e.setAttribute("onclick","go()")',
+                                   "e.outerHTML=t", 'setTimeout("go()",1)', "e.insertAdjacentHTML(p,t)"])
+def test_vendor_chunk_with_any_other_sink_fails(tmp_path, extra):
+    web = _with_assets(tmp_path, {"vendor-Ab12.js": _vendor_text(extra=extra)})
+    assert "unsafe-js" in _rules(web)
+
+
+@pytest.mark.parametrize("name", ["index-Ab12.js", "vendor.js", "chunk-vendor-Ab12.js"])
+def test_the_allowance_never_reaches_a_file_that_is_not_the_vendor_chunk(tmp_path, name):
+    web = _with_assets(tmp_path, {name: _vendor_text()})
+    assert "unsafe-js" in _rules(web)
+
+
+def test_the_allowance_needs_the_assets_folder(tmp_path):
+    web = _copy_web(tmp_path)
+    (web / "vendor-Ab12.js").write_text(_vendor_text(), encoding="utf-8")
+    assert "unsafe-js" in _rules(web)
