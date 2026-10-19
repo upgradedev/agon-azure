@@ -19,6 +19,9 @@ SRC = REPO / "src"
 SEED = 1  # a published seed: 1-1, two goals, one booking
 OFFICER = "officer@media.example"
 VISITOR = "console-visitor:session-1"
+# Pinned by literal, never derived from the lock: a refit of agon.interpret changes this together
+# with MODEL_SHA256 in tests/test_interpret.py, and every sealed bundle's deployment_ids with it.
+INTERPRET_SOURCE = "agon.interpret/7ab5e12ab86e"
 AF_REQUIRED = os.environ.get("AGON_REQUIRE_AF") == "1"
 
 

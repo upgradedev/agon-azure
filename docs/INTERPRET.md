@@ -139,6 +139,26 @@ realised and expected swing.
 - distance milestones cannot be derived from events, because most running happens off the ball.
   The output returns `null` with that reason rather than a number.
 
+## In the fleet
+
+The W-fulltime `interpret` executor calls this package through `AgonInterpret`
+(`src/agon/fleet/interpret_port.py`). Every deps builder uses it: the offline fakes and the Azure
+worker alike. Its output is a digest that the Draft carries to the Analyst and the Desk Editor:
+
+- `candidates`: `candidate_moments`, most important first. Each has a `kind` from the Fact Gate's
+  claim vocabulary (goal, red_card, penalty, shot), the score before and after from
+  `agon.governance.recompute`, and `swing`: the larger of the realised and the expected change in
+  the acting club's win probability, in ppm, with both parts and the probabilities before and after;
+- `metrics`: xG and xT totals, PPDA, control vs chaos per window (index and band), pressure regimes
+  with their changes, and tempo bands;
+- `units`: the unit of every field above.
+
+The momentum and win-probability series and the speed proxy stay out of the digest, because the
+Draft travels in every checkpointed message. `source` is `agon.interpret/` plus the first 12 hex
+digits of the model sha256, and the seal records it as `deployment_ids.interpret`, so a bundle names
+the model behind its candidates. A bundle that names `fleet-local-standin/1` came from the earlier
+stand-in, whose swing was a score-state measure and not a win probability.
+
 ## M6: interpret win probability against final results
 
 ```

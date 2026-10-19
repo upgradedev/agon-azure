@@ -1,4 +1,7 @@
-"""File stores, the run ledger, the interpret stand-in and the deterministic templates."""
+"""File stores, the run ledger, the match source and the deterministic templates.
+
+The interpret port has its own tests in tests/fleet/test_fleet_interpret.py.
+"""
 
 from __future__ import annotations
 
@@ -12,7 +15,6 @@ from fleet_support import OFFICER
 from agon.agents.fakes import FakeModel
 from agon.fleet import stores, templates
 from agon.fleet.contracts import Draft, PublishRequest
-from agon.fleet.interpret_port import STANDIN_SOURCE, LocalInterpret
 from agon.fleet.sources import MatchSourceError, SynthMatchSource, load_facts
 from agon.governance import verifier
 from agon.governance.claims import Sentence
@@ -144,7 +146,7 @@ def test_run_ledger_note_records_facts_without_moving_the_status() -> None:
         ledger.note("missing", cards_posted=[])
 
 
-# ----------------------------------------------------------------- sources and interpret
+# ----------------------------------------------------------------- sources
 
 
 def test_load_facts_refuses_a_log_that_changed() -> None:
@@ -157,18 +159,6 @@ def test_load_facts_refuses_a_log_that_changed() -> None:
     with pytest.raises(MatchSourceError):
         source.load({"source": "cosmos", "seed": 1, "match_index": 0})
     assert record.meta["generator"] == GENERATOR_VERSION
-
-
-@pytest.mark.parametrize("seed", SEEDS)
-def test_interpret_standin_ranks_moments_and_says_what_it_is(seed: int) -> None:
-    record = SynthMatchSource().load({"source": "synth", "seed": seed, "match_index": 0})
-    out = LocalInterpret().interpret(record)
-    assert out["source"] == STANDIN_SOURCE and "not a win-probability model" in out["note"]
-    assert out["final_score"] == record.meta["score"]
-    swings = [c["swing"] for c in out["candidates"]]
-    assert swings == sorted(swings, reverse=True)
-    goals = [c for c in out["candidates"] if c["kind"] == "goal"]
-    assert len(goals) == record.meta["score"]["home"] + record.meta["score"]["away"]
 
 
 # ----------------------------------------------------------------- templates

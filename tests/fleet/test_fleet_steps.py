@@ -10,7 +10,7 @@ import json
 from datetime import datetime, timezone
 
 from fleet_reference import run_to_request
-from fleet_support import OFFICER, SEED, planted_model, run, run_input
+from fleet_support import INTERPRET_SOURCE, OFFICER, SEED, planted_model, run, run_input
 
 from agon.agents.fakes import FakeModel, FakeSpeech, FakeTranslator
 from agon.fleet import steps, stores
@@ -82,7 +82,7 @@ def test_full_time_event_reaches_an_approval_request_with_a_sealed_bundle() -> N
     manifest = _manifest_ok(deps, ref.sealed)
     assert manifest["gate_verdicts"] == {"factgate": "pass", "factgate_lang": "pass", "rights": "pass"}
     assert manifest["deployment_ids"]["ports"] == "fake"
-    assert manifest["deployment_ids"]["interpret"] == "fleet-local-standin/1"
+    assert manifest["deployment_ids"]["interpret"] == INTERPRET_SOURCE
     assert sorted(d.editions) == ["easy", "el", "en", "es", "fr"]
     for edition in ("report-en.json", "report-el.json", "report-es.json", "report-fr.json", "report-easy.json", "card.json"):
         assert edition in manifest["artifacts"]
@@ -119,8 +119,8 @@ def test_card_artifact_lists_flags_and_confirm_rows() -> None:
     manifest = json.loads(sealed.manifest_json)
     card = json.loads(deps.artifacts.get(manifest["artifacts"]["card.json"]["sha256"]))
     assert card["confirm_rows"] == sealed.draft.confirm_rows
-    assert card["interpret_source"] == "fleet-local-standin/1"
-    assert "not a win-probability model" in card["interpret_note"]
+    assert card["interpret_source"] == INTERPRET_SOURCE
+    assert "change in win probability, in ppm" in card["interpret_note"]
 
 
 # ----------------------------------------------------------------- section 4 failure rules
@@ -217,6 +217,24 @@ def test_analyst_invented_event_ids_are_retried_once_then_fall_back() -> None:
     d = run(run_to_request(twice, run_input())).sealed.draft
     assert {"analyst_rejected", "analyst_fallback"} <= set(_codes(d))
     assert d.turning_points and {tp["author"] for tp in d.turning_points} == {"template"}
+    # The fallback is spec 4 row 3's "largest WP swing" selection: the top interpret candidates.
+    ranked = sorted(d.interpret["candidates"], key=lambda c: -c["swing"])
+    assert [tp["event_id"] for tp in d.turning_points] == [c["event_id"] for c in ranked[: steps.FALLBACK_TURNING_POINTS]]
+    fallback = next(f for f in d.flags if f["code"] == "analyst_fallback")
+    assert "win-probability swing" in fallback["detail"]
+
+
+def test_the_analyst_sees_the_interpret_metrics_units_and_candidates() -> None:
+    model = FakeModel()
+    d = run(run_to_request(_deps(model=model), run_input())).sealed.draft
+    payload = model.calls_for("analyst")[0]
+    assert payload["interpret_source"] == INTERPRET_SOURCE
+    assert payload["candidates"] == d.interpret["candidates"]
+    assert set(payload["metrics"]) == {"totals", "ppda", "control_vs_chaos", "pressure_regimes", "tempo"}
+    assert set(payload["metrics"]["totals"]) == {d.home_id, d.away_id}
+    assert "ppm" in payload["units"]["swing"]
+    assert "windows" not in payload, "the stand-in's score-state windows are gone"
+    assert {tp["event_id"] for tp in d.turning_points} <= {c["event_id"] for c in payload["candidates"]}
 
 
 def test_triage_code_table_overrides_the_model_label() -> None:

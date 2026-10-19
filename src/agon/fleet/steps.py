@@ -196,7 +196,8 @@ async def analyst(deps: FleetDeps, draft: Draft) -> Draft:
         "match": _header(record),
         "final_score": d.interpret.get("final_score"),
         "interpret_source": d.interpret.get("source"),
-        "windows": d.interpret.get("windows", []),
+        "units": d.interpret.get("units", {}),
+        "metrics": d.interpret.get("metrics", {}),
         "candidates": candidates,
     }
     picks: list[dict[str, str]] | None = None
@@ -222,9 +223,9 @@ async def analyst(deps: FleetDeps, draft: Draft) -> Draft:
     if picks is None:
         if problems:
             add_flag(d, "analyst_rejected", "; ".join(problems), "analyst")
-        add_flag(d, "analyst_fallback", "turning points chosen by code: largest score-state swing first", "analyst")
+        add_flag(d, "analyst_fallback", "turning points chosen by code: largest interpret win-probability swing first", "analyst")
         picks = [
-            {"event_id": c["event_id"], "why": "Chosen by code: largest score-state swing.", "theme": "game_rhythm"}
+            {"event_id": c["event_id"], "why": "Chosen by code: largest win-probability swing.", "theme": "game_rhythm"}
             for c in candidates[:FALLBACK_TURNING_POINTS]
         ]
         author = "template"
