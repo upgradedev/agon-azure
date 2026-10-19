@@ -58,6 +58,13 @@ PUBLISH_REQUESTED = "publish_requested"
 PUBLISH_ALREADY_REQUESTED = "publish_already_requested"
 CHANGES_REQUESTED = "changes_requested"
 DECISION_REFUSED = "decision_refused"
+# A redelivered `runs` message (or a restarted runner) for a run that is already past the fact
+# gate. Nothing is redone and no second nonce is issued; see `steps.ingest`.
+ALREADY_SEALED = "already_sealed"
+AWAITING_DECISION = "awaiting_approval"
+ALREADY_ENDED = "already_ended"
+# Two deliveries of one run raced past ingest; only the first to claim the approval issues a nonce.
+APPROVAL_ALREADY_REQUESTED = "approval_already_requested"
 OUTCOME_STATUSES: tuple[str, ...] = (
     REFUSED_AT_INGEST,
     REFUSED_BY_GATE,
@@ -65,6 +72,10 @@ OUTCOME_STATUSES: tuple[str, ...] = (
     PUBLISH_ALREADY_REQUESTED,
     CHANGES_REQUESTED,
     DECISION_REFUSED,
+    ALREADY_SEALED,
+    AWAITING_DECISION,
+    ALREADY_ENDED,
+    APPROVAL_ALREADY_REQUESTED,
 )
 
 

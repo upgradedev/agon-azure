@@ -25,6 +25,10 @@ from agon.agents.prompts import manifest_sha256
 from agon.agents.roles import ask
 from agon.fleet import templates
 from agon.fleet.contracts import (
+    ALREADY_ENDED,
+    ALREADY_SEALED,
+    APPROVAL_ALREADY_REQUESTED,
+    AWAITING_DECISION,
     CHANGES_REQUESTED,
     DECISION_REFUSED,
     EASY_READ,
@@ -109,7 +113,37 @@ def _header(record: MatchRecord) -> dict[str, Any]:
 # ----------------------------------------------------------------- ingest, interpret, analyst
 
 
+def _already(run: RunInput, status: str, known: dict[str, Any]) -> RunOutcome:
+    """The outcome for a run that is already past the fact gate: nothing is redone."""
+    bundle = known.get("bundle_sha256")
+    if status == stores.SEALED:
+        return RunOutcome(
+            run_id=run.run_id, status=ALREADY_SEALED, bundle_sha256=bundle, code="already_sealed",
+            detail="sealed; the approval executor resumes from its checkpoint and no second nonce is issued",
+        )
+    if status == stores.AWAITING_APPROVAL:
+        return RunOutcome(
+            run_id=run.run_id, status=AWAITING_DECISION, bundle_sha256=bundle, code="awaiting_approval",
+            detail=f"paused at checkpoint {known.get('checkpoint_id')}; the decision resumes it",
+        )
+    return RunOutcome(
+        run_id=run.run_id, status=ALREADY_ENDED, bundle_sha256=bundle, code=status.lower(),
+        detail=f"run already ended as {status}",
+    )
+
+
 async def ingest(deps: FleetDeps, run: RunInput) -> Draft | RunOutcome:
+    """Start a run, or re-enter one: the `runs` queue delivers at least once (spec 3.5).
+
+    * no ledger record: the run starts and the ledger reads DRAFT;
+    * DRAFT or CHECKED: a worker died before the seal, so the run is driven again from the event
+      log. The ledger does not move backwards and nothing about the redelivery enters the Draft,
+      so a re-entered run seals the same bundle a clean run would;
+    * SEALED or later: a RunOutcome, and no step runs again. No second nonce is ever issued.
+
+    A run id that the ledger already holds for a different match is refused.
+    """
+
     def refuse(code: str, detail: str) -> RunOutcome:
         return RunOutcome(run_id=run.run_id, status=REFUSED_AT_INGEST, bundle_sha256=None, code=code, detail=detail)
 
@@ -131,6 +165,14 @@ async def ingest(deps: FleetDeps, run: RunInput) -> Draft | RunOutcome:
         event_log_sha256=record.event_log_sha256,
         seed_sha256=record.seed_sha256,
     )
+    known = deps.ledger.record(run.run_id)
+    if known is not None:
+        if known.get("match_id") != record.match_id:
+            return refuse("run_id_reused", f"run {run.run_id} belongs to match {known.get('match_id')}, not {record.match_id}")
+        status = known.get("status")
+        if status in (stores.DRAFT, stores.CHECKED):
+            return draft
+        return _already(run, str(status), known)
     deps.ledger.advance(run.run_id, stores.DRAFT, f"ingested {len(record.events)} events", match_id=record.match_id)
     return draft
 
@@ -597,7 +639,9 @@ async def seal_step(deps: FleetDeps, draft: Draft) -> SealedDraft:
 async def prepare_approval(deps: FleetDeps, sealed: SealedDraft) -> ApprovalRequest | RunOutcome:
     """Register the sealed manifest, issue the single-use nonce, build the card payload.
 
-    A bundle any gate refused gets no nonce and so no Approve button, server side too.
+    A bundle any gate refused gets no nonce and so no Approve button, server side too. Before the
+    nonce, the run claims its approval on the ledger by compare-and-set: of two deliveries that
+    raced past `ingest`, only the first issues a nonce, so one run never has two live cards.
     """
     d = sealed.draft
     data = sealed.manifest_json.encode("utf-8")
@@ -612,6 +656,13 @@ async def prepare_approval(deps: FleetDeps, sealed: SealedDraft) -> ApprovalRequ
     if not gates_all_pass(manifest):
         reasons = [f"{gate}: {r}" for gate in sorted(d.gate_reasons) for r in d.gate_reasons[gate]]
         return refused("bundle_refused_by_gate", "; ".join(reasons) or "a gate refused this bundle")
+    claimed = deps.ledger.claim_approval(d.run_id, sealed.bundle_sha256)
+    if claimed is not None:
+        # Two deliveries of one run raced past ingest. The first claim issues the only nonce.
+        return RunOutcome(
+            run_id=d.run_id, status=APPROVAL_ALREADY_REQUESTED, bundle_sha256=sealed.bundle_sha256,
+            code="approval_already_claimed", detail=f"approval already requested for bundle {claimed}; no second nonce",
+        )
     verifier.register_sealed_bundle(deps.store, data)
     now = deps.clock()
     try:

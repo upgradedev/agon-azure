@@ -15,6 +15,10 @@ from fleet_support import OFFICER, SEED, planted_model, run, run_input
 from agon.agents.fakes import FakeModel, FakeSpeech, FakeTranslator
 from agon.fleet import steps, stores
 from agon.fleet.contracts import (
+    ALREADY_ENDED,
+    ALREADY_SEALED,
+    APPROVAL_ALREADY_REQUESTED,
+    AWAITING_DECISION,
     CHANGES_REQUESTED,
     PUBLISH_ALREADY_REQUESTED,
     PUBLISH_REQUESTED,
@@ -405,3 +409,81 @@ def test_the_console_stand_in_cannot_approve_the_public_feed() -> None:
     deps, ref = _awaiting()
     out = run(steps.decide(deps, ref.request, _envelope(ref.request, channel="console"), ref.sealed.manifest_json))
     assert out.code == "channel_not_allowed"
+
+
+# ----------------------------------------------------------------- redelivery (spec 3.5)
+
+
+def _clean_bundle() -> str:
+    return run(run_to_request(_deps(), run_input())).sealed.bundle_sha256
+
+
+async def _through_factgate(deps, run_in):
+    d = await steps.ingest(deps, run_in)
+    d = await steps.interpret(deps, d)
+    d = await steps.analyst(deps, d)
+    d = await steps.writer(deps, d)
+    d = await steps.triage(deps, d)
+    kind, d = await steps.factgate(deps, d)
+    assert kind == "checked"
+    return d
+
+
+def test_a_redelivery_at_draft_runs_again_and_seals_the_clean_bundle() -> None:
+    deps = _deps()
+    first = run(steps.ingest(deps, run_input()))
+    assert deps.ledger.status("run-1") == stores.DRAFT
+    again = run(steps.ingest(deps, run_input()))
+    assert again == first, "re-entry returns the same Draft and leaves nothing of the redelivery in it"
+    ref = run(run_to_request(deps, run_input()))
+    assert ref.request is not None and ref.sealed.bundle_sha256 == _clean_bundle()
+    assert len(deps.store.keys(verifier.NONCES)) == 1
+
+
+def test_a_redelivery_at_checked_runs_again_and_seals_the_clean_bundle() -> None:
+    deps = _deps()
+    run(_through_factgate(deps, run_input()))
+    assert deps.ledger.status("run-1") == stores.CHECKED
+    ref = run(run_to_request(deps, run_input()))
+    assert ref.request is not None and ref.sealed.bundle_sha256 == _clean_bundle()
+    assert len(deps.store.keys(verifier.NONCES)) == 1
+    assert [h["status"] for h in deps.ledger.history("run-1")] == [stores.DRAFT, stores.CHECKED, stores.SEALED]
+
+
+def test_a_redelivery_at_sealed_redoes_nothing_and_issues_no_second_nonce() -> None:
+    deps = _deps()
+    ref = run(run_to_request(deps, run_input()))
+    assert deps.ledger.status("run-1") == stores.SEALED
+    out = run(steps.ingest(deps, run_input()))
+    assert out.status == ALREADY_SEALED and out.bundle_sha256 == ref.sealed.bundle_sha256
+    again = run(run_to_request(deps, run_input()))
+    assert again.outcome.status == ALREADY_SEALED and again.sealed is None
+    assert deps.store.keys(verifier.NONCES) == [ref.request.nonce]
+
+
+def test_a_redelivery_after_the_pause_or_the_decision_reports_the_state() -> None:
+    deps = _deps()
+    ref = run(run_to_request(deps, run_input()))
+    deps.ledger.advance("run-1", stores.AWAITING_APPROVAL, "test", checkpoint_id="cp-1")
+    waiting = run(steps.ingest(deps, run_input()))
+    assert waiting.status == AWAITING_DECISION and "cp-1" in waiting.detail
+    run(steps.decide(deps, ref.request, _envelope(ref.request), ref.sealed.manifest_json))
+    ended = run(steps.ingest(deps, run_input()))
+    assert ended.status == ALREADY_ENDED and ended.code == "approved"
+    assert len(deps.store.keys(verifier.NONCES)) == 1 and deps.publish_queue.items() == []
+
+
+def test_two_deliveries_racing_past_ingest_issue_one_nonce() -> None:
+    deps = _deps()
+    ref = run(run_to_request(deps, run_input()))
+    second = run(steps.prepare_approval(deps, ref.sealed))
+    assert second.status == APPROVAL_ALREADY_REQUESTED and second.code == "approval_already_claimed"
+    assert deps.store.keys(verifier.NONCES) == [ref.request.nonce]
+
+
+def test_a_reused_run_id_for_another_match_is_refused() -> None:
+    deps = _deps()
+    run(steps.ingest(deps, run_input()))
+    other = RunInput("run-1", {"source": "synth", "seed": SEED, "match_index": 1})
+    out = run(steps.ingest(deps, other))
+    assert out.status == REFUSED_AT_INGEST and out.code == "run_id_reused"

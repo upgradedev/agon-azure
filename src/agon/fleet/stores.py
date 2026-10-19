@@ -298,6 +298,34 @@ class RunLedger:
         doc = self.store.read(self.container, run_id)
         return [] if doc is None else list(doc.body.get("history", []))
 
+    def record(self, run_id: str) -> dict[str, Any] | None:
+        doc = self.store.read(self.container, run_id)
+        return None if doc is None else dict(doc.body)
+
+    def claim_approval(self, run_id: str, bundle_sha256: str) -> str | None:
+        """Claim the right to issue this run's one nonce, by etag compare-and-set.
+
+        Returns None when this caller won the claim, otherwise the bundle hash that is already
+        claimed. A second caller loses even for the same bundle: a crashed first attempt and a
+        concurrent one cannot be told apart, and one claim must mean at most one nonce. The claim
+        holds no nonce, so the runs document never carries an approval capability, only the fact
+        that one was requested.
+        """
+        for _ in range(3):
+            doc = self.store.read(self.container, run_id)
+            if doc is None:
+                raise LedgerError(f"run {run_id}: no ledger record to claim an approval on")
+            claimed = doc.body.get("approval_claim")
+            if claimed is not None:
+                return str(claimed)
+            body = {**doc.body, "approval_claim": bundle_sha256}
+            try:
+                self.store.replace(self.container, run_id, body, if_match=doc.etag)
+                return None
+            except PreconditionFailed:
+                continue
+        raise LedgerError(f"run {run_id}: could not claim the approval after three attempts")
+
     def advance(self, run_id: str, to: str, detail: str = "", **fields: Any) -> None:
         if to not in RUN_STATUSES:
             raise LedgerError(f"unknown status {to!r}")
