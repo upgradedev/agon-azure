@@ -80,6 +80,7 @@ class FoundryModelPort:
             return self._agents[role]
         from agent_framework.foundry import FoundryAgent, FoundryChatClient
 
+        agent: Any
         if role in PROMPT_AGENT_ROLES:
             agent = FoundryAgent(
                 project_endpoint=self.settings.project_endpoint,

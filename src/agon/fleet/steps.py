@@ -342,7 +342,7 @@ async def desk_editor(deps: FleetDeps, draft: Draft) -> Draft:
 
 
 def _protected_names(record: MatchRecord, sentences: list[Sentence]) -> list[str]:
-    names = set()
+    names: set[str] = set()
     for s in sentences:
         names.update(c.value for c in s.claims if c.type == "name" and isinstance(c.value, str))
         names.update(n for n in record.roster.all_names() if n in s.text)

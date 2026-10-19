@@ -8,7 +8,7 @@ the kill-and-resume driver use, and it says so in the bundle (`deployment_ids["p
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from agon.agents.fakes import FAKE_DEPLOYMENT_IDS, FakeModel, FakeSpeech, FakeTranslator
 from agon.fleet.deps import FleetDeps, file_tracer, no_trace
@@ -37,7 +37,7 @@ def fake_deps(
         store: Any = InMemoryStore()
         artifacts: Any = InMemoryArtifactStore()
         queue: Any = InMemoryPublishQueue()
-        trace = no_trace
+        trace: Callable[[str, str], None] = no_trace
     else:
         root = Path(root)
         store = FileStore(root / "store")
