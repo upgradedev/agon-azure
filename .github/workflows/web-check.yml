@@ -32,3 +32,10 @@ jobs:
 
       - name: Checker tests, each rule proven to fail once
         run: python -m pytest tests/test_web_check.py -q -p no:cacheprovider
+
+      # Uses the runner's preinstalled node and its built-in test runner, so
+      # nothing is installed. A runner without node fails here; it never skips.
+      - name: Browser core tests (frame parity with Python, manifest rules, WebCrypto hash)
+        run: |
+          node --version
+          node --test tests/js/core.test.js

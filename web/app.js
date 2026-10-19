@@ -7,7 +7,8 @@
   evaluated from strings. ci/web_check.py enforces those rules.
 
   Nothing here calls a backend. The preview is honest about that: the primary
-  button opens a panel that says the newsroom is not connected.
+  button opens a panel that says the newsroom is not connected. The replay
+  and the hash check live in match.js and verify.js, which read static files.
 */
 (function () {
   "use strict";
@@ -146,6 +147,11 @@
 
     document.body.classList.toggle("has-action-bar", key === "/");
 
+    /* match.js and verify.js listen for this to pause or start their work. */
+    if (typeof window.CustomEvent === "function") {
+      document.dispatchEvent(new window.CustomEvent("agon:route", { detail: { path: key } }));
+    }
+
     if (active) {
       document.title = "Agon | " + (active.getAttribute("data-title") || "Agon");
       if (moveFocus) {
@@ -192,14 +198,20 @@
     }
 
     /* aria-disabled keeps the control focusable so its reason can be found;
-       this listener makes sure activating it does nothing. */
-    var disabled = document.querySelectorAll("[aria-disabled='true']");
-    for (var j = 0; j < disabled.length; j += 1) {
-      disabled[j].addEventListener("click", function (event) {
-        event.preventDefault();
-        event.stopImmediatePropagation();
-      });
-    }
+       this listener makes sure activating it does nothing. It is delegated
+       and reads the attribute at click time, because the Match Centre turns
+       its controls on only after the match file has loaded. */
+    document.addEventListener(
+      "click",
+      function (event) {
+        var target = event.target && event.target.closest ? event.target.closest("[aria-disabled='true']") : null;
+        if (target) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+        }
+      },
+      true
+    );
   }
 
   /* ---------------------------------------------------------- full-time panel */

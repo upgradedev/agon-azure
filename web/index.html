@@ -6,11 +6,14 @@
   <meta name="color-scheme" content="light dark">
   <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#121922" media="(prefers-color-scheme: dark)">
-  <meta name="description" content="Agon preview build: the Match Centre shell for a planned full-time newsroom for a club media office. Synthetic, fictional data only.">
+  <meta name="description" content="Agon preview build: a Match Centre that replays synthetic matches and a Verify page that recomputes their file hashes in your browser, for a planned full-time newsroom for a club media office. Synthetic, fictional data only.">
   <title>Agon | Match Centre</title>
   <link rel="icon" href="favicon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="app.css">
   <script src="theme.js"></script>
+  <script src="agon-core.js" defer></script>
+  <script src="match.js" defer></script>
+  <script src="verify.js" defer></script>
   <script src="app.js" defer></script>
 </head>
 <body class="has-action-bar" data-commit="__AGON_COMMIT__">
@@ -58,7 +61,7 @@
   <main id="main" tabindex="-1">
     <noscript>
       <div class="container">
-        <p class="notice">This preview uses JavaScript for navigation and the theme switch. Without it you can still read the Match Centre below.</p>
+        <p class="notice">This preview uses JavaScript for the replay, the hash check, navigation and the theme switch. Without it you can still read the pages below, but no match loads.</p>
       </div>
     </noscript>
 
@@ -67,21 +70,39 @@
       <div class="container">
         <header class="view-head">
           <p class="eyebrow">Match Centre</p>
-          <h1 id="h-match" tabindex="-1">Set up a match, then blow the whistle</h1>
-          <p class="lead">Pick a seeded fictional match and a reading mode. At full time Agon is planned to draft the club's match report and hold it until the media officer approves it.</p>
+          <h1 id="h-match" tabindex="-1">Replay a seeded match, then blow the whistle</h1>
+          <p class="lead">Pick a seeded fictional match and watch it replay from its event log. At full time Agon is planned to draft the club's match report and hold it until the media officer approves it.</p>
         </header>
 
         <div class="match-grid">
           <section class="card pitch-card" aria-labelledby="h-pitch">
             <div class="card__head">
-              <h2 id="h-pitch">Pitch</h2>
-              <span class="chip chip--neutral">Illustration</span>
+              <h2 id="h-pitch">Replay</h2>
+              <span class="chip chip--neutral" id="data-chip">Loading</span>
             </div>
+            <p class="match-label" id="match-label">Loading the synthetic match data.</p>
+            <p class="notice" id="data-notice" hidden></p>
+
+            <div class="scoreboard">
+              <p class="scoreboard__team">
+                <span class="scoreboard__name" id="home-name">Home</span>
+                <span class="scoreboard__goals" id="home-goals">0</span>
+              </p>
+              <p class="scoreboard__clock">
+                <span class="scoreboard__minute" id="clock-minute">1'</span>
+                <span class="scoreboard__period" id="clock-period">First half</span>
+              </p>
+              <p class="scoreboard__team scoreboard__team--away">
+                <span class="scoreboard__goals" id="away-goals">0</span>
+                <span class="scoreboard__name" id="away-name">Away</span>
+              </p>
+            </div>
+            <p class="visually-hidden" id="score-live" aria-live="polite" aria-atomic="true"></p>
 
             <figure class="pitch">
               <svg viewBox="-3 -3 111 74" role="img" aria-labelledby="pitch-title pitch-desc" focusable="false">
-                <title id="pitch-title">Football pitch illustration</title>
-                <desc id="pitch-desc">A pitch drawn to scale with a ball and a shaded pressure band in the right half. It is a static illustration; no match data is loaded.</desc>
+                <title id="pitch-title">Replay pitch</title>
+                <desc id="pitch-desc">A pitch drawn to scale. The home club attacks to the right in both halves. The dot is the ball at the current replay time, the thin line is the current pass, carry or shot, and the shaded band marks play under pressure. The event under the pitch says the same in words.</desc>
                 <defs>
                   <pattern id="pressure-hatch" width="2.4" height="2.4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
                     <line class="pitch__hatch-line" x1="0" y1="0" x2="0" y2="2.4"/>
@@ -92,8 +113,10 @@
                 <rect class="pitch__stripe" x="45" y="0" width="15" height="68"/>
                 <rect class="pitch__stripe" x="75" y="0" width="15" height="68"/>
 
-                <rect class="pitch__pressure" x="63" y="0" width="17" height="68"/>
-                <rect x="63" y="0" width="17" height="68" fill="url(#pressure-hatch)"/>
+                <g id="pressure-band" visibility="hidden">
+                  <rect class="pitch__pressure" id="pressure-fill" x="44" y="0" width="17" height="68"/>
+                  <rect class="pitch__hatch" id="pressure-hatch-rect" x="44" y="0" width="17" height="68"/>
+                </g>
 
                 <rect class="pitch__line" x="0" y="0" width="105" height="68"/>
                 <line class="pitch__line" x1="52.5" y1="0" x2="52.5" y2="68"/>
@@ -111,16 +134,51 @@
                 <rect class="pitch__line" x="-1.8" y="30.34" width="1.8" height="7.32"/>
                 <rect class="pitch__line" x="105" y="30.34" width="1.8" height="7.32"/>
 
-                <circle class="pitch__ball-ring" cx="71" cy="29" r="2.2"/>
-                <circle class="pitch__ball" cx="71" cy="29" r="1.1"/>
+                <line class="pitch__path" id="event-path" x1="52.5" y1="34" x2="52.5" y2="34" visibility="hidden"/>
+                <circle class="pitch__ball-ring" id="ball-ring" cx="52.5" cy="34" r="2.2"/>
+                <circle class="pitch__ball" id="ball" cx="52.5" cy="34" r="1.1"/>
               </svg>
             </figure>
 
+            <p class="event-caption" id="event-caption">Kick-off has not happened yet.</p>
+
             <ul class="legend" aria-label="Pitch legend">
-              <li><span class="swatch swatch--pressure" aria-hidden="true"></span>Pressure band</li>
+              <li><span class="swatch swatch--pressure" aria-hidden="true"></span>Under pressure</li>
               <li><span class="swatch swatch--ball" aria-hidden="true"></span>Ball</li>
+              <li id="pitch-direction">Home club attacks to the right in both halves.</li>
             </ul>
-            <p class="hint">This is a static illustration. No match data is loaded in this preview build, so the ball and the pressure band do not follow play.</p>
+
+            <div class="transport">
+              <div class="transport__row">
+                <button type="button" class="button button--primary transport__play" id="play-toggle" aria-disabled="true" aria-describedby="play-reason">
+                  <svg class="button__icon button__icon--solid" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path d="M8 5v14l11-7z"/>
+                  </svg>
+                  <span id="play-text">Play</span>
+                </button>
+                <fieldset class="field transport__speed">
+                  <legend class="visually-hidden">Replay speed</legend>
+                  <div class="segmented">
+                    <input type="radio" name="speed" id="speed-1" value="1">
+                    <label for="speed-1">1x</label>
+                    <input type="radio" name="speed" id="speed-8" value="8" checked>
+                    <label for="speed-8">8x</label>
+                    <input type="radio" name="speed" id="speed-60" value="60">
+                    <label for="speed-60">60x</label>
+                  </div>
+                </fieldset>
+              </div>
+              <p class="hint" id="play-reason">Play and the match time slider are unavailable until the match file has loaded.</p>
+
+              <div class="scrubber">
+                <label class="field__label" for="scrubber">Match time</label>
+                <svg class="moment-strip" id="moment-strip" viewBox="0 0 1000 12" preserveAspectRatio="none" aria-hidden="true" focusable="false"></svg>
+                <input type="range" class="scrubber__input" id="scrubber" min="0" max="1" step="1" value="0" disabled aria-describedby="play-reason">
+                <p class="hint" id="scrubber-hint">Arrow keys move the replay one second at a time; Page Up and Page Down jump further. The marks above the slider are the key moments listed below.</p>
+              </div>
+            </div>
+
+            <p class="small muted" id="pressure-readout">Pressure figures appear once the replay starts.</p>
           </section>
 
           <section class="card controls-card" aria-labelledby="h-setup">
@@ -128,7 +186,7 @@
 
             <fieldset class="field" aria-describedby="seed-hint">
               <legend>Seed</legend>
-              <div class="segmented">
+              <div class="segmented" id="seed-group">
                 <input type="radio" name="seed" id="seed-1" value="1" checked>
                 <label for="seed-1">Seed 1</label>
                 <input type="radio" name="seed" id="seed-2" value="2">
@@ -136,7 +194,7 @@
                 <input type="radio" name="seed" id="seed-3" value="3">
                 <label for="seed-3">Seed 3</label>
               </div>
-              <p class="hint" id="seed-hint">Each seed is planned to generate its own fictional match from the synthetic data generator, which is not connected to this preview.</p>
+              <p class="hint" id="seed-hint">Each seed is a different fictional match from the synthetic generator. The list is replaced by the seeds in the match data once it loads.</p>
             </fieldset>
 
             <fieldset class="field" aria-describedby="mode-hint">
@@ -171,6 +229,16 @@
             </div>
           </section>
 
+          <section class="card moments-card" aria-labelledby="h-moments">
+            <div class="card__head">
+              <h2 id="h-moments">Key moments</h2>
+              <span class="chip chip--neutral" id="moments-count">0</span>
+            </div>
+            <p class="hint" id="moments-hint">Goals, shots, cards and substitutions from the event log. Choose one to move the replay there; moments still to come are dimmed.</p>
+            <ol class="moments" id="moments" aria-labelledby="h-moments" aria-describedby="moments-hint" hidden></ol>
+            <p class="hint" id="moments-empty">No goals, shots, cards or substitutions are in the loaded event file yet.</p>
+          </section>
+
           <section class="card status-card" aria-labelledby="h-newsroom">
             <div class="card__head">
               <h2 id="h-newsroom">Newsroom</h2>
@@ -178,32 +246,36 @@
             </div>
             <div class="status-row">
               <span class="status-dot" aria-hidden="true"></span>
-              <p>The agents, the checks and the approval step are planned and not connected to this preview. <a href="#/about">Read what each one will do.</a></p>
+              <p>The agents, the checks and the approval step are planned and not connected to this preview. The replay above reads the generator's event file directly. <a href="#/about">Read what each one will do.</a></p>
             </div>
           </section>
         </div>
       </div>
     </section>
 
-    <!-- S5 Verify placeholder -->
+    <!-- S5 Verify -->
     <section class="view" data-view="/verify" data-title="Verify" aria-labelledby="h-verify" hidden>
       <div class="container">
         <header class="view-head">
           <p class="eyebrow">Verify</p>
-          <h1 id="h-verify" tabindex="-1">Check that what was published is what was approved</h1>
-          <p class="lead">This page is planned to recompute every published file's hash in your own browser and compare it with the hash the media officer approved.</p>
+          <h1 id="h-verify" tabindex="-1">Recompute every match file's hash in your browser</h1>
+          <p class="lead">This page downloads the manifest and every file it lists, then hashes each file with SHA-256 on your own device and compares the result with the manifest. The totals below are counted on this page.</p>
         </header>
 
         <div class="doc-grid">
-          <section class="card" aria-labelledby="h-nothing">
+          <section class="card verify-card" aria-labelledby="h-files">
             <div class="card__head">
-              <h2 id="h-nothing">Nothing to verify yet</h2>
-              <span class="chip chip--neutral">Empty</span>
+              <h2 id="h-files">Recomputed hashes</h2>
+              <span class="chip chip--neutral" id="verify-chip">Not run</span>
             </div>
-            <p>Nothing has been published from this preview build, so there is no manifest and no file to check.</p>
+            <p id="verify-source">The check starts when you open this page.</p>
+            <p class="notice" id="verify-notice" hidden></p>
+            <p class="verify-overall" id="verify-overall" aria-live="polite">Not run yet.</p>
+            <p class="small muted" id="verify-counts"></p>
+            <ul class="verify-list" id="verify-list"></ul>
+            <p class="small muted verify-manifest-hash" id="verify-manifest-hash" hidden></p>
             <div class="control-with-reason">
-              <button type="button" class="button button--secondary" id="recompute" aria-disabled="true" aria-describedby="recompute-reason">Recompute hashes</button>
-              <p class="hint" id="recompute-reason">Recompute hashes is unavailable because nothing has been published from this preview build yet.</p>
+              <button type="button" class="button button--secondary" id="recompute"><span id="recompute-text">Recompute again</span></button>
             </div>
           </section>
 
@@ -216,16 +288,28 @@
             <p class="hint">This check runs a known test vector through the browser's own WebCrypto. Nothing leaves your device.</p>
           </section>
 
+          <section class="card" aria-labelledby="h-proves">
+            <div class="card__head">
+              <h2 id="h-proves">What a match proves, and what it does not</h2>
+              <span class="chip">Built</span>
+            </div>
+            <p>A match means the bytes your browser received are exactly the bytes the manifest lists. It does not show that anyone approved them: no report has been approved or published from this preview build yet.</p>
+            <div class="control-with-reason">
+              <button type="button" class="button button--secondary" id="compare-approved" aria-disabled="true" aria-describedby="approved-reason">Compare with the approved hash</button>
+              <p class="hint" id="approved-reason">Comparing with an approved hash is unavailable because nothing has been approved or published from this preview build yet.</p>
+            </div>
+          </section>
+
           <section class="card" aria-labelledby="h-verify-plan">
             <div class="card__head">
-              <h2 id="h-verify-plan">How verification will work</h2>
-              <span class="chip chip--planned">Planned</span>
+              <h2 id="h-verify-plan">How verification grows</h2>
+              <span class="chip chip--planned">Partly planned</span>
             </div>
             <ol class="steps">
-              <li><strong>Fetch the manifest</strong><span>The page downloads the published manifest and every file it lists.</span></li>
-              <li><strong>Recompute each hash here</strong><span>Your browser hashes each file with SHA-256. No server is trusted for this step.</span></li>
-              <li><strong>Compare with the approval</strong><span>Each file shows a match or a mismatch against the hash the media officer approved.</span></li>
-              <li><strong>Follow corrections</strong><span>A corrected report shows its own approval and links back to the version it replaces.</span></li>
+              <li><strong>Fetch the manifest (built)</strong><span>The page downloads the manifest and every file it lists.</span></li>
+              <li><strong>Recompute each hash here (built)</strong><span>Your browser hashes each file with SHA-256. No server is trusted for this step.</span></li>
+              <li><strong>Compare with the approval (planned)</strong><span>Each published file will show a match or a mismatch against the hash the media officer approved.</span></li>
+              <li><strong>Follow corrections (planned)</strong><span>A corrected report will show its own approval and link back to the version it replaces.</span></li>
             </ol>
           </section>
         </div>
@@ -252,7 +336,7 @@
               <h2 id="h-real">What is real in this preview</h2>
               <span class="chip">Built</span>
             </div>
-            <p>This page is a static shell: the layout, the light and dark themes, the routes and the security headers. No agents run, no match data is loaded, nothing is published and no account is needed.</p>
+            <p>This preview is a static site. The Match Centre replays synthetic matches from the generator's event files, and the Verify page recomputes those files' hashes in your browser. No agents run, nothing is published and no account is needed.</p>
           </section>
 
           <section class="card" aria-labelledby="h-fulltime">

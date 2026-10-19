@@ -29,6 +29,9 @@ node_modules/
 *.pem
 .azure/
 
+# Match files the deploy step writes (web/data-fixture/ is committed)
+web/data/
+
 # OS
 .DS_Store
 Thumbs.db
