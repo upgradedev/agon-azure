@@ -3,7 +3,7 @@
     "analyst": {
       "file": "analyst.v1.md",
       "kind": "prompt_agent",
-      "sha256": "27fff7cc4e27a96ec5cd6d966e70dc4fd35a2f3c4154fbfa0b3852b1bb66412e",
+      "sha256": "9fd1496107475df53c6459ef815a7493a762204cd7f2196a8942be7f22717ecd",
       "version": "v1"
     },
     "desk_editor": {
