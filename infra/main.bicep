@@ -1,4 +1,4 @@
-// Agon core infrastructure (spec 3.1, 3.2 rows 8, 12, 13, 14, 9.1).
+// Agon core infrastructure (spec 3.1, 3.2 rows 4, 6, 7, 8, 12, 13, 14, 9.1).
 //
 // Deployed by .github/workflows/deploy.yml with the CI identity, which holds
 // Contributor on the resource group only. Contributor cannot write
@@ -18,6 +18,24 @@ param location string = resourceGroup().location
 
 @description('Static Web Apps region. The service is not offered in swedencentral.')
 param staticSiteLocation string = 'westeurope'
+
+@description('Object id of the CI service principal (agon-azure-ci), NOT its appId. deploy.yml reads it from the oid claim of its own access token. Gets a Cosmos data role on the checkpoints container only (modules/cosmos-access.bicep).')
+@minLength(1)
+param ciPrincipalId string
+
+@description('Translator pricing tier (modules/aiservices.bicep).')
+@allowed([
+  'F0'
+  'S1'
+])
+param translatorSku string = 'F0'
+
+@description('Speech pricing tier (modules/aiservices.bicep).')
+@allowed([
+  'F0'
+  'S0'
+])
+param speechSku string = 'S0'
 
 @description('Extra tags. app=agon is always applied and cannot be overridden.')
 param extraTags object = {}
@@ -90,6 +108,32 @@ module cosmosAccess 'modules/cosmos-access.bicep' = {
     apiPrincipalId: identities.outputs.apiPrincipalId
     publisherPrincipalId: identities.outputs.publisherPrincipalId
     publisherSandboxPrincipalId: identities.outputs.publisherSandboxPrincipalId
+    ciPrincipalId: ciPrincipalId
+  }
+}
+
+module foundry 'modules/foundry.bicep' = {
+  name: 'agon-foundry'
+  params: {
+    location: location
+    tags: tags
+    name: 'aif-agon-${suffix}'
+    customSubDomainName: 'aif-agon-${suffix}'
+    appInsightsName: monitoring.outputs.appInsightsName
+  }
+}
+
+module aiServices 'modules/aiservices.bicep' = {
+  name: 'agon-aiservices'
+  params: {
+    location: location
+    tags: tags
+    translatorName: 'trl-agon-${suffix}'
+    translatorSubDomain: 'trl-agon-${suffix}'
+    translatorSku: translatorSku
+    speechName: 'spch-agon-${suffix}'
+    speechSubDomain: 'spch-agon-${suffix}'
+    speechSku: speechSku
   }
 }
 
@@ -118,3 +162,24 @@ output staticSiteDefaultHostname string = staticSite.outputs.defaultHostname
 
 output logAnalyticsWorkspaceName string = monitoring.outputs.workspaceName
 output appInsightsName string = monitoring.outputs.appInsightsName
+
+// Echoed so infra/rbac.bicep reads it from agon-main like every other input.
+output ciPrincipalId string = ciPrincipalId
+
+// Microsoft Foundry (spec 3.2 row 4). Deployment names are confirmed at gate C2
+// by .github/workflows/foundry-smoke.yml and are not judge-facing before then.
+output foundryAccountName string = foundry.outputs.accountName
+output foundryEndpoint string = foundry.outputs.endpoint
+output foundryOpenAiEndpoint string = foundry.outputs.openAiEndpoint
+output foundryProjectName string = foundry.outputs.projectName
+output foundryProjectEndpoint string = foundry.outputs.projectEndpoint
+output foundryDeploymentNames array = foundry.outputs.deploymentNames
+
+// Azure AI Translator and Speech (spec 3.2 rows 6 and 7).
+output translatorAccountName string = aiServices.outputs.translatorName
+output translatorEndpoint string = aiServices.outputs.translatorEndpoint
+output translatorRegion string = aiServices.outputs.translatorRegion
+output speechAccountName string = aiServices.outputs.speechName
+output speechEndpoint string = aiServices.outputs.speechEndpoint
+output speechRegion string = aiServices.outputs.speechRegion
+output speechResourceId string = aiServices.outputs.speechResourceId

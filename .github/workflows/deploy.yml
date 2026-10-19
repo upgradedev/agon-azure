@@ -8,9 +8,15 @@
 #            and uploads web/.
 # readiness  main only: the live gate (ci/readiness.py) against the deployed host,
 #            with the commit sha as a required body marker. Fails on any non-200.
+# foundry-smoke  main only, after deploy: one model call to the Foundry deployment
+#            (.github/workflows/foundry-smoke.yml, gate C2). Fails on any non-200,
+#            including the 403 expected until the owner-side rbac deploy has run.
 #
 # The CI identity holds Contributor on the resource group only. It cannot write
 # role assignments, so infra/rbac.bicep is NOT deployed here (docs/OPERATIONS.md).
+# main.bicep takes ciPrincipalId, the object id of that identity, for its Cosmos
+# checkpoints grant. It is read from the oid claim of the job's own ARM token,
+# because reading it from Microsoft Graph needs a directory role CI does not hold.
 #
 # No job here runs on pull_request. A pull request workflow runs the diff of its
 # own branch before anyone reviews it, and the only Azure identity this repo has
@@ -81,13 +87,26 @@ jobs:
           az config set bicep.use_binary_from_path=false bicep.check_version=false --only-show-errors
           az bicep install --version "$BICEP_VERSION"
           az bicep version
+      - name: Read the CI principal object id from the oid claim of its own token
+        run: |
+          az account get-access-token --query accessToken --output tsv | python3 -c '
+          import base64, json, os, re, sys
+          payload = sys.stdin.read().strip().split(".")[1]
+          claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+          oid = claims.get("oid", "")
+          if not re.fullmatch(r"[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}", oid):
+              sys.exit("no service principal object id (oid) in the access token")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as fh:
+              fh.write("CI_PRINCIPAL_ID=" + oid + chr(10))
+          print("CI principal object id: " + oid)
+          '
       - name: What-if (read only)
         run: |
           az deployment group what-if \
             --resource-group "$RESOURCE_GROUP" \
             --name "$DEPLOYMENT_NAME" \
             --template-file infra/main.bicep \
-            --parameters location="$LOCATION"
+            --parameters location="$LOCATION" ciPrincipalId="$CI_PRINCIPAL_ID"
 
   deploy:
     needs: what-if
@@ -117,13 +136,26 @@ jobs:
           az config set bicep.use_binary_from_path=false bicep.check_version=false --only-show-errors
           az bicep install --version "$BICEP_VERSION"
           az bicep version
+      - name: Read the CI principal object id from the oid claim of its own token
+        run: |
+          az account get-access-token --query accessToken --output tsv | python3 -c '
+          import base64, json, os, re, sys
+          payload = sys.stdin.read().strip().split(".")[1]
+          claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+          oid = claims.get("oid", "")
+          if not re.fullmatch(r"[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}", oid):
+              sys.exit("no service principal object id (oid) in the access token")
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as fh:
+              fh.write("CI_PRINCIPAL_ID=" + oid + chr(10))
+          print("CI principal object id: " + oid)
+          '
       - name: Deploy main.bicep (incremental only, never complete)
         run: |
           az deployment group create \
             --resource-group "$RESOURCE_GROUP" \
             --name "$DEPLOYMENT_NAME" \
             --template-file infra/main.bicep \
-            --parameters location="$LOCATION" \
+            --parameters location="$LOCATION" ciPrincipalId="$CI_PRINCIPAL_ID" \
             --mode Incremental \
             --output json > "$RUNNER_TEMP/deployment.json"
       - name: Capture the deployment outputs
@@ -206,6 +238,18 @@ jobs:
           output_location: ""
           skip_app_build: true
           skip_api_build: true
+
+  # Gate C2: one model call to what was just deployed. Independent of web and
+  # readiness, so a red smoke never holds back the public site.
+  foundry-smoke:
+    needs: deploy
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/foundry-smoke.yml
+    with:
+      deployment: gpt-5.6-luna
 
   readiness:
     needs: [deploy, web]

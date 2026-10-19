@@ -1,0 +1,149 @@
+# Gate C2 evidence (spec 11.2 S3): one model call from CI to the Foundry deployment
+# in Sweden Central, with a Microsoft Entra token and no SDK.
+#
+# When it runs
+#   workflow_call      from deploy.yml, in the job after "deploy", so it always calls
+#                      what was just deployed. A plain push trigger on infra/** would
+#                      race the deploy and could call a deployment that does not exist
+#                      yet, so the push path goes through deploy.yml instead.
+#   workflow_dispatch  by hand on main, for example right after the owner-side
+#                      infra/rbac.bicep deploy grants CI its inference role. That
+#                      dispatched run is the gate C2 evidence the first time.
+#
+# Expect HTTP 403 until infra/rbac.bicep has been deployed with the ciPrincipalId
+# output of agon-main (docs/OPERATIONS.md, owner step 3) and the grant has propagated.
+# The job fails on that 403; it never passes without a 200.
+#
+# Identity: the CI app agon-azure-ci through the environment azure subject. It needs
+# Cognitive Services OpenAI User on the Foundry account (infra/rbac.bicep) and reads
+# the agon-main outputs with Contributor on the group. No key exists: the Foundry
+# account has local auth disabled.
+
+name: foundry-smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      deployment:
+        description: Model deployment to call
+        type: choice
+        options:
+          - gpt-5.6-luna
+          - gpt-5.6-terra
+        default: gpt-5.6-luna
+  workflow_call:
+    inputs:
+      deployment:
+        description: Model deployment to call
+        type: string
+        default: gpt-5.6-luna
+
+permissions:
+  contents: read
+
+env:
+  RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+  DEPLOYMENT_NAME: agon-main
+  MODEL_DEPLOYMENT: ${{ inputs.deployment || 'gpt-5.6-luna' }}
+  # Token audience for Azure OpenAI and Foundry inference with Microsoft Entra ID.
+  TOKEN_RESOURCE: https://cognitiveservices.azure.com
+
+jobs:
+  smoke:
+    # Only main has a federated subject and the azure environment accepts main only.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: azure
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0 (peeled tag, git ls-remote 2026-10-19)
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Read the Foundry outputs of agon-main (only once it reads Succeeded)
+        id: foundry
+        run: |
+          state="$(az deployment group show --resource-group "$RESOURCE_GROUP" --name "$DEPLOYMENT_NAME" --query properties.provisioningState --output tsv)"
+          if [ "$state" != "Succeeded" ]; then
+            echo "agon-main is $state, not Succeeded: its outputs are not readable yet"
+            exit 1
+          fi
+          az deployment group show --resource-group "$RESOURCE_GROUP" --name "$DEPLOYMENT_NAME" \
+            --query properties.outputs --output json > "$RUNNER_TEMP/outputs.json"
+          python3 - "$RUNNER_TEMP/outputs.json" <<'PY'
+          import json, os, sys
+          outputs = json.load(open(sys.argv[1], encoding="utf-8"))
+          def value(key):
+              if key not in outputs:
+                  sys.exit(f"agon-main has no output {key}: deploy the Foundry module first")
+              return outputs[key]["value"]
+          names = value("foundryDeploymentNames")
+          wanted = os.environ["MODEL_DEPLOYMENT"]
+          if wanted not in names:
+              sys.exit(f"deployment {wanted!r} is not one of the deployed names {names}")
+          rows = {
+              "account": value("foundryAccountName"),
+              "openai_endpoint": value("foundryOpenAiEndpoint"),
+              "project": value("foundryProjectName"),
+              "project_endpoint": value("foundryProjectEndpoint"),
+          }
+          for key, val in rows.items():
+              if not val:
+                  sys.exit(f"empty output for {key}")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              for key, val in rows.items():
+                  fh.write(f"{key}={val}\n")
+          print("\n".join(f"{k}: {v}" for k, v in rows.items()))
+          print(f"deployments: {names}")
+          PY
+      - name: Deployment SKU, model version and capacity (control plane, read only)
+        env:
+          ACCOUNT: ${{ steps.foundry.outputs.account }}
+        run: |
+          az cognitiveservices account deployment show --resource-group "$RESOURCE_GROUP" --name "$ACCOUNT" \
+            --deployment-name "$MODEL_DEPLOYMENT" \
+            --query "{deployment:name, sku:sku.name, capacity:sku.capacity, model:properties.model.name, version:properties.model.version, state:properties.provisioningState}" \
+            --output table
+      - name: Regional quota (subscription read; Contributor on one group may not see it)
+        env:
+          LOCATION: ${{ vars.AZURE_LOCATION }}
+        run: |
+          # Informational only: it never passes or fails the gate. Quota was read
+          # owner-side on 2026-10-19 (STATE.md) and is printed here when readable.
+          az cognitiveservices usage list --location "$LOCATION" \
+            --query "[?contains(name.value, 'gpt-5.6')].{name:name.value, current:currentValue, limit:limit}" \
+            --output table || echo "quota not readable with this identity's scope"
+      - name: One chat completion, fail on anything but 200 with usage
+        env:
+          OPENAI_ENDPOINT: ${{ steps.foundry.outputs.openai_endpoint }}
+        run: |
+          AGON_AI_TOKEN="$(az account get-access-token --resource "$TOKEN_RESOURCE" --query accessToken --output tsv)"
+          if [ -z "$AGON_AI_TOKEN" ]; then
+            echo "no access token returned for $TOKEN_RESOURCE"
+            exit 1
+          fi
+          echo "::add-mask::$AGON_AI_TOKEN"
+          export AGON_AI_TOKEN
+          python ci/foundry_smoke.py \
+            --endpoint "$OPENAI_ENDPOINT" \
+            --deployment "$MODEL_DEPLOYMENT" \
+            --summary "$GITHUB_STEP_SUMMARY" \
+            --evidence "$RUNNER_TEMP/foundry-smoke.json"
+      - name: Keep the evidence row
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: foundry-smoke-${{ github.run_id }}
+          path: ${{ runner.temp }}/foundry-smoke.json
+          if-no-files-found: warn
+          retention-days: 30
