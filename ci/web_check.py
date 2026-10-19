@@ -311,6 +311,14 @@ def check_config(rel: str, text: str) -> list[Violation]:
     missing_dirs = [d for d in FALLBACK_JSON_DIRS if d not in _excluded_dirs(fallback.get("exclude") or [])]
     if missing_dirs:
         out.append(Violation("spa-fallback-dirs", rel, 1, f"navigationFallback must exclude JSON in each data folder; missing {', '.join(missing_dirs)}"))
+    # Static Web Apps refuses the whole deploy when a route or exclude pattern holds
+    # more than one '*' (deploy run 39270419700 failed on "/runs/*/*.json"). Catch
+    # it here, at pull request time, instead of in the deploy job on main.
+    patterns = [p for p in (fallback.get("exclude") or []) if isinstance(p, str)]
+    patterns += [r.get("route") for r in (data.get("routes") or []) if isinstance(r, dict) and isinstance(r.get("route"), str)]
+    for pattern in patterns:
+        if pattern.count("*") > 1:
+            out.append(Violation("swa-wildcard", rel, 1, f"Static Web Apps allows at most one '*' per pattern: {pattern!r}"))
     return out
 
 
@@ -347,9 +355,14 @@ FALLBACK_JSON_DIRS = ("/data/", "/data-fixture/", "/runs/", "/runs/*/")
 
 
 def _excluded_dirs(patterns: list[str]) -> set[str]:
-    """Folder prefixes whose pattern ends in *.json or *.{...json...}."""
+    """Folder prefixes whose pattern ends in *.json or *.{...json...}, or that a tree
+    pattern '/<folder>/*' (one wildcard, everything below the folder) covers."""
     found: set[str] = set()
     for pattern in patterns:
+        if pattern.endswith("/*") and pattern.count("*") == 1:
+            tree = pattern[:-1]
+            found.update(prefix for prefix in FALLBACK_JSON_DIRS if prefix.startswith(tree))
+            continue
         for prefix in FALLBACK_JSON_DIRS:
             rest = pattern[len(prefix):] if pattern.startswith(prefix) else None
             if rest is None or "/" in rest:
