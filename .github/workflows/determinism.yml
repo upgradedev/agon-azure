@@ -57,11 +57,7 @@ jobs:
       # sha256 and the season record byte for byte. --hash-out writes binary LF on every OS.
       - name: Generate the full season (30 matches)
         run: |
-          # TEMPORARY, reverted in the next commit: windows builds only 9 matchdays, a deliberate
-          # divergence that must turn the compare job red.
-          cut=""
-          if [ "$RUNNER_OS" = "Windows" ]; then cut="--matchdays 9"; fi
-          python -m agon.synth.season --season "$SEASON" --print-hash $cut \
+          python -m agon.synth.season --season "$SEASON" --print-hash \
             --hash-out "artifact/out/season-$SEASON/hash.txt" --out "artifact/out/season-$SEASON"
       - uses: actions/upload-artifact@v4
         with:
