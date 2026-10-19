@@ -25,7 +25,7 @@ env:
 jobs:
   readiness:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     permissions:
       contents: read
       id-token: write
@@ -58,6 +58,16 @@ jobs:
         id: host
         if: steps.window.outputs.open == 'true'
         run: |
+          # While a deploy runs, agon-main reports null outputs (TRAPS.md); the run of
+          # 2026-10-19 (39293986701) raced one and read an empty hostname. Wait for
+          # Succeeded, at most 20 minutes, then read; any other end state still fails.
+          for attempt in $(seq 1 60); do
+            state="$(az deployment group show --resource-group "$RESOURCE_GROUP" --name agon-main --query properties.provisioningState --output tsv)"
+            [ "$state" = "Succeeded" ] && break
+            echo "attempt $attempt: agon-main is '$state'; waiting for a deploy to finish"
+            sleep 20
+          done
+          if [ "$state" != "Succeeded" ]; then echo "agon-main is still '$state' after 20 minutes"; exit 1; fi
           host="$(az deployment group show --resource-group "$RESOURCE_GROUP" --name agon-main --query properties.outputs.staticSiteDefaultHostname.value --output tsv)"
           case "$host" in
             ""|*/*|*:*|*" "*) echo "unexpected hostname from agon-main: '$host'"; exit 1 ;;
