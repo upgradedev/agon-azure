@@ -29,8 +29,12 @@ never an MCP tool.
 | `wp.swing` | `match_id, event_id` | interpret win probability before and after the event, and a shot's expected swing |
 | `charter.get` | `match_id` | the approved Match-Day Charter, or `no_approved_charter` and its consequence |
 
-The names come from one table, `agon.mcp.tools.TOOLS`. Some model APIs reject dots in function
-names. If the Foundry registration needs underscores, the rename is one edit to that table.
+The names come from one table, `agon.mcp.tools.TOOLS`. MCP allows dots. Chat-function APIs that
+accept only `^[a-zA-Z0-9_-]{1,64}$` do not, and registering matchfacts as an MCP tool on an Agent
+Framework agent turns these tools into chat functions. Whether the Foundry Toolbox path forwards
+dotted names unchanged is **untested**. The deploy and fleet lanes own a day-one check: register
+one dotted tool and make one model call. If that returns a 400, the fallback is dots to underscores
+in `TOOLS`; a stdlib test proves that rename matches the pattern and keeps the nine names distinct.
 
 ## Quoted data
 
@@ -52,6 +56,12 @@ string next to a Rights Guard refusal, and never splices it into prose.
   container. The expected document layout is in the module docstring and must match what the
   ingest lane writes.
 
+Every record carries a `version`: the snapshot's Cosmos `_etag`, or a constant for the immutable
+in-memory source. Each tool call reads the record. The tools reuse a built match view only while
+that version is unchanged, so a live match whose snapshot the ingest lane rewrites is served from
+the new document on the next call. A record with no version is rebuilt on every call. The cache
+holds at most 32 matches per replica, least recently used evicted first.
+
 ## What the tests prove
 
 Stdlib, every run (`tests/test_matchfacts_tools.py`):
@@ -59,6 +69,8 @@ Stdlib, every run (`tests/test_matchfacts_tools.py`):
 - the tools class exposes no other public method, and no data-source layer has a write method;
 - every tool returns the envelope, and a period-1 minute-46 event never shares a window with a
   period-2 minute-46 event;
+- a Cosmos snapshot rewritten with a new `_etag` is served fresh on the next call, a snapshot
+  without an `_etag` is never served from the cache, and the cache evicts past its bound;
 - the referee is unreachable: a fresh interpreter that refuses any referee import calls every
   tool, then checks `sys.modules`. A negative control proves the blocker blocks.
 

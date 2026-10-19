@@ -21,7 +21,7 @@ Document layout the Cosmos implementation expects (the ingest lane writes it; co
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Iterable, Mapping, Protocol, Sequence
 
 READ_CONTAINERS: tuple[str, ...] = ("matchstate", "charters")
@@ -32,12 +32,23 @@ class UnknownMatch(KeyError):
     """The source holds no match with this id."""
 
 
+IN_MEMORY_VERSION = "in-memory"
+
+
 @dataclass(frozen=True)
 class MatchRecord:
+    """One match as a source holds it. `version` changes whenever the stored match changes.
+
+    `version` is the Cosmos `_etag` for a matchstate snapshot and the constant `IN_MEMORY_VERSION`
+    for an immutable in-memory record. None means the source cannot say, and a reader must then
+    treat every read as possibly new (matchfacts rebuilds instead of reusing a cached view).
+    """
+
     match_id: str
     meta: Mapping[str, Any]
     world: Mapping[str, Any]
     events: tuple[Mapping[str, Any], ...]
+    version: str | None = None
 
 
 class MatchSource(Protocol):
@@ -52,7 +63,8 @@ class InMemorySource:
     """Matches held in memory. Read-only after construction."""
 
     def __init__(self, records: Iterable[MatchRecord], charters: Mapping[str, Mapping[str, Any]] | None = None) -> None:
-        self._records = {r.match_id: r for r in records}
+        # Held records never change after construction, so each carries the constant version.
+        self._records = {r.match_id: replace(r, version=IN_MEMORY_VERSION) for r in records}
         self._charters = dict(charters or {})
 
     @classmethod
@@ -140,13 +152,23 @@ class CosmosSource:
 
     def record(self, match_id: str) -> MatchRecord:
         try:
-            doc = _strip(self._reader.read_item("matchstate", match_id, match_id))
+            raw = self._reader.read_item("matchstate", match_id, match_id)
         except KeyError:
             raise UnknownMatch(match_id) from None
+        # The ingest lane rewrites a live match's snapshot; `_etag` changes on every rewrite. Read it
+        # before `_strip` removes the system fields.
+        etag = raw.get("_etag")
+        doc = _strip(raw)
         missing = [k for k in ("meta", "world", "events") if k not in doc]
         if missing:
             raise ValueError(f"matchstate document {match_id!r} lacks {missing}")
-        return MatchRecord(match_id=match_id, meta=doc["meta"], world=doc["world"], events=tuple(doc["events"]))
+        return MatchRecord(
+            match_id=match_id,
+            meta=doc["meta"],
+            world=doc["world"],
+            events=tuple(doc["events"]),
+            version=str(etag) if etag else None,
+        )
 
     def charter(self, match_id: str) -> Mapping[str, Any] | None:
         rows = self._reader.query_items(

@@ -16,6 +16,7 @@ from `agon.interpret`. Nothing here imports the referee.
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from dataclasses import dataclass, fields
 from typing import Any, Callable, Mapping
 
@@ -37,6 +38,8 @@ MAX_WINDOW_EVENTS = 500
 MAX_IDS = 50
 MAX_TEXT = 2000
 MAX_QUERY = 64
+# Built match views kept per replica, least recently used evicted first. Keyed on record version.
+CACHE_SIZE = 32
 INTERPRET_METRICS: dict[str, str] = {
     "xg_ppm": "sum of modelled xG over the scope's shots, ppm",
     "xt_added_ppm": "sum of xT added by the scope's completed passes and carries, ppm",
@@ -81,23 +84,36 @@ def _rights(value: str, where: str) -> dict[str, Any]:
 
 
 class MatchFactsTools:
-    """Read-only tool implementations. One instance serves many matches from one source."""
+    """Read-only tool implementations. One instance serves many matches from one source.
 
-    def __init__(self, source: MatchSource) -> None:
+    Every call reads the match record from the source. The built view is reused only while the
+    record's version (the Cosmos `_etag`) is unchanged, and at most `cache_size` views are kept.
+    """
+
+    def __init__(self, source: MatchSource, cache_size: int = CACHE_SIZE) -> None:
+        if not isinstance(cache_size, int) or cache_size < 1:
+            raise ValueError("cache_size must be a positive integer")
         self._source = source
-        self._cache: dict[str, _Match] = {}
+        self._cache_size = cache_size
+        # match_id -> (record version, built view). Least recently used first.
+        self._cache: OrderedDict[str, tuple[str, _Match]] = OrderedDict()
 
     # ----------------------------------------------------------------- helpers
 
     def _match(self, match_id: str) -> _Match:
         if not isinstance(match_id, str) or not match_id:
             raise ToolInputError("match_id must be a non-empty string")
-        if match_id in self._cache:
-            return self._cache[match_id]
+        # Always read the record: the source is the truth, and a live match's snapshot is rewritten
+        # while it runs. Only the derived view is reused, and only while the version is unchanged.
         try:
             rec = self._source.record(match_id)
         except UnknownMatch:
+            self._cache.pop(match_id, None)
             raise ToolInputError(f"unknown match_id {match_id!r}") from None
+        hit = self._cache.get(match_id)
+        if hit is not None and rec.version is not None and hit[0] == rec.version:
+            self._cache.move_to_end(match_id)
+            return hit[1]
         view = MatchView.build(rec.events, rec.meta["home"], rec.meta["away"], rec.match_id)
         facts = recompute.MatchFacts(
             events=tuple(Event(**{k: e[k] for k in EVENT_FIELDS}) for e in view.events),
@@ -106,7 +122,14 @@ class MatchFactsTools:
             roster=roster_from_world(rec.world),
         )
         m = _Match(view=view, facts=facts, world=rec.world)
-        self._cache[match_id] = m
+        if rec.version is None:
+            # A source that cannot version its records is never served from the cache.
+            self._cache.pop(match_id, None)
+            return m
+        self._cache[match_id] = (rec.version, m)
+        self._cache.move_to_end(match_id)
+        while len(self._cache) > self._cache_size:
+            self._cache.popitem(last=False)
         return m
 
     @staticmethod

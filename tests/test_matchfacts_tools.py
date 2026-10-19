@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 import json
+import re
 import subprocess
 import sys
 
@@ -281,3 +282,88 @@ def test_cosmos_reader_refuses_containers_outside_its_role():
         reader.read_item("approvals", "a", "a")
     with pytest.raises(PermissionError):
         reader.query_items("charters", "SELECT 1", [], None)
+
+
+# --------------------------------------------------------------------------- cache follows the source
+
+
+def _cosmos_over(doc: dict) -> tuple[CosmosSource, FakeContainer]:
+    matchstate = FakeContainer({doc["id"]: doc}, [doc["id"]])
+    return CosmosSource(ContainerClientsReader({"matchstate": matchstate, "charters": FakeContainer({}, [])})), matchstate
+
+
+def _snapshot(rec: MatchRecord, events: list, etag: str | None) -> dict:
+    doc = {"id": rec.match_id, "match_id": rec.match_id, "meta": dict(rec.meta), "world": dict(rec.world), "events": list(events), "_ts": 1}
+    if etag is not None:
+        doc["_etag"] = etag
+    return doc
+
+
+def test_a_rewritten_cosmos_snapshot_is_served_fresh(src):
+    """The ingest lane rewrites a live match; the next call must see the new events, not a cached view."""
+    mid = src.match_ids()[0]
+    rec = src.record(mid)
+    full = list(rec.events)
+    early = [e for e in full if e["minute"] < 30]
+    assert 0 < len(early) < len(full)
+    cos, matchstate = _cosmos_over(_snapshot(rec, early, '"etag-a"'))
+    assert cos.record(mid).version == '"etag-a"'
+    tools = MatchFactsTools(cos)
+    first = tools.events_window(mid, 0, 130)["data"]["count"]
+    assert first == len(early)
+    # Same etag, same document: the view is reused (one read per call, no rebuild needed).
+    assert tools.events_window(mid, 0, 130)["data"]["count"] == first
+    # The snapshot is rewritten with more events and a new etag.
+    matchstate.items[mid] = _snapshot(rec, full, '"etag-b"')
+    second = tools.events_window(mid, 0, 130)["data"]["count"]
+    assert second == len(full) and second != first
+    goals = tools.stats_recompute(mid, "goals", rec.meta["home"])["data"]["value"]
+    assert goals == rec.meta["score"]["home"]
+
+
+def test_a_snapshot_without_an_etag_is_never_served_from_cache(src):
+    mid = src.match_ids()[0]
+    rec = src.record(mid)
+    full = list(rec.events)
+    early = [e for e in full if e["minute"] < 30]
+    cos, matchstate = _cosmos_over(_snapshot(rec, early, None))
+    assert cos.record(mid).version is None
+    tools = MatchFactsTools(cos)
+    assert tools.events_window(mid, 0, 130)["data"]["count"] == len(early)
+    matchstate.items[mid] = _snapshot(rec, full, None)
+    assert tools.events_window(mid, 0, 130)["data"]["count"] == len(full)
+    assert not tools._cache
+
+
+def test_the_match_cache_is_bounded_least_recently_used_first():
+    many = InMemorySource.from_seeds([1, 2, 3])
+    ids = many.match_ids()
+    assert len(ids) == 3 and all(many.record(i).version == source_mod.IN_MEMORY_VERSION for i in ids)
+    tools = MatchFactsTools(many, cache_size=2)
+    for mid in ids:
+        tools.momentum_series(mid)
+    assert list(tools._cache) == ids[1:]
+    tools.momentum_series(ids[1])
+    tools.momentum_series(ids[0])
+    assert list(tools._cache) == [ids[1], ids[0]]
+    with pytest.raises(ValueError):
+        MatchFactsTools(many, cache_size=0)
+
+
+# --------------------------------------------------------------------------- function-name fallback
+
+
+FUNCTION_NAME = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+
+
+def test_the_underscore_rename_is_one_safe_edit():
+    """Spec names use dots, which MCP allows. Some chat-function APIs accept only ^[a-zA-Z0-9_-]{1,64}$.
+
+    If the deploy lane's day-one call rejects dots, the fallback is dots to underscores in TOOLS.
+    This proves that rename is valid for that pattern and maps the nine names one to one, so it
+    stays a one-line change and cannot collide.
+    """
+    renamed = [n.replace(".", "_") for n in TOOL_NAMES]
+    assert all(FUNCTION_NAME.match(n) for n in renamed), renamed
+    assert len(set(renamed)) == len(TOOL_NAMES)
+    assert not FUNCTION_NAME.match("events.window")  # negative control: the pattern rejects a dot
