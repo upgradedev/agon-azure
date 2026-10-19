@@ -400,6 +400,21 @@ resource fleetSpeechUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = 
   }
 }
 
+// Role: Cognitive Services User. BEYOND THE SPEC 7.1 TABLE. The submission video
+// is built in CI (spec 10.1): a main-only workflow synthesises each narration beat
+// with Azure Speech, keyless. Speech account only; no other Cognitive Services
+// account and no key. Remove it after the freeze if the video is final.
+resource ciSpeechUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  scope: speech
+  name: guid(speech.id, ciPrincipalId, cognitiveServicesUser)
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', cognitiveServicesUser)
+    principalId: ciPrincipalId
+    principalType: 'ServicePrincipal'
+    description: 'beyond spec 7.1: the CI identity synthesises the video narration with Azure Speech (main-only workflow)'
+  }
+}
+
 // Role: Cognitive Services OpenAI User. BEYOND THE SPEC 7.1 TABLE, which gives
 // the CI principal Contributor plus User Access Administrator instead; the
 // bootstrap gave it Contributor only (spec 14.2). Needed for gate C2 (spec 11.2
