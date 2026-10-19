@@ -28,6 +28,7 @@ from agon.fleet.contracts import PublishRequest
 from agon.governance.store import Conflict, Document, NotFound, PreconditionFailed, Store
 
 LOCK_TIMEOUT_SECONDS = 30.0
+SHARING_RETRY_SECONDS = 5.0
 
 
 def _snapshot(body: dict[str, Any]) -> dict[str, Any]:
@@ -40,13 +41,16 @@ def _atomic_write(path: Path, data: bytes) -> None:
         handle.write(data)
         handle.flush()
         os.fsync(handle.fileno())
-    for attempt in range(50):
+    deadline = time.monotonic() + SHARING_RETRY_SECONDS
+    while True:
         try:
             os.replace(tmp, path)
             return
         except PermissionError:
-            # Windows refuses to replace a file another process has open for reading.
-            if attempt == 49:
+            # Windows refuses to replace a file another process has open for reading. Under many
+            # concurrent readers half a second was not enough (a flake seen in the full suite),
+            # so the retry is bounded by time, not by a count.
+            if time.monotonic() > deadline:
                 raise
             time.sleep(0.01)
 
@@ -109,7 +113,8 @@ class FileStore:
 
     @staticmethod
     def _load(path: Path) -> Document | None:
-        for attempt in range(50):
+        deadline = time.monotonic() + SHARING_RETRY_SECONDS
+        while True:
             try:
                 record = json.loads(path.read_text(encoding="utf-8"))
                 return Document(record["body"], record["etag"])
@@ -117,10 +122,9 @@ class FileStore:
                 return None
             except PermissionError:
                 # Windows: the file is being replaced by another writer at this instant.
-                if attempt == 49:
+                if time.monotonic() > deadline:
                     raise
                 time.sleep(0.01)
-        return None
 
     @staticmethod
     def _dump(key: str, body: dict[str, Any]) -> tuple[bytes, str]:
