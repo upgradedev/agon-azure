@@ -117,6 +117,7 @@ MUTATIONS = [
     ("spa-fallback", "staticwebapp.config.json", "/*.{css,js,", "/*.{"),
     ("swa-wildcard", "staticwebapp.config.json", '"/runs/*"', '"/runs/*", "/runs/*/*.json"'),
     ("spa-fallback-dirs", "staticwebapp.config.json", '"/runs/*"', '"/runs/*.json"'),
+    ("spa-fallback-dirs", "staticwebapp.config.json", '"/season/*"', '"/season/*.txt"'),
     ("config-json", "staticwebapp.config.json", "{", "{{"),
     ("contrast-fail", "app.css", "--text-muted: #4b5767;", "--text-muted: #a8b0ba;"),
     ("contrast-mismatch", "app.css", "--text-muted: #4b5767;", "--text-muted: #3f4a59;"),

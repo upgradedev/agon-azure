@@ -5,7 +5,8 @@
       "/*.{css,js,svg,png,ico,json,ndjson,xml,txt,webmanifest,mp3,ogg,vtt}",
       "/data/*.{json,ndjson}",
       "/data-fixture/*.{json,ndjson,txt}",
-      "/runs/*"
+      "/runs/*",
+      "/season/*"
     ]
   },
   "globalHeaders": {
