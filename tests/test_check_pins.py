@@ -15,19 +15,33 @@ import pytest
 import check_pins
 
 SCRIPT = Path(__file__).resolve().parents[1] / "ci" / "check_pins.py"
+GREEK_REQS = "requirements/\u03b4\u03bf\u03ba\u03b9\u03bc\u03ae.txt"
+IDENTITY = ["-c", "user.name=agon-test", "-c", "user.email=agon-test@example.test"]
 
 
-def git_repo(tmp_path: Path, files: dict[str, str]) -> Path:
+def git(root: Path, *args: str) -> None:
+    subprocess.run(["git", *IDENTITY, "-C", str(root), *args], check=True, capture_output=True)
+
+
+def git_repo(tmp_path: Path, files: dict[str, str], commit: bool = False) -> Path:
     subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    # The git default; set here so a developer's global config cannot hide the
+    # non-ASCII file name case.
+    git(tmp_path, "config", "core.quotepath", "true")
     for rel, text in files.items():
         path = tmp_path / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
+    if commit:
+        git(tmp_path, "add", "-A")
+        git(tmp_path, "commit", "-q", "-m", "fixture")
     return tmp_path
 
 
 def run(root: Path) -> subprocess.CompletedProcess[str]:
-    return subprocess.run([sys.executable, str(SCRIPT), "--root", str(root)], capture_output=True, text=True)
+    return subprocess.run(
+        [sys.executable, str(SCRIPT), "--root", str(root)], capture_output=True, encoding="utf-8"
+    )
 
 
 GOOD = (
@@ -84,6 +98,25 @@ def test_ignored_file_is_not_selected(tmp_path: Path) -> None:
     result = run(root)
     assert result.returncode == 0, result.stdout
     assert "requirements files scanned: 1 (requirements.txt)" in result.stdout
+
+
+def test_non_ascii_requirements_name_is_selected(tmp_path: Path) -> None:
+    # Plain `git ls-files` prints this path C-quoted, so it once failed the
+    # .txt suffix test and its loose pin was never read.
+    root = git_repo(tmp_path, {"requirements/dev.txt": "pytest==9.0.2\n", GREEK_REQS: "bar>=1\n"}, commit=True)
+    result = run(root)
+    assert result.returncode == 1, result.stdout
+    assert f"{GREEK_REQS}:1: not an exact name==version pin: bar>=1" in result.stdout
+    assert "requirements files scanned: 2" in result.stdout
+
+
+def test_listed_but_missing_requirements_file_fails(tmp_path: Path) -> None:
+    root = git_repo(tmp_path, {"requirements.txt": "pytest==9.0.2\n", "requirements-ci.txt": "pytest==9.0.2\n"},
+                    commit=True)
+    (root / "requirements-ci.txt").unlink()
+    result = run(root)
+    assert result.returncode == 1, result.stdout
+    assert "requirements-ci.txt: listed by git but not a readable regular file" in result.stdout
 
 
 def test_path_selection_rule() -> None:

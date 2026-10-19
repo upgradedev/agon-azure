@@ -7,8 +7,11 @@ names are all rejected.
 
 Files are selected by PATH from git (tracked plus untracked, minus ignored), never
 by searching their text: any file named requirements*.txt, and any .txt file
-inside a directory named requirements. Finding zero such files is a failure,
-because a gate that scanned nothing proves nothing.
+inside a directory named requirements. The list comes from `git ls-files -z`
+(see git_paths.py), because the plain form C-quotes non-ASCII names and such a
+file once failed the .txt test and was never read. Finding zero such files is a
+failure, because a gate that scanned nothing proves nothing, and so is a listed
+file that cannot be read.
 
 Allowed lines: blank lines, comments, "-r file" or "-c file" includes (the
 included file is checked on its own), and exact pins with optional extras,
@@ -21,9 +24,10 @@ from __future__ import annotations
 
 import argparse
 import re
-import subprocess
 import sys
 from pathlib import Path, PurePosixPath
+
+from git_paths import list_repo_paths
 
 EXACT_PIN = re.compile(
     r"^(?P<name>[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?)"
@@ -45,11 +49,7 @@ def is_requirements_path(path: str) -> bool:
 
 def candidate_files(root: Path) -> list[str]:
     """Repo-relative paths of requirements files, selected from git by path."""
-    out = subprocess.run(
-        ["git", "-C", str(root), "ls-files", "--cached", "--others", "--exclude-standard"],
-        check=True, capture_output=True, text=True,
-    ).stdout
-    return sorted(p for p in out.splitlines() if p and is_requirements_path(p))
+    return [p for p in list_repo_paths(root).files if is_requirements_path(p)]
 
 
 def logical_lines(text: str) -> list[tuple[int, str]]:
@@ -108,11 +108,24 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", type=Path, default=Path.cwd())
     args = parser.parse_args(argv)
 
+    if hasattr(sys.stdout, "reconfigure"):
+        # A non-ASCII path printed to a Windows pipe must not crash the gate.
+        sys.stdout.reconfigure(encoding="utf-8", errors="backslashreplace")
+
     files = candidate_files(args.root)
     failures = 0
     pins = 0
     for rel in files:
-        problems, count = check_file(args.root / rel)
+        try:
+            problems, count = check_file(args.root / rel)
+        except UnicodeDecodeError as exc:
+            print(f"{rel}: not valid UTF-8 ({exc.reason} at byte {exc.start})")
+            failures += 1
+            continue
+        except OSError:
+            print(f"{rel}: listed by git but not a readable regular file")
+            failures += 1
+            continue
         for number, text, reason in problems:
             print(f"{rel}:{number}: {reason}: {text}")
         failures += len(problems)
