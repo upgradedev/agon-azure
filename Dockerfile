@@ -17,7 +17,7 @@ WORKDIR /app
 # the -r lines and brings the pinned setuptools the package build below needs.
 # worker.txt adds the Storage SDKs of the fleet worker (job-agon-fleet).
 COPY requirements/ requirements/
-RUN python -m pip install -r requirements/fleet.txt -r requirements/intake.txt -r requirements/worker.txt
+RUN python -m pip install -r requirements/fleet.txt -r requirements/intake.txt -r requirements/worker.txt -r requirements/publish.txt
 
 COPY pyproject.toml README.md LICENSE ./
 COPY src/ src/

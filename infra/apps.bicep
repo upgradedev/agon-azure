@@ -349,5 +349,128 @@ resource fleetJob 'Microsoft.App/jobs@2025-01-01' = if (fleetEnabled) {
   }
 }
 
+// Spec 3.2 rows 11 and 11b: one Publisher job per target, each with its own
+// identity and its own trigger queue. `python -m agon.publish` recomputes the
+// bundle hash from the bytes first, reads the approval record, then writes
+// create-only into the one container its identity may write (feed or sandbox).
+var publishers = [
+  {
+    name: 'job-agon-publisher'
+    target: 'feed'
+    queue: 'publish-requests'
+    identity: 'id-publisher'
+  }
+  {
+    name: 'job-agon-publisher-sandbox'
+    target: 'sandbox'
+    queue: 'sandbox-publish-requests'
+    identity: 'id-publisher-sandbox'
+  }
+]
+
+resource publisherIdentities 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' existing = [for publisher in publishers: {
+  name: publisher.identity
+}]
+
+resource publisherJobs 'Microsoft.App/jobs@2025-01-01' = [for (publisher, i) in publishers: {
+  name: publisher.name
+  location: location
+  tags: tags
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${publisherIdentities[i].id}': {}
+    }
+  }
+  properties: {
+    environmentId: environment.id
+    workloadProfileName: 'Consumption'
+    configuration: {
+      triggerType: 'Event'
+      replicaTimeout: 900
+      replicaRetryLimit: 1
+      eventTriggerConfig: {
+        parallelism: 1
+        replicaCompletionCount: 1
+        scale: {
+          minExecutions: 0
+          maxExecutions: 1
+          pollingInterval: 15
+          rules: [
+            {
+              name: publisher.queue
+              type: 'azure-queue'
+              identity: publisherIdentities[i].id
+              metadata: {
+                accountName: storage.name
+                queueName: publisher.queue
+                queueLength: '1'
+              }
+            }
+          ]
+        }
+      }
+      registries: [
+        {
+          server: registry.properties.loginServer
+          identity: publisherIdentities[i].id
+        }
+      ]
+    }
+    template: {
+      containers: [
+        {
+          name: 'publisher'
+          image: image
+          command: [
+            'python'
+            '-m'
+            'agon.publish'
+            '--target'
+            publisher.target
+            '--idle-exit'
+            '20'
+          ]
+          env: [
+            {
+              name: 'AGON_PUBLISH_TARGET'
+              value: publisher.target
+            }
+            {
+              name: 'AGON_QUEUE_ACCOUNT_URL'
+              value: storage.properties.primaryEndpoints.queue
+            }
+            {
+              name: 'AGON_BLOB_ACCOUNT_URL'
+              value: storage.properties.primaryEndpoints.blob
+            }
+            {
+              name: 'AGON_PUBLIC_BASE_URL'
+              value: take(storage.properties.primaryEndpoints.blob, length(storage.properties.primaryEndpoints.blob) - 1)
+            }
+            {
+              name: 'AGON_COSMOS_ENDPOINT'
+              value: cosmos.properties.documentEndpoint
+            }
+            {
+              name: 'AGON_COSMOS_DATABASE'
+              value: cosmosDatabaseName
+            }
+            {
+              name: 'AZURE_CLIENT_ID'
+              value: publisherIdentities[i].properties.clientId
+            }
+          ]
+          resources: {
+            cpu: json('0.25')
+            memory: '0.5Gi'
+          }
+        }
+      ]
+    }
+  }
+}]
+
 output intakeJobName string = intakeJob.name
 output fleetJobName string = fleetEnabled ? fleetJob.name : ''
+output publisherJobNames array = [for (publisher, i) in publishers: publisherJobs[i].name]
