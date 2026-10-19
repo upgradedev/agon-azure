@@ -280,8 +280,11 @@ def test_readiness_rewrite_points_the_live_gate_at_the_recorded_run(tmp_path):
     assert names.index("demo-recorded-bundle") == names.index("demo-recorded") + 1
     demo_kept = [m for m in before["demo"].markers if not m.startswith(LABEL_PREFIXES)]
     assert after["demo"].markers == demo_kept + labels
+    # Every target the rewrite does not own stays as it was. The committed config may already
+    # point the two recorded targets at the live recorded run; the rewrite replaces them in place.
+    owned = {"demo", "demo-recorded", "demo-recorded-bundle"}
     for name, target in before.items():
-        if name != "demo":
+        if name not in owned:
             assert after[name].markers == target.markers and after[name].url == target.url
     sha = run["bundle"]["sha256"]
     assert after["demo-recorded"].markers == [
