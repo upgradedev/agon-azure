@@ -26,7 +26,7 @@ from agon.synth.rng import PPM, Stream, StreamId
 from agon.synth.schema import COORDINATE_FRAME, PITCH_X_DM, PITCH_Y_DM, Event, make_event
 from agon.synth.world import Club, League, Player, Style, fixture_list
 
-GENERATOR_VERSION = "synth-v0.1"  # v0.1: match meta records coordinate_frame
+GENERATOR_VERSION = "synth-v0.2"  # v0.2: constants calibrated against frozen bands; v0.1: meta records coordinate_frame
 GRID_X = 16
 GRID_Y = 12
 HALF_SECONDS = 2700
@@ -51,6 +51,31 @@ _PASS_DX_BASE: tuple[int, ...] = (60, 110, 200, 260, 200, 110, 60)
 _PASS_DY: tuple[int, ...] = (-3, -2, -1, 0, 1, 2, 3)
 _PASS_DY_BASE: tuple[int, ...] = (30, 80, 200, 380, 200, 80, 30)
 _POSITIONS: tuple[str, ...] = ("GK", "DF", "MF", "FW")
+
+# Calibrated constants (synth-v0.2). Each was moved by hand on calibration seeds 1 to 200 against
+# the realism bands frozen in bands.json before any of them changed; held-out results are on
+# seeds 1001 to 1200. DATASET_CARD.md section 4 records the v0.1 value of each one.
+FOUL_BASE_PPM = 480_000  # chance a failed-tackle duel is a foul, before discipline
+YELLOW_BASE_PPM = 95_000  # chance a foul draws a yellow, before discipline
+YELLOW_PER_POINT_PPM = 2_200  # added per point of (100 - discipline)
+STRAIGHT_RED_BASE_PPM = 1_500  # chance a foul draws a straight red, before discipline
+STRAIGHT_RED_PER_POINT_PPM = 25
+SAVED_SHARE_PCT = 27  # of non-goal shots: saved / off target / blocked, in percent
+OFF_TARGET_SHARE_PCT = 46
+BLOCKED_SHARE_PCT = 27
+HOME_XG_PERMILLE = 1050  # home advantage on open-play and set-piece scoring chance
+AWAY_XG_PERMILLE = 860
+HOME_PASS_BONUS_PPM = 15_000  # home advantage on pass completion
+PASSING_ATTR_PPM = 6_000  # pass completion per point of passing above 60
+CLEARED_CORNER_MIN_X = 12  # zone column from which a failed pass can be cleared behind (16 = never)
+CLEARED_CORNER_PPM = 100_000  # chance such a failed pass is cleared behind for a corner
+BOOKED_YELLOW_PERMILLE = 300  # a booked player's foul draws a second yellow at this share of the usual rate
+PASS_BASE_PPM = 940_000  # pass completion before distance, skill, pressure and zone
+PASS_DISTANCE_PPM = 52_000  # completion lost per zone of pass distance
+SHORT_GAME_PPM_PER_POINT = 320  # completion per point of (500 - directness): patient sides are drilled to keep the ball
+SHOT_APPETITE_PERMILLE = 1350  # scales the shot weight against pass and carry
+PASS_ACTION_WEIGHT = 800  # weight of a pass against shot and carry for the player on the ball
+SECOND_HALF_XG_PER_MINUTE = 12  # per-mille scoring chance added per minute played after 45 (fatigue)
 
 
 def _centrality(zy: int) -> int:
@@ -262,11 +287,11 @@ class MatchSimulator:
     def _action_weights(self, team: TeamState, carrier: Player, zone: Zone) -> tuple[int, int, int]:
         """(shot, pass, carry) weights for the next on-ball action."""
         style = self._effective_style(team)
-        shot = _SHOT_WEIGHT_BY_X[zone[0]] * _centrality(zone[1]) // 1000
+        shot = _SHOT_WEIGHT_BY_X[zone[0]] * _centrality(zone[1]) * SHOT_APPETITE_PERMILLE // 1_000_000
         shot = shot * (1000 + self._momentum_bonus(team) // 2) // 1000
         if team.goals < self._opponent(team).goals and self.clock >= 75 * 60:
             shot = shot * 13 // 10
-        pas = 600
+        pas = PASS_ACTION_WEIGHT
         carry = max(60, 250 + carrier.pace * 3 - style.directness // 4)
         if carrier.position == "GK":
             shot, carry = 0, 10
@@ -278,9 +303,13 @@ class MatchSimulator:
         """Emit the foul and any card; a red or second yellow removes the player."""
         self._emit("foul", offender_team, offender, point, outcome="committed")
         disc = self._stream(StreamId.DISCIPLINE)
-        if disc.chance_ppm(3_000 + (100 - offender.discipline) * 40):
+        if disc.chance_ppm(STRAIGHT_RED_BASE_PPM + (100 - offender.discipline) * STRAIGHT_RED_PER_POINT_PPM):
             card = "red"
-        elif disc.chance_ppm(60_000 + (100 - offender.discipline) * 2_200):
+        elif disc.chance_ppm(
+            (YELLOW_BASE_PPM + (100 - offender.discipline) * YELLOW_PER_POINT_PPM)
+            * (BOOKED_YELLOW_PERMILLE if offender_team.yellows.get(offender.player_id, 0) else 1000)
+            // 1000
+        ):
             card = "second_yellow" if offender_team.yellows.get(offender.player_id, 0) >= 1 else "yellow"
         else:
             return
@@ -367,10 +396,14 @@ class MatchSimulator:
                 xg = xg * 7 // 10
             if qualifier == "header":
                 xg = xg * 8 // 10
+            xg = xg * (HOME_XG_PERMILLE if team is self.home else AWAY_XG_PERMILLE) // 1000
+            late = self.clock // 60 - 45
+            if late > 0:
+                xg = xg * (1000 + SECOND_HALF_XG_PER_MINUTE * late) // 1000
         xg = _clamp(xg, 4_000, 900_000)
         rest = PPM - xg
         outcome = ("goal", "saved", "off_target", "blocked")[
-            s.weighted((xg, rest * 33 // 100, rest * 42 // 100, rest * 25 // 100))
+            s.weighted((xg, rest * SAVED_SHARE_PCT // 100, rest * OFF_TARGET_SHARE_PCT // 100, rest * BLOCKED_SHARE_PCT // 100))
         ]
         if outcome in ("goal", "saved"):
             end = (PITCH_X_DM, s.between(GOAL_Y_LO, GOAL_Y_HI))
@@ -430,7 +463,7 @@ class MatchSimulator:
                     pressed = True
                     if pressure.chance_ppm(220_000 + (presser.tackling - carrier.pace) * 2_000):
                         in_box = zone[0] >= 14 and 3 <= zone[1] <= 8
-                        foul_ppm = 330_000 + (100 - presser.discipline) * 3_000
+                        foul_ppm = FOUL_BASE_PPM + (100 - presser.discipline) * 3_000
                         if in_box:
                             foul_ppm //= 6  # defenders are careful in their own box
                         if pressure.chance_ppm(foul_ppm):
@@ -459,7 +492,10 @@ class MatchSimulator:
                     target = self._pass_target(act, team, zone, pressed)
                 tpoint = zone_point(sp, target)
                 dist = abs(target[0] - zone[0]) + abs(target[1] - zone[1])
-                ok = 900_000 - dist * 35_000 + (carrier.passing - 60) * 3_000
+                ok = PASS_BASE_PPM - dist * PASS_DISTANCE_PPM + (carrier.passing - 60) * PASSING_ATTR_PPM
+                if team is self.home:
+                    ok += HOME_PASS_BONUS_PPM
+                ok += (500 - self._effective_style(team).directness) * SHORT_GAME_PPM_PER_POINT
                 ok += self._momentum_bonus(team) * 60
                 ok -= 40_000 * (11 - len(team.on_pitch))
                 if pressed:
@@ -484,6 +520,11 @@ class MatchSimulator:
                     return Restart(opp, zone_of(mx, touch), "throw_in", "out_of_play", (mx, touch))
                 self._emit("pass", team, carrier, point, end=tpoint, under_pressure=pressed, outcome="incomplete")
                 self.clock += timing.between(2, 3)
+                if target[0] >= CLEARED_CORNER_MIN_X and act.chance_ppm(CLEARED_CORNER_PPM):
+                    # The defender gets there first but can only clear it behind his own line.
+                    corner_point = (PITCH_X_DM, PITCH_Y_DM if tpoint[1] >= PITCH_Y_DM // 2 else 0)
+                    self.clock += timing.between(20, 35)
+                    return Restart(team, zone_of(*corner_point), "corner", None, corner_point)
                 return Restart(opp, mirror_zone(target), None, "interception", (PITCH_X_DM - tpoint[0], PITCH_Y_DM - tpoint[1]))
             # carry
             target = (_clamp(zone[0] + act.between(0, 2), 0, GRID_X - 1), _clamp(zone[1] + act.between(-1, 1), 0, GRID_Y - 1))

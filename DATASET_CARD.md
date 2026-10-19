@@ -1,9 +1,11 @@
 # Agon synthetic match data: dataset card
 
-Generator version `synth-v0.1`. Everything here is synthetic and fictional. No real league, club,
+Generator version `synth-v0.2`. Everything here is synthetic and fictional. No real league, club,
 player or match data was used to build, seed or calibrate it.
 
-Sections that describe parts not built yet say so. Nothing below is a measured realism claim.
+Sections that describe parts not built yet say so. Nothing below is a claim about real football:
+the realism bands in section 4 are ranges we chose as sanity checks, and every number is
+self-measured with the command printed beside it.
 
 ## 1. Motivation
 
@@ -61,8 +63,8 @@ Worked example, home club `C1`, away club `C2`:
 | `C1` pass from | (300, 200) | (300, 200) |
 
 The carrier and the presser land on the same spot only after conversion. `tests/test_synth_frame.py`
-pins this example. It also checks all 1341 pressure, tackle and foul events of generated seeds 11
-to 15 (match index 0) against the carrier's spot, with none skipped, and every interception
+pins this example. It also checks all 1198 pressure, tackle and foul events of generated seeds 11
+to 15 (match index 0, generator `synth-v0.2`) against the carrier's spot, with none skipped, and every interception
 restart against the end of the intercepted pass.
 
 Known quirk: a `sub` event is stored at `(525, 0)`, a fixed marker on the `y_dm = 0` touchline of the
@@ -84,9 +86,77 @@ thresholds in parts per million, with no `exp`, `log` or `pow` in the sampling p
 
 ## 4. Calibration
 
-Not built yet. The v0 tests check only wide sanity ranges (goals 0 to 9 and shots 5 to 40 per
-match, on seeds 1 to 50). They are not realism bands.
+**Bands.** 22 realism bands live in `src/agon/synth/bands.json`. They are ranges we chose from
+general football knowledge as sanity checks for a synthetic generator, not measurements of any
+real league. They were frozen, and their sha256 written to `src/agon/synth/bands.lock`, in a commit
+before any engine constant changed (`git log --follow src/agon/synth/bands.json` shows the order).
+The CLI refuses a bands file that does not match its lock, and `tests/test_synth_bands.py` pins the
+same hash as a literal. Before the bands were written we had read v0.1 aggregates for seeds 1001
+to 1040 (goals, shots, passes, cards, corners); the bands were not set to bracket them.
 
+Two bands need tracking data (sprints per outfield player, distance per outfield player). The
+generator has none yet, so they print NOT MEASURABLE and count as not passed. With the M2 threshold
+at 20 of 22, every other band must pass.
+
+**Fitting.** The engine constants in `agon.synth.engine` (the block under "Calibrated constants")
+were moved by hand, not by the evolution strategy the build spec describes, which is not built.
+About ten evaluation rounds ran on calibration seeds only: seeds 1 to 200 at match index 0, and for
+the last rounds seeds 1 to 200 at match indices 0, 7 and 15 (600 matches) to reduce noise. No band
+was changed. The held-out seeds were read once before fitting (the v0.1 column) and once after.
+
+| Constant | v0.1 | v0.2 | Why |
+|---|---|---|---|
+| `FOUL_BASE_PPM` | 330000 | 480000 | fouls per match were below the band |
+| `YELLOW_BASE_PPM` | 60000 | 95000 | yellows per match were below the band |
+| `STRAIGHT_RED_BASE_PPM`, `STRAIGHT_RED_PER_POINT_PPM` | 3000, 40 | 1500, 25 | more fouls would have pushed reds above the band |
+| `BOOKED_YELLOW_PERMILLE` | 1000 (no caution) | 300 | booked players were sent off too often |
+| `SAVED_SHARE_PCT`, `OFF_TARGET_SHARE_PCT`, `BLOCKED_SHARE_PCT` | 33, 42, 25 | 27, 46, 27 | shots on target ratio was above the band |
+| `HOME_XG_PERMILLE`, `AWAY_XG_PERMILLE` | 1000, 1000 (no home advantage) | 1050, 860 | home goal share and home win rate were below the band |
+| `HOME_PASS_BONUS_PPM` | 0 | 15000 | home advantage in keeping the ball |
+| `PASSING_ATTR_PPM` | 3000 | 6000 | possession split was too even |
+| `SHORT_GAME_PPM_PER_POINT` (reads `directness`) | 0 | 320 | possession split was too even |
+| `PASS_BASE_PPM`, `PASS_DISTANCE_PPM` | 900000, 35000 | 940000, 52000 | long passes cost more; completion kept in the band |
+| `PASS_ACTION_WEIGHT`, `SHOT_APPETITE_PERMILLE` | 600, 1000 | 800, 1350 | passes and shots per team stayed in the band together |
+| `CLEARED_CORNER_MIN_X`, `CLEARED_CORNER_PPM` | none | 12, 100000 | corners per match were about half the band |
+| `SECOND_HALF_XG_PER_MINUTE` | 0 | 12 | second-half goal share was at the lower edge |
+
+**Results (self-measured, Windows 11, Python 3.11, branch `b/synth-realism`).** Command:
+`python -m agon.synth.bands --seeds 1001-1200 --bands bands.json` (with `PYTHONPATH=src`).
+
+| Band | lo | hi | v0.1 held-out | v0.2 held-out |
+|---|---|---|---|---|
+| goals_per_match | 2.30 | 3.10 | 2.5450 PASS | 2.5800 PASS |
+| home_win_rate | 0.38 | 0.50 | 0.3350 FAIL | 0.4550 PASS |
+| draw_rate | 0.20 | 0.32 | 0.3200 PASS | 0.2500 PASS |
+| zero_zero_rate | 0.04 | 0.11 | 0.0750 PASS | 0.0800 PASS |
+| home_goal_share | 0.52 | 0.60 | 0.5010 FAIL | 0.5950 PASS |
+| comeback_rate | 0.24 | 0.40 | 0.3243 PASS | 0.2935 PASS |
+| shots_per_team | 10.0 | 14.5 | 11.4525 PASS | 11.4750 PASS |
+| shots_on_target_ratio | 0.30 | 0.40 | 0.4128 FAIL | 0.3534 PASS |
+| goals_per_shot | 0.09 | 0.13 | 0.1111 PASS | 0.1124 PASS |
+| passes_per_team | 380 | 560 | 424.2150 PASS | 432.3075 PASS |
+| pass_completion | 0.75 | 0.87 | 0.7640 PASS | 0.7802 PASS |
+| possession_dominant_share | 0.54 | 0.64 | 0.5372 FAIL | 0.5773 PASS |
+| fouls_per_match | 19 | 27 | 17.9550 FAIL | 22.2300 PASS |
+| yellow_cards_per_match | 3.0 | 5.0 | 2.4400 FAIL | 3.6300 PASS |
+| red_cards_per_match | 0.06 | 0.25 | 0.2800 FAIL | 0.1650 PASS |
+| corners_per_match | 8.5 | 11.5 | 4.7450 FAIL | 10.3450 PASS |
+| penalties_per_match | 0.18 | 0.40 | 0.2100 PASS | 0.3150 PASS |
+| set_piece_goal_share | 0.20 | 0.35 | 0.1690 FAIL | 0.3178 PASS |
+| second_half_goal_share | 0.52 | 0.60 | 0.5403 PASS | 0.6105 FAIL |
+| late_goal_share | 0.18 | 0.30 | 0.2515 PASS | 0.3023 FAIL |
+| sprints_per_outfield_player | 20 | 60 | NOT MEASURABLE | NOT MEASURABLE |
+| distance_per_outfield_player_km | 9.0 | 12.5 | NOT MEASURABLE | NOT MEASURABLE |
+| **M2 passed** | | | **11 of 22** | **18 of 22** |
+
+M2 on the held-out seeds is **18 of 22, below the threshold of 20**, and the CLI exits 1. The two
+misses are the goal-timing bands, just above their upper edges. On the 600 calibration matches the
+same two bands sat inside (0.5693 and 0.2484), so the miss is either noise in 200 matches (one
+standard error of a share over about 516 goals is about 0.022) or a real overshoot of the fatigue
+term. We did not retune on the held-out seeds, because that would turn them into calibration seeds.
+The next fit must run on calibration seeds only, and the result is reported here as it stands.
+On the calibration seeds 1 to 200 at match index 0 the same command gives 20 of 22.
+Total wall time for the 200 held-out matches: about 41 s on this machine (printed on stderr).
 ## 5. Labels
 
 Not built yet (turning-point labels, storyline labels, planted-error manifests).
@@ -111,6 +181,6 @@ windows-latest. The hash values of record come from that CI run, not from this c
 
 ## 8. Maintenance and known gaps
 
-- v0 engine, uncalibrated.
+- Engine constants fitted by hand on calibration seeds; M2 held-out is 18 of 22 (section 4).
 - No tracking data and no video.
 - The sub marker location described in section 2.
