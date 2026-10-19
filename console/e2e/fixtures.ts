@@ -5,6 +5,7 @@
 */
 import { test as base, expect, type Locator, type Page } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
+import type { Run } from "../src/lib/types";
 
 declare global {
   interface Window {
@@ -12,7 +13,6 @@ declare global {
   }
 }
 
-export const LABEL = "Design preview: sample run written by hand, not produced by the pipeline.";
 export const STANDIN = "Stand-in for the Microsoft Teams card. It calls the same decision endpoint. The real Teams card is in the video.";
 
 export const test = base.extend<{ guard: void }>({
@@ -40,6 +40,24 @@ export const test = base.extend<{ guard: void }>({
 });
 
 export { expect };
+
+/* The run a run-scoped screen shows, read from the files the site serves:
+   #/newsroom/<id>, #/approve/<id> and #/recap/<id> name it in the URL. */
+export async function runOnScreen(page: Page): Promise<Run> {
+  const m = /#\/(?:newsroom|approve|recap)\/([a-z0-9-]+)/.exec(page.url());
+  expect(m, `the URL ${page.url()} names a run`).not.toBeNull();
+  const response = await page.request.get(`/runs/${m?.[1] ?? ""}.json`);
+  expect(response.ok(), "the run file is served").toBe(true);
+  return (await response.json()) as Run;
+}
+
+/* The run the site shows by default: the first in runs/index.json. */
+export async function defaultRun(page: Page): Promise<Run> {
+  const index = await (await page.request.get("/runs/index.json")).json();
+  const response = await page.request.get(`/runs/${index.runs[0].file}`);
+  expect(response.ok(), "the default run file is served").toBe(true);
+  return (await response.json()) as Run;
+}
 
 /* The app has hydrated the prerendered page. */
 export async function appReady(page: Page): Promise<void> {

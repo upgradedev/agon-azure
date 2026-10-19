@@ -20,6 +20,7 @@ import recorded_kit
 import web_check
 from agon import webrecord, webrun
 from agon.governance.seal import canonical_utf8
+from sitekit import vanilla_fixture
 
 ROOT = Path(__file__).resolve().parent.parent
 RECORDED = ROOT / "tests" / "fixtures" / "recorded-run" / "runs"
@@ -116,8 +117,7 @@ def test_unticked_payloads_are_withheld_and_named_by_the_manifest():
 
 def test_export_lists_the_recorded_run_first_and_keeps_the_design_preview(container, tmp_path):
     root, sha = container
-    runs = tmp_path / "runs"
-    shutil.copytree(SAMPLE_RUNS, runs)
+    runs = vanilla_fixture(tmp_path / "web") / "runs"
     assert _export(root, sha, runs) == 0
     assert webrun.verify_run_dir(runs) == ["run-afc16bdd87a7", "sample-s1"]
     index = json.loads((runs / "index.json").read_text(encoding="utf-8"))
@@ -248,9 +248,15 @@ def test_the_local_feed_never_leaves_its_folder(tmp_path):
 
 def test_text_the_site_cannot_serve_is_named_by_file_and_rule():
     dash = chr(0x2013)  # an en dash, built so this file holds none
-    files = {"run-x/report-en.json": f'{{"text":"1{dash}0"}}'.encode("utf-8"), "run-x/destination-feeds.json": b"{}"}
-    problems = webrecord.text_problems(files, ["run-x/report-en.json"])
-    assert problems and all(p.startswith("run-x/report-en.json: ") for p in problems)
+    files = {
+        "run-x/report-en.json": f'{{"text":"1{dash}0"}}'.encode("utf-8"),
+        "run-x/destination-feeds.json": b'{"text":"Rated 9/10 by the desk."}',
+        "run-x/card.json": b"{}",
+    }
+    problems = webrecord.text_problems(files)
+    assert any(p.startswith("run-x/report-en.json: ") for p in problems), problems
+    assert any(p.startswith("run-x/destination-feeds.json: ") for p in problems), problems
+    assert not any(p.startswith("run-x/card.json") for p in problems)
 
 
 # ---------------------------------------------------------------- the live gate follows the default run
@@ -293,13 +299,26 @@ def test_readiness_rewrite_points_the_live_gate_at_the_recorded_run(tmp_path):
     assert config.read_text(encoding="utf-8") == text, "a second rewrite changes nothing"
 
 
-def test_readiness_rewrite_keeps_the_committed_file_byte_for_byte_for_the_design_preview(tmp_path):
-    """Rewriting for the run shown today reproduces ci/readiness.json exactly, so the format round-trips."""
+def test_the_committed_config_is_what_the_rewrite_writes_for_the_run_shown_by_default(tmp_path):
+    """Rewriting for the first run in web/runs/index.json reproduces ci/readiness.json byte for byte:
+    the design preview before a recorded run is committed, that run after."""
     config = tmp_path / "readiness.json"
     shutil.copy(CONFIG, config)
-    sample = json.loads((SAMPLE_RUNS / "sample-s1.json").read_text(encoding="utf-8"))
-    webrecord.rewrite_readiness(config, sample)
+    shown = web_check.default_run(SAMPLE_RUNS.parent)
+    assert shown is not None
+    webrecord.rewrite_readiness(config, shown[1])
     assert config.read_bytes() == CONFIG.read_bytes()
+
+
+def test_rewriting_for_the_design_preview_again_drops_the_recorded_targets(tmp_path):
+    config = tmp_path / "readiness.json"
+    shutil.copy(CONFIG, config)
+    webrecord.rewrite_readiness(config, _fixture_run())
+    sample = json.loads((SAMPLE_RUNS / "sample-s1.json").read_text(encoding="utf-8"))
+    assert webrecord.rewrite_readiness(config, sample) == [m for _, m in web_check.PAGE_LABEL_MARKERS]
+    targets = {t.name: t for t in readiness.load_config(config)[0]}
+    assert "demo-recorded" not in targets and "demo-recorded-bundle" not in targets
+    assert [m for m in targets["demo"].markers if m.startswith(LABEL_PREFIXES)] == [m for _, m in web_check.PAGE_LABEL_MARKERS]
 
 
 def test_readiness_only_rewrites_from_a_run_file(tmp_path, capsys):

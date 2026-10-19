@@ -510,9 +510,11 @@ def _ci_module(name: str) -> ModuleType:
     return module
 
 
-def text_problems(files: Mapping[str, bytes], page_files: Sequence[str]) -> list[str]:
-    """Dashes in every text file (check_dashes and web_check), and the readiness rules (real names,
-    self-scores, the banned word) in the files whose text reaches the served page or a gate target."""
+def text_problems(files: Mapping[str, bytes]) -> list[str]:
+    """Dashes (ci/check_dashes.py and ci/web_check.py) and the live gate's rules (real names,
+    self-scores, the banned words of ci/readiness.py) in every text file the export writes: the
+    page and the gate fetch the run and its editions, and tests/test_web_runs.py scans every file
+    under web/ with the same rules, so a payload that trips one is refused here, not in CI."""
     web_check = _ci_module("web_check")
     readiness = _ci_module("readiness")
     rules = readiness.build_rules()
@@ -522,8 +524,7 @@ def text_problems(files: Mapping[str, bytes], page_files: Sequence[str]) -> list
             continue
         text = data.decode("utf-8")
         problems += [f"{name}: {v.message} (line {v.line})" for v in web_check.check_dashes(name, text)]
-        if name in page_files:
-            problems += [f"{name}: {hit}" for hit in readiness.forbidden_hits(text, rules)]
+        problems += [f"{name}: {hit}" for hit in readiness.forbidden_hits(text, rules)]
     return problems
 
 
@@ -551,8 +552,7 @@ def _index_with(runs_dir: Path, run: dict[str, Any]) -> bytes:
 def write_export(runs_dir: Path, run: dict[str, Any], p: Published) -> list[str]:
     """Check the export in a scratch copy, then write it. Returns the run ids the folder now verifies."""
     files = run_files(run, p)
-    page_files = [f"{run['run_id']}.json", *(f"{run['run_id']}/{m['file']}" for m in run["editions"])]
-    problems = text_problems(files, page_files)
+    problems = text_problems(files)
     if problems:
         raise ExportError("sealed text the site cannot serve: " + "; ".join(problems))
     if (runs_dir / run["run_id"]).exists() or (runs_dir / f"{run['run_id']}.json").exists():

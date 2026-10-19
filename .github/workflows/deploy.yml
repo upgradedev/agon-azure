@@ -3,9 +3,16 @@
 # what-if    main only, before every deploy: compiles main.bicep and asks Azure what
 #            would change. It is not run on pull requests (see below).
 # deploy     main only, environment azure: incremental deployment of main.bicep.
-# web        main only: generates the recorded synthetic data for the published
-#            seeds, stamps the commit, fetches the Static Web Apps token at run time
-#            and uploads web/.
+# web-build  main only, no Azure identity (no id-token, no environment): builds the
+#            React console (console/) from its committed lock, prerenders it,
+#            generates the recorded synthetic data for the published seeds, stamps
+#            the commit and the season files, runs ci/web_check.py and the live
+#            readiness gate offline on those exact bytes, and uploads them as the
+#            artifact agon-site. Third-party build code never runs where a token
+#            can be minted.
+# web        main only, environment azure: downloads agon-site, runs
+#            ci/web_check.py again on the downloaded bytes, fetches the Static Web
+#            Apps token at run time and uploads them. web/ is no longer uploaded.
 # readiness  main only: the live gate (ci/readiness.py) against the deployed host,
 #            with the commit sha as a required body marker. Fails on any non-200.
 # ai         main only, environment azure, after deploy: lints, what-ifs and deploys
@@ -45,6 +52,7 @@ on:
     paths:
       - "infra/**"
       - "web/**"
+      - "console/**"
       - "src/agon/**"
       - "requirements/**"
       - "Dockerfile"
@@ -214,8 +222,60 @@ jobs:
           print("\n".join(f"{k}: {v}" for k, v in rows.items()))
           PY
 
+  # The site is built where no Azure token can be minted: npm ci and the Vite build
+  # run third-party code, so this job holds contents: read only. The web job below
+  # receives the built bytes as an artifact and never runs npm.
+  web-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: read
+    env:
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Exact pins in package.json, and the committed lock agrees with them
+        working-directory: console
+        run: |
+          test -f package-lock.json
+          node scripts/check-deps.mjs
+          node scripts/check-deps.mjs --lock
+      - name: Install from the committed lock (no install scripts)
+        working-directory: console
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Build and prerender every view into index.html (runs from web/runs)
+        working-directory: console
+        run: npm run build
+      - name: Generate the recorded synthetic data for the published seeds
+        run: |
+          rm -rf console/dist/data
+          python -m agon.webdata --seeds "$PUBLISHED_SEEDS" --out console/dist/data
+      - name: Stamp the commit, re-hash the data, write the season files and verify the runs
+        run: python ci/stamp_web.py console/dist --sha "$GITHUB_SHA" --data-dir console/dist/data --seeds "$PUBLISHED_SEEDS"
+      - name: Static checks on the exact tree that ships
+        run: python ci/web_check.py console/dist
+      - name: The live readiness gate, offline, on the exact bytes that ship
+        run: |
+          python console/scripts/readiness_offline.py console/dist "$RUNNER_TEMP/readiness" README.md
+          python ci/readiness.py --offline "$RUNNER_TEMP/readiness" --set-host agon.example --add-marker "demo=$GITHUB_SHA"
+      - name: Hand the checked site to the upload job
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: agon-site
+          path: console/dist/
+          if-no-files-found: error
+          retention-days: 7
+
   web:
-    needs: deploy
+    needs: [deploy, web-build]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: azure
@@ -223,7 +283,6 @@ jobs:
       contents: read
       id-token: write
     env:
-      PYTHONPATH: src
       SWA_NAME: ${{ needs.deploy.outputs.static_site_name }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -232,14 +291,14 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - name: Generate the recorded synthetic data for the published seeds
-        run: |
-          rm -rf web/data
-          python -m agon.webdata --seeds "$PUBLISHED_SEEDS" --out web/data
-      - name: Stamp the commit and re-hash the data against its manifest
-        run: python ci/stamp_web.py web --sha "$GITHUB_SHA" --data-dir web/data --seeds "$PUBLISHED_SEEDS"
-      - name: Static checks on the exact tree that ships
-        run: python ci/web_check.py web
+      # Into the workspace, not RUNNER_TEMP: the Static Web Apps action runs in a
+      # container that mounts only the workspace.
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0 (git ls-remote 2026-10-19)
+        with:
+          name: agon-site
+          path: site
+      - name: Static checks again on the downloaded bytes, the exact tree that uploads
+        run: python ci/web_check.py site
       - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0 (peeled tag, git ls-remote 2026-10-19)
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
@@ -262,7 +321,7 @@ jobs:
         with:
           azure_static_web_apps_api_token: ${{ steps.token.outputs.token }}
           action: upload
-          app_location: web
+          app_location: site
           api_location: ""
           output_location: ""
           skip_app_build: true

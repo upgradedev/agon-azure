@@ -30,7 +30,7 @@ from agon.governance.claims import Claim, Sentence
 from agon.governance.factgate import check_translation, run_factgate
 from agon.governance.rights import run_rights
 from agon.governance.seal import canonical_utf8, sha256_hex, verify_manifest
-from sitekit import served
+from sitekit import served, vanilla_fixture
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
@@ -203,7 +203,11 @@ def test_sample_still_builds_from_the_real_gates():
 
 
 def test_runs_folder_verifies_end_to_end():
-    assert webrun.verify_run_dir(RUNS) == ["sample-s1"]
+    rows = json.loads((RUNS / "index.json").read_text(encoding="utf-8"))["runs"]
+    assert webrun.verify_run_dir(RUNS) == [row["run_id"] for row in rows]
+    # the hand-written sample stays listed as the fallback; anything else listed is a recorded pipeline run
+    assert [row["run_id"] for row in rows if row["provenance"] == "design_preview"] == ["sample-s1"]
+    assert all(row["provenance"] == "pipeline" for row in rows if row["run_id"] != "sample-s1")
 
 
 def test_bundle_hash_is_sha256_of_the_served_manifest_and_every_edition_matches():
@@ -408,8 +412,9 @@ def test_sample_builder_refuses_sentences_a_gate_would_refuse(monkeypatch):
 
 
 def test_cli_check_and_failure(tmp_path, capsys):
+    ids = [row["run_id"] for row in json.loads((RUNS / "index.json").read_text(encoding="utf-8"))["runs"]]
     assert webrun.main(["--check", str(RUNS)]) == 0
-    assert "verified 1 runs: sample-s1" in capsys.readouterr().out
+    assert f"verified {len(ids)} runs: {', '.join(ids)}" in capsys.readouterr().out
     runs = _copy_runs(tmp_path)
     (runs / "index.json").unlink()
     assert webrun.main(["--check", str(runs)]) == 1
@@ -420,9 +425,8 @@ def test_cli_check_and_failure(tmp_path, capsys):
 
 
 def _copy_web(tmp_path: Path) -> Path:
-    target = tmp_path / "web"
-    shutil.copytree(WEB, target)
-    return target
+    """The retired hand-written page with the design preview as its only run (tests/sitekit.py)."""
+    return vanilla_fixture(tmp_path / "web")
 
 
 def _copy_served(tmp_path: Path) -> Path:
@@ -436,9 +440,19 @@ def test_web_check_passes_on_the_shipped_tree():
     assert count > 20 and violations == [], violations
 
 
-def test_web_check_passes_on_the_retired_vanilla_tree_it_still_holds_as_a_fixture():
-    count, violations = web_check.scan(WEB)
+def test_web_check_passes_on_the_retired_vanilla_tree_it_still_holds_as_a_fixture(tmp_path):
+    count, violations = web_check.scan(_copy_web(tmp_path))
     assert count > 20 and violations == []
+
+
+def _site(kind: str, tmp_path: Path) -> Path:
+    return _copy_web(tmp_path) if kind == "vanilla" else _copy_served(tmp_path)
+
+
+def _shown_markers(web: Path) -> list[str]:
+    shown = web_check.default_run(web)
+    assert shown is not None
+    return [marker for _, marker in web_check.page_label_markers(shown[1])]
 
 
 def test_web_check_refuses_a_design_preview_run_without_its_label(tmp_path):
@@ -450,24 +464,31 @@ def test_web_check_refuses_a_design_preview_run_without_its_label(tmp_path):
     assert "run-label" in rules
 
 
-def test_web_check_refuses_a_page_without_the_label(tmp_path):
-    web = _copy_served(tmp_path)
+@pytest.mark.parametrize("kind", ["vanilla", "served"])
+def test_web_check_refuses_a_page_without_the_label(tmp_path, kind):
+    web = _site(kind, tmp_path)
     index = web / "index.html"
-    index.write_bytes(index.read_bytes().replace(LABEL.encode("utf-8"), b"Sample run."))
-    rules = {v.rule for v in web_check.scan(web)[1]}
-    assert "run-label-page" in rules
+    page = index.read_text(encoding="utf-8")
+    for marker in _shown_markers(web):
+        assert marker in page
+        page = page.replace(marker, marker[: marker.index(">") + 1] + "Sample run.")
+    index.write_text(page, encoding="utf-8")
+    found = [v for v in web_check.scan(web)[1] if v.rule == "run-label-page"]
+    assert len(found) == 3, found
 
 
+@pytest.mark.parametrize("kind", ["vanilla", "served"])
 @pytest.mark.parametrize("element", ["wall-label", "approve-label", "recap-label"])
-def test_web_check_refuses_a_page_missing_one_screen_copy_of_the_label(tmp_path, element):
+def test_web_check_refuses_a_page_missing_one_screen_copy_of_the_label(tmp_path, element, kind):
     """Only one copy goes; the others stay. A bare substring check passed this."""
-    web = _copy_served(tmp_path)
+    web = _site(kind, tmp_path)
     index = web / "index.html"
     page = index.read_text(encoding="utf-8")
     start = page.index(f'id="{element}">')
     end = page.index("</p>", start)
     stripped = page[:start] + f'id="{element}">Sample run.' + page[end:]
-    assert stripped.count(LABEL) == page.count(LABEL) - 1 >= 2
+    markers = _shown_markers(web)
+    assert [m for m in markers if m not in stripped] == [m for m in markers if m.startswith(f'id="{element}">')]
     index.write_bytes(stripped.encode("utf-8"))
     found = [v for v in web_check.scan(web)[1] if v.rule == "run-label-page"]
     assert len(found) == 1 and element in found[0].message, found

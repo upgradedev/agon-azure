@@ -89,8 +89,9 @@ export function SeedNotice({ blownSeed, run }: { blownSeed: number | null; run: 
   }
   return (
     <Notice tone="warning" className="mb-5">
-      You blew full time on seed {blownSeed}, but the only run on this site is the hand-written sample for seed {run.seed}, so this
-      screen shows that seed {run.seed} sample instead.
+      {run.provenance === "design_preview"
+        ? `You blew full time on seed ${blownSeed}, but the only run on this site is the hand-written sample for seed ${run.seed}, so this screen shows that seed ${run.seed} sample instead.`
+        : `You blew full time on seed ${blownSeed}, but no recorded run on this site is for that seed, so this screen shows the recorded run for seed ${run.seed} instead.`}
     </Notice>
   );
 }

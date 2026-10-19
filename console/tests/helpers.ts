@@ -28,3 +28,19 @@ export function diskFetchAt(root: string): FetchText {
 }
 
 export const diskFetch: FetchText = diskFetchAt(WEB);
+
+type IndexRow = { run_id: string; file: string; provenance: string };
+
+/* web/ as it reads once the build session has exported a recorded run: the recorded fixture
+   listed first, every run web/runs lists after it (the sample stays as the fallback). */
+export const afterFetch: FetchText = async (url) => {
+  if (url === "runs/index.json") {
+    const committed = readJson<{ format: string; runs: IndexRow[] }>(join(WEB, "runs", "index.json"));
+    const recorded = readJson<{ runs: IndexRow[] }>(join(RECORDED, "runs", "index.json")).runs;
+    const ids = new Set(recorded.map((r) => r.run_id));
+    const runs = [...recorded, ...committed.runs.filter((r) => !ids.has(r.run_id))];
+    return { ok: true, status: 200, text: JSON.stringify({ format: committed.format, runs }) };
+  }
+  const fromRecorded = await diskFetchAt(RECORDED)(url);
+  return fromRecorded.ok ? fromRecorded : diskFetch(url);
+};

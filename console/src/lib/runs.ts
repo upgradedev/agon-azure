@@ -22,12 +22,28 @@ import type {
   GateVerdict,
   LoadedRun,
   Run,
+  RunsData,
   Sentence,
   SentenceType,
 } from "./types";
 import { isInt, isObject } from "./core";
 
 export const RUNS_BASE = "runs/";
+
+/* The run Blow full time opens for a seed. A recorded pipeline run comes first: the one for this
+   seed, else the first one listed (the seed notice then says it is for another seed). Only while
+   no recorded run is listed does the hand-written sample open, for this seed or as the default. */
+export function runForBlow(data: RunsData, seed: number | null): LoadedRun | null {
+  const all = data.index.runs.map((row) => data.runs[row.run_id]).filter((r): r is LoadedRun => Boolean(r));
+  const recorded = all.filter((r) => r.run.provenance === "pipeline");
+  return (
+    recorded.find((r) => r.run.seed === seed) ??
+    recorded[0] ??
+    all.find((r) => r.run.seed === seed) ??
+    data.runs[data.defaultRunId] ??
+    null
+  );
+}
 export const INDEX_NAME = "index.json";
 export const RUN_FORMAT = "agon.web-run/1";
 export const INDEX_FORMAT = "agon.web-runs/1";

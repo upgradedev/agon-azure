@@ -351,7 +351,8 @@ test("run rules agree with the Python validator on the shared cases", () => {
 test("the runs index is valid and names the sample", () => {
   const index = JSON.parse(fs.readFileSync(path.join(RUNS, "index.json"), "utf8"));
   assert.deepEqual(runsApi.validateIndex(index), []);
-  assert.equal(index.runs[0].run_id, "sample-s1");
+  /* The sample stays listed as the fallback; a recorded run exported by agon.webrecord goes first. */
+  assert.deepEqual(index.runs.filter((r) => r.provenance === "design_preview").map((r) => r.run_id), ["sample-s1"]);
   assert.ok(runsApi.validateIndex({ format: "agon.web-runs/1", runs: [] }).length > 0);
 });
 

@@ -28,13 +28,14 @@ import {
   validateIndex,
   validateRun,
   wallItems,
+  runForBlow,
   why,
   withheldPayloads,
 } from "../src/lib/runs";
 import { chipsFor } from "../src/lib/destinations";
-import { loadRunsData } from "../src/lib/loader";
+import { loadRunsData, type FetchText } from "../src/lib/loader";
 import type { BundleManifest, Destination, Run } from "../src/lib/types";
-import { CASES, RECORDED, WEB, diskFetch, diskFetchAt, readJson } from "./helpers";
+import { CASES, RECORDED, WEB, afterFetch, diskFetch, diskFetchAt, readJson } from "./helpers";
 
 type Op = { path: (string | number)[]; delete?: boolean; value?: unknown; from?: (string | number)[] };
 type RunCase = { case: string; valid: boolean; problem?: string; ops?: Op[]; replace?: unknown };
@@ -243,7 +244,7 @@ describe("wall, why and the bundle check", () => {
 
   it("lists the cited events, claims, gates and author for a sentence", async () => {
     const data = await loadRunsData(diskFetch);
-    const loaded = data.runs[data.defaultRunId];
+    const loaded = data.runs["sample-s1"];
     const en = loaded.editions.en;
     const w = why(loaded.run, en.meta, en.data.sentences[4], 4);
     expect(w.confirm).toBe(true);
@@ -366,5 +367,26 @@ describe("the recorded run written by agon.webrecord", () => {
     const headline = why(loaded.run, en.meta, en.data.sentences[1], 1);
     expect(headline.confirm).toBe(true);
     expect(headline.scope).toContain("Confirm row");
+  });
+});
+
+describe("Blow full time", () => {
+  it("opens the hand-written sample while no recorded run is listed", async () => {
+    const committed = readJson<{ format: string; runs: { provenance: string }[] }>(join(WEB, "runs", "index.json"));
+    const onlySample: FetchText = async (url) =>
+      url === "runs/index.json"
+        ? { ok: true, status: 200, text: JSON.stringify({ ...committed, runs: committed.runs.filter((r) => r.provenance === "design_preview") }) }
+        : diskFetch(url);
+    const data = await loadRunsData(onlySample);
+    expect(runForBlow(data, 1)?.run.run_id).toBe("sample-s1");
+    expect(runForBlow(data, 3)?.run.run_id).toBe("sample-s1");
+  });
+
+  it("opens the recorded run once one is listed, for its seed and for any other seed", async () => {
+    const data = await loadRunsData(afterFetch);
+    expect(data.defaultRunId).toBe("run-afc16bdd87a7");
+    expect(runForBlow(data, 1)?.run.run_id).toBe("run-afc16bdd87a7");
+    expect(runForBlow(data, 3)?.run.run_id).toBe("run-afc16bdd87a7");
+    expect(Object.keys(data.runs)).toContain("sample-s1");
   });
 });

@@ -7,7 +7,9 @@
 
   Also the first-run guide (skip remembered per browser) and the theme switch.
 */
-import { appReady, expect, expectNoSeriousAxe, test } from "./fixtures";
+import { readFileSync } from "node:fs";
+import { appReady, defaultRun, expect, expectNoSeriousAxe, test } from "./fixtures";
+import { editionLabel } from "../src/lib/runs";
 
 test("glossary popover opens on click, explains the term and returns focus", async ({ page }) => {
   await page.setViewportSize({ width: 375, height: 812 });
@@ -113,11 +115,17 @@ test("the served page carries the strict CSP and every readiness marker", async 
   expect(csp).toContain("style-src 'self';");
   expect(csp).toContain("require-trusted-types-for 'script'");
   const body = (await response?.text()) ?? "";
-  expect(body).toContain(`id="wall-label">Design preview: sample run written by hand, not produced by the pipeline.`);
-  expect(body).toContain(`id="approve-label">Design preview: sample run written by hand, not produced by the pipeline.`);
-  expect(body).toContain(`id="recap-label">Not approved. Design preview: sample run written by hand, not produced by the pipeline.`);
-  expect(body).toContain("Newsroom Wall");
-  expect(body).toContain("Match Centre");
+  /* Every marker of the demo target, read from ci/readiness.json, which names the labels of
+     the run the site shows by default (and the commit, added at deploy, is stamped here too). */
+  const config = JSON.parse(readFileSync(new URL("../../ci/readiness.json", import.meta.url), "utf8")) as {
+    targets: { name: string; markers: string[] }[];
+  };
+  const markers = config.targets.find((t) => t.name === "demo")?.markers ?? [];
+  expect(markers.filter((m) => /^id="(wall|approve|recap)-label">/.test(m)).length).toBe(3);
+  expect(markers.filter((m) => !body.includes(m))).toEqual([]);
+  const shown = await defaultRun(page);
+  expect(body).toContain(`id="wall-label">${shown.label}`);
+  expect(body).toContain(`id="recap-label">${editionLabel(shown)}`);
 });
 
 test("the Data Lab shows the season table and the self-measured bands, each file hashed in the browser", async ({ page }) => {
