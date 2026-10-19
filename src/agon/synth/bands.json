@@ -1,0 +1,29 @@
+{
+  "header": "These 22 realism bands are ranges the Agon team chose as sanity checks for a synthetic match generator. They are not measurements of, and not claims about, any real league, club, player or season. They were written from general football knowledge, frozen and hashed (bands.lock) before any engine constant was calibrated, and they are never widened to make the generator pass. Ratios are aggregated over all matches in the seed set (sum over sum) unless the statistic says mean over matches.",
+  "version": "bands-v1",
+  "frozen_on": "2026-10-19",
+  "bands": [
+    {"id": "goals_per_match", "statistic": "total goals over all matches divided by the number of matches", "unit": "goals", "lo": "2.30", "hi": "3.10", "measurable_from": "events"},
+    {"id": "home_win_rate", "statistic": "share of matches the home club won", "unit": "share", "lo": "0.38", "hi": "0.50", "measurable_from": "events"},
+    {"id": "draw_rate", "statistic": "share of matches drawn", "unit": "share", "lo": "0.20", "hi": "0.32", "measurable_from": "events"},
+    {"id": "zero_zero_rate", "statistic": "share of matches ending 0-0", "unit": "share", "lo": "0.04", "hi": "0.11", "measurable_from": "events"},
+    {"id": "home_goal_share", "statistic": "home goals divided by all goals (home advantage)", "unit": "share", "lo": "0.52", "hi": "0.60", "measurable_from": "events"},
+    {"id": "comeback_rate", "statistic": "among matches with at least one goal, share where the club that conceded first did not lose", "unit": "share", "lo": "0.24", "hi": "0.40", "measurable_from": "events"},
+    {"id": "shots_per_team", "statistic": "shots over all matches divided by twice the number of matches", "unit": "shots", "lo": "10.0", "hi": "14.5", "measurable_from": "events"},
+    {"id": "shots_on_target_ratio", "statistic": "shots with outcome goal or saved divided by all shots", "unit": "share", "lo": "0.30", "hi": "0.40", "measurable_from": "events"},
+    {"id": "goals_per_shot", "statistic": "goals divided by all shots", "unit": "share", "lo": "0.09", "hi": "0.13", "measurable_from": "events"},
+    {"id": "passes_per_team", "statistic": "attempted passes over all matches divided by twice the number of matches", "unit": "passes", "lo": "380", "hi": "560", "measurable_from": "events"},
+    {"id": "pass_completion", "statistic": "passes with outcome complete divided by attempted passes", "unit": "share", "lo": "0.75", "hi": "0.87", "measurable_from": "events"},
+    {"id": "possession_dominant_share", "statistic": "mean over matches of the larger club's share of the match's attempted passes (possession split)", "unit": "share", "lo": "0.54", "hi": "0.64", "measurable_from": "events"},
+    {"id": "fouls_per_match", "statistic": "foul events divided by the number of matches", "unit": "fouls", "lo": "19", "hi": "27", "measurable_from": "events"},
+    {"id": "yellow_cards_per_match", "statistic": "card events with outcome yellow (second yellows excluded) divided by the number of matches", "unit": "cards", "lo": "3.0", "hi": "5.0", "measurable_from": "events"},
+    {"id": "red_cards_per_match", "statistic": "card events with outcome red or second_yellow divided by the number of matches", "unit": "cards", "lo": "0.06", "hi": "0.25", "measurable_from": "events"},
+    {"id": "corners_per_match", "statistic": "set pieces with qualifier corner divided by the number of matches", "unit": "corners", "lo": "8.5", "hi": "11.5", "measurable_from": "events"},
+    {"id": "penalties_per_match", "statistic": "set pieces with qualifier penalty divided by the number of matches", "unit": "penalties", "lo": "0.18", "hi": "0.40", "measurable_from": "events"},
+    {"id": "set_piece_goal_share", "statistic": "goals scored in a possession chain opened by a corner, free kick or penalty, divided by all goals", "unit": "share", "lo": "0.20", "hi": "0.35", "measurable_from": "events"},
+    {"id": "second_half_goal_share", "statistic": "goals in period 2 divided by all goals (goal minute shape, halves)", "unit": "share", "lo": "0.52", "hi": "0.60", "measurable_from": "events"},
+    {"id": "late_goal_share", "statistic": "goals at match minute 75 or later, stoppage time included, divided by all goals (goal minute shape, tail)", "unit": "share", "lo": "0.18", "hi": "0.30", "measurable_from": "events"},
+    {"id": "sprints_per_outfield_player", "statistic": "sprints at 25.2 km/h or more per outfield player per 90 minutes", "unit": "sprints", "lo": "20", "hi": "60", "measurable_from": "tracking"},
+    {"id": "distance_per_outfield_player_km", "statistic": "distance covered per outfield player per 90 minutes", "unit": "km", "lo": "9.0", "hi": "12.5", "measurable_from": "tracking"}
+  ]
+}

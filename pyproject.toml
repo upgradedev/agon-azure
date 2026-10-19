@@ -19,6 +19,10 @@ dev = ["pytest==9.0.2"]
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+# The frozen realism bands and their lock ship with the package (metric M2).
+"agon.synth" = ["bands.json", "bands.lock"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 # ci/ holds the stdlib gate scripts; tests import them as plain modules.
