@@ -1,0 +1,39 @@
+# Governance evidence: M12 (rights), M15 (exactly-once approval) and M16 (no approval route skips
+# the verifier), each printed under its own step so a run URL can be cited beside the number.
+# Separate from the main CI workflow so the governance lane can change it without touching
+# platform files. Stdlib only, plus the pinned test runner.
+name: governance
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  governance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install pinned test tooling
+        run: python -m pip install -r requirements/dev.txt
+      - name: Install the package (editable, pinned backend, no isolation)
+        run: python -m pip install --no-build-isolation --no-deps -e .
+      - name: M16 route audit (channel files selected by path, count printed)
+        run: python -m agon.governance.routes
+      - name: M16 routes, static audit plus verify() spy and rogue-adapter negative control
+        run: python -m pytest tests/routes -q -p no:cacheprovider
+      - name: M15 exactly-once, 50 concurrent approvals of one nonce, with an etag-blind negative control
+        run: python -m pytest tests/approval_concurrency -q -s -p no:cacheprovider
+      - name: M12 rights guard, block lists, roster false positives and injection fixtures
+        run: python -m pytest tests/rights -q -p no:cacheprovider
+      - name: Fact gate, seal, verifier, channels and publisher
+        run: python -m pytest tests/governance -q -p no:cacheprovider
