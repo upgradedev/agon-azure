@@ -40,7 +40,7 @@ LABEL = "Design preview: sample run written by hand, not produced by the pipelin
 RUN_CASES = json.loads((ROOT / "tests" / "js" / "run_cases.json").read_text(encoding="utf-8"))
 CONSOLE_RUNS = ROOT / "console" / "src" / "lib" / "runs.ts"
 RECORDED = ROOT / "tests" / "fixtures" / "recorded-run" / "runs"
-STANDIN = "Stand-in for the Microsoft Teams card. It calls the same decision endpoint. The real Teams card is in the video."
+STANDIN = "Stand-in for the Microsoft Teams card. In this public build it sends no decision; the real card is posted in the club's Microsoft Teams channel."
 LABEL_PREFIXES = ('id="wall-label">', 'id="approve-label">', 'id="recap-label">')
 
 

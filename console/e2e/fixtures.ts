@@ -13,7 +13,7 @@ declare global {
   }
 }
 
-export const STANDIN = "Stand-in for the Microsoft Teams card. It calls the same decision endpoint. The real Teams card is in the video.";
+export const STANDIN = "Stand-in for the Microsoft Teams card. In this public build it sends no decision; the real card is posted in the club's Microsoft Teams channel.";
 
 export const test = base.extend<{ guard: void }>({
   guard: [
