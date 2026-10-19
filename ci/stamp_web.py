@@ -12,7 +12,7 @@ Rules, each a hard failure:
 * index.html must hold the placeholder __AGON_COMMIT__ exactly once, and after
   stamping no file under the web directory may still hold it;
 * with --data-dir: manifest.json must exist, list exactly the --seeds given,
-  and every file it lists must exist with the stated byte count and sha256;
+  and every file it lists must exist with the stated sha256 and event count (the web data contract in agon.webdata);
   every file under the data directory other than manifest.json must be listed.
 
 Stdlib only. Writes are binary, so line endings never change.
@@ -72,7 +72,15 @@ def parse_seeds(text: str) -> list[int]:
 
 
 def verify_data(data_dir: Path, seeds: list[int]) -> int:
-    """Re-hash every manifest entry and refuse unlisted files. Returns files verified."""
+    """Check the shipped data against the web data contract the browser enforces.
+
+    The contract lives in agon.webdata (validate_manifest): the browser refuses any
+    other shape and falls back to the fixture, so the deploy must refuse it first.
+    Every listed file is re-hashed and its event lines counted; unlisted files fail.
+    Returns the number of files verified.
+    """
+    from agon.webdata import validate_manifest  # the one definition of the contract
+
     manifest_path = data_dir / "manifest.json"
     if not manifest_path.is_file():
         raise StampError(f"{manifest_path} does not exist")
@@ -80,26 +88,26 @@ def verify_data(data_dir: Path, seeds: list[int]) -> int:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         raise StampError(f"manifest.json is not valid JSON: {exc}") from exc
-    listed_seeds = sorted(int(entry["seed"]) for entry in manifest.get("seeds", []))
+    problems = validate_manifest(manifest)
+    if problems:
+        raise StampError("manifest breaks the web data contract: " + "; ".join(problems))
+    entries = manifest["files"]
+    listed_seeds = sorted(int(entry["seed"]) for entry in entries)
     if listed_seeds != seeds:
         raise StampError(f"manifest lists seeds {listed_seeds}, expected {seeds}")
-    entries = manifest.get("files", [])
-    if not entries:
-        raise StampError("manifest lists no files")
     listed: set[str] = set()
     for entry in entries:
-        rel = str(entry["path"])
-        if rel.startswith("/") or ".." in Path(rel).parts:
-            raise StampError(f"manifest path escapes the data directory: {rel}")
+        rel = str(entry["name"])
         path = data_dir / rel
         if not path.is_file():
             raise StampError(f"manifest lists {rel}, which does not exist")
         data = path.read_bytes()
-        if len(data) != int(entry["bytes"]):
-            raise StampError(f"{rel}: {len(data)} bytes, manifest says {entry['bytes']}")
         digest = hashlib.sha256(data).hexdigest()
         if digest != entry["sha256"]:
             raise StampError(f"{rel}: sha256 {digest}, manifest says {entry['sha256']}")
+        lines = len(data.splitlines())
+        if lines != int(entry["events"]):
+            raise StampError(f"{rel}: {lines} event lines, manifest says {entry['events']}")
         listed.add(rel)
     present = {
         p.relative_to(data_dir).as_posix()
