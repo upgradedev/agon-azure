@@ -174,7 +174,7 @@ jobs:
       - name: Generate the recorded synthetic data for the published seeds
         run: |
           rm -rf web/data
-          python -m agon.synth.manifest --seeds "$PUBLISHED_SEEDS" --out web/data --print-hash
+          python -m agon.webdata --seeds "$PUBLISHED_SEEDS" --out web/data
       - name: Stamp the commit and re-hash the data against its manifest
         run: python ci/stamp_web.py web --sha "$GITHUB_SHA" --data-dir web/data --seeds "$PUBLISHED_SEEDS"
       - name: Static checks on the exact tree that ships

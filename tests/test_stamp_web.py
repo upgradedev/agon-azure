@@ -1,8 +1,8 @@
 """Proof that the deploy stamp and the data check fail on broken inputs.
 
 Each negative case asserts the reason, not only the exit code. The good case
-generates real seeded data with the package's own manifest writer, so the
-check runs against exactly what the deploy job ships.
+writes real seeded data with agon.webdata, the same writer and contract the
+browser enforces, so the check runs against exactly what the deploy job ships.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 import stamp_web
-from agon.synth.manifest import build_bundle, write_outputs
+from agon.webdata import write_web_data
 
 SHA = "0123456789abcdef0123456789abcdef01234567"
 SHELL = '<!doctype html><html><body data-commit="__AGON_COMMIT__"><p>Agon</p></body></html>'
@@ -29,7 +29,8 @@ def make_web(tmp_path: Path, html: str = SHELL) -> Path:
 
 def make_data(web: Path, seeds: tuple[int, ...] = (1,)) -> Path:
     data = web / "data"
-    write_outputs(str(data), [build_bundle(s) for s in seeds], 0)
+    # The first 5 minutes keep the test fast; the contract is the same for full matches.
+    write_web_data(str(data), list(seeds), max_minute=5)
     return data
 
 
@@ -67,36 +68,37 @@ def test_placeholder_left_in_another_file_fails(tmp_path: Path) -> None:
 def test_tampered_data_file_fails(tmp_path: Path) -> None:
     web = make_web(tmp_path)
     data = make_data(web)
-    events = data / "seed-0001" / "events.ndjson"
+    events = data / "1.ndjson"
     raw = bytearray(events.read_bytes())
     raw[10] = ord("X") if raw[10] != ord("X") else ord("Y")
     events.write_bytes(bytes(raw))
-    with pytest.raises(stamp_web.StampError, match="events.ndjson: sha256"):
+    with pytest.raises(stamp_web.StampError, match="1.ndjson: sha256"):
         stamp_web.verify_data(data, [1])
 
 
-def test_truncated_data_file_fails_on_size(tmp_path: Path) -> None:
+def test_event_count_must_match(tmp_path: Path) -> None:
     web = make_web(tmp_path)
     data = make_data(web)
-    world = data / "seed-0001" / "world.json"
-    world.write_bytes(world.read_bytes()[:-1])
-    with pytest.raises(stamp_web.StampError, match="world.json: .* bytes"):
+    manifest = json.loads((data / "manifest.json").read_text(encoding="utf-8"))
+    manifest["files"][0]["events"] += 1
+    (data / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(stamp_web.StampError, match="event lines, manifest says"):
         stamp_web.verify_data(data, [1])
 
 
 def test_stray_file_fails(tmp_path: Path) -> None:
     web = make_web(tmp_path)
     data = make_data(web)
-    (data / "seed-0001" / "extra.json").write_bytes(b"{}\n")
-    with pytest.raises(stamp_web.StampError, match="not listed in the manifest: seed-0001/extra.json"):
+    (data / "extra.json").write_bytes(b"{}\n")
+    with pytest.raises(stamp_web.StampError, match="not listed in the manifest: extra.json"):
         stamp_web.verify_data(data, [1])
 
 
 def test_missing_listed_file_fails(tmp_path: Path) -> None:
     web = make_web(tmp_path)
     data = make_data(web)
-    (data / "seed-0001" / "match.json").unlink()
-    with pytest.raises(stamp_web.StampError, match="match.json, which does not exist"):
+    (data / "1.ndjson").unlink()
+    with pytest.raises(stamp_web.StampError, match="1.ndjson, which does not exist"):
         stamp_web.verify_data(data, [1])
 
 
@@ -107,13 +109,24 @@ def test_seed_set_must_match(tmp_path: Path) -> None:
         stamp_web.verify_data(data, [1, 2])
 
 
-def test_manifest_path_escape_fails(tmp_path: Path) -> None:
+def test_manifest_name_escape_fails(tmp_path: Path) -> None:
     web = make_web(tmp_path)
     data = make_data(web)
     manifest = json.loads((data / "manifest.json").read_text(encoding="utf-8"))
-    manifest["files"][0]["path"] = "../index.html"
+    manifest["files"][0]["name"] = "../index.html"
     (data / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
-    with pytest.raises(stamp_web.StampError, match="escapes"):
+    with pytest.raises(stamp_web.StampError, match="web data contract"):
+        stamp_web.verify_data(data, [1])
+
+
+def test_generator_manifest_shape_is_refused(tmp_path: Path) -> None:
+    # The regression that shipped on 2026-10-19: the deploy wrote the synth CLI's
+    # manifest, the browser refused it and fell back to the fixture. Now the deploy refuses it.
+    web = make_web(tmp_path)
+    data = web / "data"
+    data.mkdir()
+    (data / "manifest.json").write_text(json.dumps({"seeds": [{"seed": 1}], "files": [{"path": "x", "bytes": 1, "sha256": "0" * 64}]}), encoding="utf-8")
+    with pytest.raises(stamp_web.StampError, match="web data contract"):
         stamp_web.verify_data(data, [1])
 
 
