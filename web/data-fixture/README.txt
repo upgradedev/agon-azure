@@ -36,10 +36,14 @@ into this folder; both use agon.webdata.write_web_data)
      "files": [{"name": str, "sha256": str, "seed": int, "events": int}]}
 
     generator  the generator version, for example synth-v0.1
-    name       a bare file name next to manifest.json, "<seed>.ndjson";
-               no folder, no "..", no scheme; the browser refuses anything else
+    name       a bare file name next to manifest.json, exactly "<seed>.ndjson"
+               with the seed of the same entry in decimal and no leading
+               zeros (seed 1 is 1.ndjson); no folder, no "..", no scheme; the
+               browser refuses anything else
     sha256     64 lowercase hex characters over the exact bytes of that file
-    seed       the generator seed of the match in that file
+    seed       the generator seed of the match in that file; each seed is
+               listed once, so a manifest with two entries for one seed is
+               refused
     events     the number of lines in that file
 
 No other keys, at either level. agon.webdata.validate_manifest is the checker

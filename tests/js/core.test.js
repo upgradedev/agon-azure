@@ -59,6 +59,9 @@ test("manifest rules agree with the Python validator on the shared cases", () =>
   for (const c of cases) {
     const problems = core.validateManifest(c.manifest);
     assert.equal(problems.length === 0, c.valid, c.case + ": " + problems.join("; "));
+    if (c.problem !== undefined) {
+      assert.ok(problems.some((p) => p.indexOf(c.problem) !== -1), c.case + ": " + problems.join("; "));
+    }
   }
 });
 

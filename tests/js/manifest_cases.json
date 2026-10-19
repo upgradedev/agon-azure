@@ -43,5 +43,13 @@
   {"case": "fractional events", "valid": false,
    "manifest": {"generator": "synth-v0.1", "files": [{"name": "1.ndjson", "sha256": "0000000000000000000000000000000000000000000000000000000000000000", "seed": 1, "events": 1.5}]}},
   {"case": "zero events", "valid": false,
-   "manifest": {"generator": "synth-v0.1", "files": [{"name": "1.ndjson", "sha256": "0000000000000000000000000000000000000000000000000000000000000000", "seed": 1, "events": 0}]}}
+   "manifest": {"generator": "synth-v0.1", "files": [{"name": "1.ndjson", "sha256": "0000000000000000000000000000000000000000000000000000000000000000", "seed": 1, "events": 0}]}},
+  {"case": "name does not match seed", "valid": false, "problem": "does not match seed",
+   "manifest": {"generator": "synth-v0.1", "files": [{"name": "2.ndjson", "sha256": "0000000000000000000000000000000000000000000000000000000000000000", "seed": 1, "events": 1}]}},
+  {"case": "name with a leading zero does not match seed", "valid": false, "problem": "does not match seed",
+   "manifest": {"generator": "synth-v0.1", "files": [{"name": "01.ndjson", "sha256": "0000000000000000000000000000000000000000000000000000000000000000", "seed": 1, "events": 1}]}},
+  {"case": "duplicate seed under two names", "valid": false, "problem": "seed 1 is listed twice",
+   "manifest": {"generator": "synth-v0.1", "files": [
+     {"name": "1.ndjson", "sha256": "0000000000000000000000000000000000000000000000000000000000000000", "seed": 1, "events": 1},
+     {"name": "x.ndjson", "sha256": "0000000000000000000000000000000000000000000000000000000000000000", "seed": 1, "events": 1}]}}
 ]

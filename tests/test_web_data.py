@@ -137,11 +137,20 @@ CASES = json.loads((JS_TESTS / "manifest_cases.json").read_text(encoding="utf-8"
 def test_manifest_cases_shared_with_the_browser(case):
     problems = validate_manifest(case["manifest"])
     assert (problems == []) is case["valid"], problems
+    if "problem" in case:
+        assert any(case["problem"] in p for p in problems), problems
 
 
 def test_manifest_cases_cover_both_outcomes():
     assert {c["valid"] for c in CASES} == {True, False}
     assert sum(1 for c in CASES if not c["valid"]) >= 10
+
+
+def test_manifest_cases_pin_the_name_and_seed_rules():
+    """The README promises name == <seed>.ndjson and one file per seed; both rules have a named case."""
+    pinned = {c["problem"] for c in CASES if "problem" in c}
+    assert "does not match seed" in pinned
+    assert "seed 1 is listed twice" in pinned
 
 
 def test_fixed_frame_golden_matches_python():

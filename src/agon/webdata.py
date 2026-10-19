@@ -118,6 +118,7 @@ def validate_manifest(manifest: Any) -> list[str]:
         problems.append("files must be a non-empty list")
         return problems
     seen: set[str] = set()
+    seen_seeds: set[int] = set()
     for i, entry in enumerate(files):
         where = f"files[{i}]"
         if not isinstance(entry, dict):
@@ -135,8 +136,16 @@ def validate_manifest(manifest: Any) -> list[str]:
             seen.add(name)
         if not isinstance(entry["sha256"], str) or not SHA256_HEX.match(entry["sha256"]):
             problems.append(f"{where}.sha256 must be 64 lowercase hex characters")
-        if not _is_int(entry["seed"]) or entry["seed"] < 0:
+        seed = entry["seed"]
+        if not _is_int(seed) or seed < 0:
             problems.append(f"{where}.seed must be a non-negative integer")
+        else:
+            if isinstance(name, str) and name != f"{seed}.ndjson":
+                problems.append(f"{where}.name {name} does not match seed {seed}, expected {seed}.ndjson")
+            if seed in seen_seeds:
+                problems.append(f"{where}.seed {seed} is listed twice")
+            else:
+                seen_seeds.add(seed)
         if not _is_int(entry["events"]) or entry["events"] < 1:
             problems.append(f"{where}.events must be a positive integer")
     return problems

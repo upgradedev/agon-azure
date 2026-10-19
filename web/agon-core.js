@@ -77,6 +77,7 @@
       return problems;
     }
     var seen = {};
+    var seenSeeds = {};
     for (var i = 0; i < files.length; i += 1) {
       var entry = files[i];
       var where = "files[" + i + "]";
@@ -100,6 +101,17 @@
       }
       if (!isInt(entry.seed) || entry.seed < 0) {
         problems.push(where + ".seed must be a non-negative integer");
+      } else {
+        var expectedName = entry.seed + ".ndjson";
+        if (typeof entry.name === "string" && entry.name !== expectedName) {
+          problems.push(where + ".name " + entry.name + " does not match seed " + entry.seed + ", expected " + expectedName);
+        }
+        var seedKey = String(entry.seed);
+        if (Object.prototype.hasOwnProperty.call(seenSeeds, seedKey)) {
+          problems.push(where + ".seed " + entry.seed + " is listed twice");
+        } else {
+          seenSeeds[seedKey] = true;
+        }
       }
       if (!isInt(entry.events) || entry.events < 1) {
         problems.push(where + ".events must be a positive integer");
