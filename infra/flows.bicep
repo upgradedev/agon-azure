@@ -242,6 +242,9 @@ resource teamsFlow 'Microsoft.Logic/workflows@2019-05-01' = {
                 attested: {
                   type: 'string'
                 }
+                report: {
+                  type: 'string'
+                }
                 gate_cleared: {
                   type: 'string'
                 }
@@ -414,6 +417,24 @@ resource teamsFlow 'Microsoft.Logic/workflows@2019-05-01' = {
                 type: 'TextBlock'
                 wrap: true
                 text: '@{coalesce(triggerBody()?[\'attested\'], \'The headline report.\')}'
+              }
+              {
+                type: 'Container'
+                style: 'emphasis'
+                items: [
+                  {
+                    type: 'TextBlock'
+                    wrap: true
+                    isSubtle: true
+                    size: 'Small'
+                    text: 'The English headline report, exactly as sealed:'
+                  }
+                  {
+                    type: 'TextBlock'
+                    wrap: true
+                    text: '@{coalesce(triggerBody()?[\'report\'], \'The report text is not in this card; open the evidence link before approving.\')}'
+                  }
+                ]
               }
               {
                 type: 'TextBlock'
@@ -838,6 +859,9 @@ resource outlookFlow 'Microsoft.Logic/workflows@2019-05-01' = if (outlookConnect
                 summary: {
                   type: 'string'
                 }
+                report: {
+                  type: 'string'
+                }
                 confirm_rows: {
                   type: 'array'
                 }
@@ -890,7 +914,7 @@ resource outlookFlow 'Microsoft.Logic/workflows@2019-05-01' = if (outlookConnect
                 To: officerEmail
                 Subject: '@{triggerBody()?[\'subject\']}'
                 Options: 'Approve and confirm flagged sentences, Approve, Request changes'
-                Body: '@{concat(\'<p>\', coalesce(triggerBody()?[\'summary\'], \'\'), \'</p><p>Bundle sha256: \', triggerBody()?[\'bundle_sha256\'], \'</p><p>Flagged sentences. Choose "Approve and confirm flagged sentences" only if you have read each one:</p><ul>\', join(body(\'Row_lines\'), \'\'), \'</ul><p>Approving here approves the destinations as offered. Recompute the hash: \', coalesce(triggerBody()?[\'verify_url\'], \'\'), \'</p>\')}'
+                Body: '@{concat(\'<p>\', coalesce(triggerBody()?[\'summary\'], \'\'), \'</p><p><b>The English headline report, exactly as sealed:</b></p><p>\', coalesce(triggerBody()?[\'report\'], \'The report text is not in this email; open the verify link before approving.\'), \'</p><p>Bundle sha256: \', triggerBody()?[\'bundle_sha256\'], \'</p><p>Flagged sentences. Choose "Approve and confirm flagged sentences" only if you have read each one:</p><ul>\', join(body(\'Row_lines\'), \'\'), \'</ul><p>Approving here approves the destinations as offered. Recompute the hash: \', coalesce(triggerBody()?[\'verify_url\'], \'\'), \'</p>\')}'
                 Importance: 'Normal'
                 HideHTMLMessage: false
                 ShowHTMLConfirmationDialog: false
