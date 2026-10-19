@@ -1,0 +1,19 @@
+# Fleet: Microsoft Agent Framework and the Azure packages the W-fulltime worker uses.
+# Every line is an exact pin (ci/check_pins.py). Versions read on PyPI 2026-10-19, read only.
+# agent-framework-core matches spike S1: 1.22.0 changed the checkpoint record format, so a
+# checkpoint store is never shared across versions (spec trap 1).
+-r dev.txt
+agent-framework-core==1.22.0
+agent-framework-openai==1.17.0
+agent-framework-foundry==1.15.0
+agent-framework-azure-cosmos==1.0.0b261015
+# agent-framework-foundry 1.15.0 requires azure-ai-projects>=2.2.0,<2.8.0 while 2.9.0 is the
+# latest release (spec trap 2), and azure-ai-inference>=1.0.0b9,<1.0.0b10.
+azure-ai-projects==2.7.0
+azure-ai-inference==1.0.0b9
+azure-cosmos==4.17.1
+azure-identity==1.26.0
+azure-core==1.41.0
+aiohttp==3.14.5
+# openai releases almost daily; 3.29.0 (2026-10-11) predates agent-framework-core 1.22.0.
+openai==3.29.0
