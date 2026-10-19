@@ -731,11 +731,12 @@ async def decide(
 ) -> RunOutcome | PublishRequest:
     """The response handler's body: re-check the sealed bytes, then delegate to the one verifier.
 
-    Who calls `verify` first is still open (lanes C2 and A3). Spec 3.4 step 5 has the api verify a
-    decision before it enqueues it; then this call meets "already_consumed" and
-    `_recover_publish_request` rebuilds the publish request from the approval record, so the
-    worker needs only read on approvals and nonces. The kill-and-resume CLI path, where the worker
-    verifies first and writes the approval, runs against the file store only.
+    In production the api's intake verifies a decision before it sends the pointer that resumes
+    the run (spec 3.4 step 5, `agon.intake`), so this call meets "already_consumed" and
+    `_recover_from_record` rebuilds the outcome from the approval record the verifier wrote: a
+    publish request for "approve", CHANGES_REQUESTED for "changes". The worker therefore needs
+    only read on approvals and nonces. The kill-and-resume CLI path, where the worker verifies
+    first and writes the approval, runs against the file store only.
     """
 
     def refused(code: str, detail: str) -> RunOutcome:
@@ -764,7 +765,7 @@ async def decide(
     )
     result = verifier.verify(decision, deps.store, deps.clock())
     if not result.ok and result.code == "already_consumed":
-        recovered = _recover_publish_request(deps, request)
+        recovered = _recover_from_record(deps, request, decision)
         if recovered is not None:
             return recovered
     if not result.ok:
@@ -789,30 +790,76 @@ async def decide(
     )
 
 
-def _recover_publish_request(deps: FleetDeps, request: ApprovalRequest) -> PublishRequest | None:
-    """Close the crash window between consume-once and the enqueue.
+def envelope_from_record(record: dict[str, Any], nonce: str) -> DecisionEnvelope:
+    """The decision a pointer resumes a run with: the approval record, plus the run's own nonce.
 
-    If a worker died after `verify` consumed the nonce but before `publish_request` ran, every
-    replay of the pause checkpoint meets "already consumed". The approval record the verifier
-    wrote is the evidence: when it says "approve" for this bundle and target, the publish request
-    is emitted again. The queue is create-only by approval id, so this can never publish twice.
+    The record is written only by `verifier.verify` and carries no nonce (only its sha256), so the
+    nonce comes from the pending ApprovalRequest in the pause checkpoint. The caller must already
+    have checked that sha256(nonce) equals the record's `nonce_sha256`.
+    """
+    return DecisionEnvelope(
+        bundle_sha256=str(record["bundle_sha256"]),
+        nonce=nonce,
+        decision=str(record["decision"]),
+        approver=str(record["approver"]),
+        channel=str(record["channel"]),
+        received_at=str(record["received_at"]),
+        confirmed_rows=[str(r) for r in record.get("confirmed_rows", [])],
+    )
+
+
+def _recover_from_record(
+    deps: FleetDeps, request: ApprovalRequest, decision: verifier.ApprovalDecision
+) -> PublishRequest | RunOutcome | None:
+    """Turn the approval record the verifier already wrote into this run's outcome.
+
+    Two cases meet "already consumed" here: the production path, where the api's intake verified
+    the decision before the pointer resumed the run, and a worker that died after `verify`
+    consumed the nonce but before `publish_request` ran. Either way the approval record is the
+    evidence. It must name this bundle and this target, and the delivered decision must be the
+    recorded one (same decision, channel and approver); a different decision on a consumed nonce,
+    for example an Outlook approve after a Teams "changes", stays refused as already consumed:
+
+    * "approve": the publish request is emitted again. The Publisher's receipt is create-only by
+      bundle hash, so a repeated request can never publish twice;
+    * "changes": the run ends as CHANGES_REQUESTED, the same outcome a first-hand verify gives.
+
+    Nothing is written to the approvals or nonces containers here; only the run ledger moves.
     """
     approval_id = verifier.approval_id_for(request.nonce)
     doc = deps.store.read(verifier.APPROVALS, approval_id)
     if doc is None:
         return None
     body = doc.body
-    if body.get("decision") != "approve" or body.get("bundle_sha256") != request.bundle_sha256 or body.get("target") != request.target:
+    if body.get("bundle_sha256") != request.bundle_sha256 or body.get("target") != request.target:
         return None
-    if deps.ledger.status(request.run_id) in (stores.SEALED, stores.AWAITING_APPROVAL):
-        if deps.ledger.status(request.run_id) == stores.SEALED:
-            deps.ledger.advance(request.run_id, stores.AWAITING_APPROVAL, "recorded when the decision arrived")
-        deps.ledger.advance(request.run_id, stores.APPROVED, "recovered from the approval record", approval_id=approval_id)
+    recorded = body.get("decision")
+    if recorded not in verifier.DECISIONS or (recorded, body.get("channel"), body.get("approver")) != (
+        decision.decision, decision.channel, verifier.normalize_principal(decision.approver)
+    ):
+        return None
+    status = deps.ledger.status(request.run_id)
+    if status == stores.SEALED:
+        deps.ledger.advance(request.run_id, stores.AWAITING_APPROVAL, "recorded when the decision arrived")
+        status = stores.AWAITING_APPROVAL
+    detail = f"{recorded} by {body.get('approver')} on {body.get('channel')}"
+    if recorded == "changes":
+        if status == stores.AWAITING_APPROVAL:
+            deps.ledger.advance(request.run_id, stores.CHANGES_REQUESTED, f"{detail}, from the approval record")
+        return RunOutcome(
+            run_id=request.run_id, status=CHANGES_REQUESTED, bundle_sha256=request.bundle_sha256,
+            code="changes_requested", detail=detail,
+        )
+    if status == stores.AWAITING_APPROVAL:
+        deps.ledger.advance(request.run_id, stores.APPROVED, f"{detail}, from the approval record", approval_id=approval_id)
     return PublishRequest(run_id=request.run_id, target=request.target, bundle_sha256=request.bundle_sha256, approval_id=approval_id)
 
 
 async def enqueue_publish(deps: FleetDeps, request: PublishRequest) -> RunOutcome:
     created = deps.publish_queue.enqueue(request)
+    # After the send, never before: a worker that dies in between leaves the ledger APPROVED with
+    # no `publish_enqueued`, and the fleet worker re-sends the request from the approval record.
+    deps.ledger.note(request.run_id, publish_enqueued=request.approval_id)
     return RunOutcome(
         run_id=request.run_id,
         status=PUBLISH_REQUESTED if created else PUBLISH_ALREADY_REQUESTED,

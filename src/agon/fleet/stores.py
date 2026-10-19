@@ -330,6 +330,28 @@ class RunLedger:
                 continue
         raise LedgerError(f"run {run_id}: could not claim the approval after three attempts")
 
+    def note(self, run_id: str, /, **fields: Any) -> None:
+        """Record facts about a run (a card posted, a publish request sent) without moving its status.
+
+        Compare-and-set like `advance`; the status, the history and the run id cannot be set here.
+        """
+        reserved = sorted({"run_id", "status", "history"}.intersection(fields))
+        if reserved:
+            raise LedgerError(f"note cannot set {reserved}; use advance")
+        for _ in range(3):
+            doc = self.store.read(self.container, run_id)
+            if doc is None:
+                raise LedgerError(f"run {run_id}: no ledger record to note on")
+            body = {**doc.body, **fields}
+            if body == doc.body:
+                return
+            try:
+                self.store.replace(self.container, run_id, body, if_match=doc.etag)
+                return
+            except PreconditionFailed:
+                continue
+        raise LedgerError(f"run {run_id}: could not record a note after three attempts")
+
     def advance(self, run_id: str, to: str, detail: str = "", **fields: Any) -> None:
         if to not in RUN_STATUSES:
             raise LedgerError(f"unknown status {to!r}")

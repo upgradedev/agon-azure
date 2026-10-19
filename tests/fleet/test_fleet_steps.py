@@ -30,6 +30,7 @@ from agon.fleet.contracts import (
 )
 from agon.fleet.local import fake_deps
 from agon.governance import verifier
+from agon.governance.channels import teams
 from agon.governance.claims import Claim, Sentence
 from agon.governance.factgate import GateReport, SentenceVerdict, check_translation
 from agon.governance.recompute import recompute_stat
@@ -410,6 +411,49 @@ def test_the_console_stand_in_cannot_approve_the_public_feed() -> None:
     deps, ref = _awaiting()
     out = run(steps.decide(deps, ref.request, _envelope(ref.request, channel="console"), ref.sealed.manifest_json))
     assert out.code == "channel_not_allowed"
+
+
+# ----------------------------------------------------------------- decided first by the intake (spec 3.4 step 5)
+
+
+def _intake_decides(deps, request, decision: str):
+    """What the api's intake does before any pointer reaches the worker: the Teams adapter verifies."""
+    data = {"decision": decision, "bundle_sha256": request.bundle_sha256, "nonce": request.nonce}
+    if decision == "approve":
+        data.update({f"{teams.CONFIRM_PREFIX}{row}": "true" for row in request.confirm_rows})
+    result = teams.handle({"responder": {"userPrincipalName": OFFICER}, "data": data}, deps.store, datetime.now(timezone.utc))
+    assert result.ok, result
+    return deps.store.read(verifier.APPROVALS, result.approval_id).body
+
+
+def test_changes_verified_by_the_intake_ends_the_run_as_changes_requested() -> None:
+    deps, ref = _awaiting()
+    record = _intake_decides(deps, ref.request, "changes")
+    out = run(steps.decide(deps, ref.request, steps.envelope_from_record(record, ref.request.nonce), ref.sealed.manifest_json))
+    assert out.status == CHANGES_REQUESTED and out.code == "changes_requested"
+    assert deps.ledger.status("run-1") == stores.CHANGES_REQUESTED
+    assert deps.publish_queue.items() == []
+
+
+def test_approve_verified_by_the_intake_gives_one_publish_request_and_notes_it() -> None:
+    deps, ref = _awaiting()
+    record = _intake_decides(deps, ref.request, "approve")
+    out = run(steps.decide(deps, ref.request, steps.envelope_from_record(record, ref.request.nonce), ref.sealed.manifest_json))
+    assert isinstance(out, PublishRequest) and out.approval_id == record["approval_id"]
+    assert deps.ledger.status("run-1") == stores.APPROVED
+    assert "publish_enqueued" not in deps.ledger.record("run-1")
+    assert run(steps.enqueue_publish(deps, out)).status == PUBLISH_REQUESTED
+    assert deps.ledger.record("run-1")["publish_enqueued"] == record["approval_id"]
+
+
+def test_a_different_decision_on_a_nonce_the_intake_consumed_stays_refused() -> None:
+    """Negative control for the recovery: only the recorded decision is rebuilt, nothing else."""
+    deps, ref = _awaiting()
+    record = _intake_decides(deps, ref.request, "changes")
+    other = steps.envelope_from_record({**record, "decision": "approve"}, ref.request.nonce)
+    out = run(steps.decide(deps, ref.request, other, ref.sealed.manifest_json))
+    assert out.code == "already_consumed"
+    assert deps.ledger.status("run-1") == stores.AWAITING_APPROVAL and deps.publish_queue.items() == []
 
 
 # ----------------------------------------------------------------- redelivery (spec 3.5)

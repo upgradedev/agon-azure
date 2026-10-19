@@ -128,6 +128,22 @@ def test_run_ledger_follows_the_transition_table() -> None:
         stores.RunLedger(InMemoryStore()).advance("x", stores.SEALED)
 
 
+def test_run_ledger_note_records_facts_without_moving_the_status() -> None:
+    from agon.governance.store import InMemoryStore
+
+    ledger = stores.RunLedger(InMemoryStore())
+    ledger.advance("r", stores.DRAFT)
+    ledger.note("r", cards_posted=["teams"])
+    ledger.note("r", cards_posted=["teams"])  # same value: no write
+    assert ledger.status("r") == stores.DRAFT and len(ledger.history("r")) == 1
+    assert ledger.record("r")["cards_posted"] == ["teams"]
+    for reserved in ("status", "history", "run_id"):
+        with pytest.raises(stores.LedgerError):
+            ledger.note("r", **{reserved: "x"})
+    with pytest.raises(stores.LedgerError):
+        ledger.note("missing", cards_posted=[])
+
+
 # ----------------------------------------------------------------- sources and interpret
 
 
