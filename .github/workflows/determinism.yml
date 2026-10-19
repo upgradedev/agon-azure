@@ -1,10 +1,12 @@
 name: determinism
 
 # Metric M1: the seeded generator must produce byte-identical output on ubuntu and windows.
-# Each OS generates seeds 1,2,3 (matches, fixtures manifest, storyline labels), uploads
-# hash.txt plus that output, and a final job
-# compares them. A mismatch prints both hash files and the first diverging event and fails.
-# The check is never relaxed; on divergence, fix the generator.
+# Each OS generates seeds 1,2,3 (matches, fixtures manifest, storyline labels) and the full
+# fictional season 1 (30 matches: one hash line per match plus the season sha256, and the
+# season record), uploads hash.txt plus that output, and a final job
+# compares them. A mismatch prints both hash files and the first diverging line and fails.
+# Two negative controls prove the comparator has teeth: one mutates a seed 1 event, one a
+# season match hash. The check is never relaxed; on divergence, fix the generator.
 
 on:
   push:
@@ -19,6 +21,7 @@ env:
   PYTHONPATH: src
   PYTHONHASHSEED: random
   SEEDS: "1,2,3"
+  SEASON: "1"
 
 jobs:
   generate:
@@ -50,6 +53,12 @@ jobs:
         run: |
           python -m agon.synth.fixtures --seeds "$SEEDS" --print-hash --out artifact/out/fixtures.json
           python -m agon.referee.storylines --seeds "$SEEDS" --print-hash --out artifact/out/labels.ndjson
+      # The season sits under out/ too, so the compare job diffs every match hash, the season
+      # sha256 and the season record byte for byte. --hash-out writes binary LF on every OS.
+      - name: Generate the full season (30 matches)
+        run: |
+          python -m agon.synth.season --season "$SEASON" --print-hash \
+            --hash-out "artifact/out/season-$SEASON/hash.txt" --out "artifact/out/season-$SEASON"
       - uses: actions/upload-artifact@v4
         with:
           name: synth-${{ matrix.os }}
@@ -87,5 +96,26 @@ jobs:
             exit 1
           fi
           echo "negative control failed as required"
+      - name: Negative control on the season (one changed match hash must fail the comparator)
+        run: |
+          cp -r hashes/synth-ubuntu-latest mutated-season
+          python - <<'PY'
+          import os
+          path = os.path.join("mutated-season", "out", "season-" + os.environ["SEASON"], "hash.txt")
+          lines = open(path, "rb").read().split(b"\n")
+          i = next(k for k, line in enumerate(lines) if line.startswith(b"match 17 "))
+          lines[i] = lines[i][:-1] + (b"0" if lines[i][-1:] != b"0" else b"1")
+          open(path, "wb").write(b"\n".join(lines))
+          PY
+          if python -m agon.synth.crosscheck hashes/synth-ubuntu-latest mutated-season; then
+            echo "comparator passed a mutated season hash: the gate has no teeth"
+            exit 1
+          fi
+          echo "season negative control failed as required"
+      - name: Season hash on each OS
+        run: |
+          for os in ubuntu-latest windows-latest; do
+            echo "$os: $(tail -n 1 "hashes/synth-$os/out/season-$SEASON/hash.txt")"
+          done
       - name: Compare ubuntu and windows outputs
         run: python -m agon.synth.crosscheck hashes/synth-ubuntu-latest hashes/synth-windows-latest
