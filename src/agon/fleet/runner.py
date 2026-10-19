@@ -138,8 +138,13 @@ def envelope_from_card(
     channel: str,
     confirm_all: bool,
     tamper_hash: bool = False,
+    destinations: list[str] | None = None,
 ) -> DecisionEnvelope:
-    """What a channel adapter builds from a tap on the card. The time is set here, never by the card."""
+    """What a channel adapter builds from a tap on the card. The time is set here, never by the card.
+
+    `destinations` is the ticked subset; None ticks every destination the card offers (the Teams
+    card pre-ticks each toggle). Outlook cannot tick, so it approves the destinations as offered.
+    """
     bundle = card["bundle_sha256"]
     if tamper_hash:
         bundle = bundle[:-1] + ("0" if bundle[-1] != "0" else "1")
@@ -151,6 +156,10 @@ def envelope_from_card(
         channel=channel,
         received_at=datetime.now(timezone.utc).isoformat(),
         confirmed_rows=list(card["confirm_rows"]) if confirm_all else [],
+        destinations=[] if decision != "approve" or channel in verifier.AS_OFFERED_CHANNELS else (
+            [d["id"] for d in card.get("destinations", [])] if destinations is None else list(destinations)
+        ),
+        destinations_as_offered=decision == "approve" and channel in verifier.AS_OFFERED_CHANNELS,
     )
 
 

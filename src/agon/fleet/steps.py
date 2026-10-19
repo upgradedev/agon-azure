@@ -52,10 +52,13 @@ from agon.fleet.deps import FleetDeps
 from agon.fleet.sources import MatchRecord, MatchSourceError, load_facts
 from agon.fleet import stores
 from agon.governance import verifier
+from agon.governance.destinations import DESTINATION_IDS
 from agon.governance.claims import Sentence
 from agon.governance.factgate import check_translation, run_factgate
+from agon.governance.recompute import score_after
 from agon.governance.rights import run_rights
 from agon.governance.seal import Artifact, canonical_utf8, gates_all_pass, seal, sha256_hex
+from agon.publish.render import ReportView, render_all
 
 TRIAGE_ROUTES: dict[str, str] = {
     "match_stat": "factgate",
@@ -564,6 +567,24 @@ async def audio(deps: FleetDeps, draft: Draft) -> Draft:
     return d
 
 
+def _report_view(deps: FleetDeps, d: Draft, edition: dict[str, Any]) -> ReportView:
+    """What the destination renderers read: the checked English edition and the final score."""
+    record = record_for(deps, d)
+    final = score_after(record.facts(), None)
+    header = _header(record)
+    return ReportView(
+        match_id=d.match_id,
+        league=header["league"],
+        home=header["home"]["name"],
+        away=header["away"]["name"],
+        home_goals=int(final["home"]),
+        away_goals=int(final["away"]),
+        sentences=tuple(row["text"] for row in d.editions.get("en", [])),
+        edition=edition,
+        disclosure=templates.EDITION_LABEL,
+    )
+
+
 def _put_json(deps: FleetDeps, d: Draft, name: str, value: Any, role: str, language: str | None) -> None:
     entry: dict[str, Any] = {"sha256": deps.artifacts.put(canonical_utf8(value)), "media_type": "application/json", "role": role}
     if language is not None:
@@ -572,7 +593,14 @@ def _put_json(deps: FleetDeps, d: Draft, name: str, value: Any, role: str, langu
 
 
 async def seal_step(deps: FleetDeps, draft: Draft) -> SealedDraft:
+    """Seal every edition, the card and the payload of every offered publish destination.
+
+    The destination payloads (agon.publish.render) are rendered from the checked English edition
+    and sealed as artifacts, so the manifest names each offered destination with its sha256. A
+    bundle the gates refused offers nothing: it gets no nonce, so no officer can tick anything.
+    """
     d = _copy(draft)
+    reports: dict[str, dict[str, Any]] = {}
     for edition in EDITION_ORDER:
         rows = d.editions.get(edition)
         if rows is None:
@@ -586,6 +614,7 @@ async def seal_step(deps: FleetDeps, draft: Draft) -> SealedDraft:
             "label": templates.EDITION_LABEL,
             "sentences": rows,
         }
+        reports[edition] = report
         _put_json(deps, d, f"report-{edition}.json", report, "edition", EDITION_LANGUAGE[edition])
     card = {
         "schema": "agon.card/1",
@@ -616,6 +645,9 @@ async def seal_step(deps: FleetDeps, draft: Draft) -> SealedDraft:
     source = d.interpret.get("source")
     if isinstance(source, str):
         deployment_ids["interpret"] = source
+    offered: dict[str, bytes] = {}
+    if gates_all_pass({"gate_verdicts": d.gate_verdicts}) and "en" in reports:
+        offered = render_all(_report_view(deps, d, reports["en"]), deps.offered_destinations)
     sealed = seal(
         kind="fulltime",
         match_id=d.match_id,
@@ -628,7 +660,10 @@ async def seal_step(deps: FleetDeps, draft: Draft) -> SealedDraft:
         attested=attested,
         gate_cleared=gate_cleared,
         deployment_ids=deployment_ids,
+        destinations=offered,
     )
+    for payload in offered.values():
+        deps.artifacts.put(payload)  # every sealed artifact lives in the artifact store
     deps.ledger.advance(d.run_id, stores.SEALED, "sealed", bundle_sha256=sealed.bundle_sha256)
     return SealedDraft(draft=d, bundle_sha256=sealed.bundle_sha256, manifest_json=sealed.manifest_bytes.decode("utf-8"))
 
@@ -684,6 +719,10 @@ async def prepare_approval(deps: FleetDeps, sealed: SealedDraft) -> ApprovalRequ
         expiry=(now + timedelta(seconds=deps.approval_ttl_seconds)).isoformat(),
         attested_scope={k: list(v) for k, v in manifest["attested_scope"].items()},
         confirm_rows=list(d.confirm_rows),
+        destinations=[
+            {"id": dest_id, "label": entry["label"], "sha256": entry["sha256"]}
+            for dest_id, entry in sorted(manifest.get("destinations", {}).items(), key=lambda kv: DESTINATION_IDS.index(kv[0]))
+        ],
     )
 
 
@@ -720,6 +759,8 @@ async def decide(
         channel=envelope.channel,
         received_at=received_at,
         confirmed_rows=frozenset(envelope.confirmed_rows),
+        destinations=frozenset(envelope.destinations),
+        destinations_as_offered=bool(envelope.destinations_as_offered),
     )
     result = verifier.verify(decision, deps.store, deps.clock())
     if not result.ok and result.code == "already_consumed":
