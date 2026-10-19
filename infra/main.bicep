@@ -1,4 +1,6 @@
-// Agon core infrastructure (spec 3.1, 3.2 rows 8, 12, 13, 14, 9.1).
+// Agon core infrastructure (spec 3.1, 3.2 rows 8, 12, 13, 14, 9.1). The AI
+// services (rows 4, 6, 7) are a separate deployment, agon-ai, in infra/ai.bicep,
+// so a failure there never fails this one or the public site it serves.
 //
 // Deployed by .github/workflows/deploy.yml with the CI identity, which holds
 // Contributor on the resource group only. Contributor cannot write
@@ -18,6 +20,10 @@ param location string = resourceGroup().location
 
 @description('Static Web Apps region. The service is not offered in swedencentral.')
 param staticSiteLocation string = 'westeurope'
+
+@description('Object id of the CI service principal (agon-azure-ci), NOT its appId. deploy.yml reads it from the oid claim of its own access token. Gets a Cosmos data role on the checkpoints container only (modules/cosmos-access.bicep).')
+@minLength(1)
+param ciPrincipalId string
 
 @description('Extra tags. app=agon is always applied and cannot be overridden.')
 param extraTags object = {}
@@ -90,6 +96,7 @@ module cosmosAccess 'modules/cosmos-access.bicep' = {
     apiPrincipalId: identities.outputs.apiPrincipalId
     publisherPrincipalId: identities.outputs.publisherPrincipalId
     publisherSandboxPrincipalId: identities.outputs.publisherSandboxPrincipalId
+    ciPrincipalId: ciPrincipalId
   }
 }
 
@@ -118,3 +125,6 @@ output staticSiteDefaultHostname string = staticSite.outputs.defaultHostname
 
 output logAnalyticsWorkspaceName string = monitoring.outputs.workspaceName
 output appInsightsName string = monitoring.outputs.appInsightsName
+
+// Echoed so infra/rbac.bicep reads it from agon-main like the other identity inputs.
+output ciPrincipalId string = ciPrincipalId

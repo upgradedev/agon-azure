@@ -142,11 +142,11 @@ jobs:
           "$HOME/.azure/bin/bicep" --version
       - name: Negative control, a known linter warning must fail the check
         run: python ci/bicep_check.py --runner bicep --bicep "$HOME/.azure/bin/bicep" --expect-fail ci/fixtures/bicep_warning.bicep
-      - name: Build and lint main.bicep and rbac.bicep, failing on any warning
-        run: python ci/bicep_check.py --runner bicep --bicep "$HOME/.azure/bin/bicep" infra/main.bicep infra/rbac.bicep
+      - name: Build and lint main.bicep, rbac.bicep and ai.bicep, failing on any warning
+        run: python ci/bicep_check.py --runner bicep --bicep "$HOME/.azure/bin/bicep" infra/main.bicep infra/rbac.bicep infra/ai.bicep
       # The same two checks through `az bicep build`, which reports Bicep warnings
       # through its own log; the negative control proves they still reach the gate.
       - name: Negative control through az bicep build
         run: python ci/bicep_check.py --runner az --expect-fail ci/fixtures/bicep_warning.bicep
       - name: Build and lint through az bicep build, failing on any warning
-        run: python ci/bicep_check.py --runner az infra/main.bicep infra/rbac.bicep
+        run: python ci/bicep_check.py --runner az infra/main.bicep infra/rbac.bicep infra/ai.bicep

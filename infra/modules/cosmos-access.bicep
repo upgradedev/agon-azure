@@ -30,6 +30,10 @@ param publisherPrincipalId string
 @description('Principal id of id-publisher-sandbox.')
 param publisherSandboxPrincipalId string
 
+@description('Object id of the CI service principal (agon-azure-ci).')
+@minLength(1)
+param ciPrincipalId string
+
 resource account 'Microsoft.DocumentDB/databaseAccounts@2024-11-15' existing = {
   name: accountName
 }
@@ -112,6 +116,16 @@ var builtInGrants = [
     principalId: apiPrincipalId
     role: 'contributor'
     container: 'usage'
+  }
+  // BEYOND THE SPEC 7.1 TABLE (spec 11.2 S1 "Cosmos once S0 passes"). The CI
+  // identity runs the S1 durable-approval spike against a real Cosmos checkpoint
+  // store, so it writes the checkpoints container and nothing else. It is not in
+  // metadataPrincipals below: if the SDK needs the account-scope readMetadata
+  // action at client start, add it there with a reason, not a wider data role.
+  {
+    principalId: ciPrincipalId
+    role: 'contributor'
+    container: 'checkpoints'
   }
 ]
 
