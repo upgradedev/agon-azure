@@ -67,7 +67,7 @@ function SeasonTables({ view }: { view: SeasonView }) {
           </Badge>
         </CardHeader>
         <CardBody>
-          <div className="-mx-2 overflow-x-auto px-2" tabIndex={0} role="region" aria-label="Final table, scrolls sideways on a narrow screen">
+          <div className="relative -mx-2 overflow-x-auto px-2" tabIndex={0} role="region" aria-label="Final table, scrolls sideways on a narrow screen">
             <table className="w-full min-w-[34rem] border-collapse text-sm tabular-nums">
               <caption className="sr-only">
                 Final table of season {view.season} after matchday {view.matchday}, fictional clubs.

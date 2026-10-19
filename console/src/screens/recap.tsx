@@ -198,7 +198,7 @@ export function Recap({ active, route, loaded, error, blownSeed }: Props) {
       <p className="mb-4 text-sm text-muted">{matchLine(run)}</p>
 
       <div className="max-w-3xl">
-        <div role="tablist" aria-label="Editions" className="flex gap-1 overflow-x-auto rounded-lg border border-line bg-surface-2 p-1">
+        <div role="tablist" aria-label="Editions" className="relative flex gap-1 overflow-x-auto rounded-lg border border-line bg-surface-2 p-1">
           {editions.map((e, i) => {
             const selected = current?.meta.edition === e.edition;
             return (
