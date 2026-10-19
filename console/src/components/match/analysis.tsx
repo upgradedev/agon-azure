@@ -26,7 +26,7 @@ import {
   type TimelineMark,
 } from "../../lib/match";
 import type { MetricId, Preferences, ViewMode } from "../../hooks/preferences";
-import { ChartFrame, MomentumChart, ShotMap, SourceNote, TerritoryGrid, TerritoryMaps, WinProbabilityChart, XgRaceChart, winAt } from "./charts";
+import { ChartFrame, MomentumChart, ShotMap, SourceNote, TerritoryGrid, TerritoryMaps, WinProbabilityChart, XgRaceChart, possessive, winAt } from "./charts";
 import { Crest, EventIcon, ICON_FOR, SIDE_BG, SIDE_FILL, SIDE_TEXT, SideBadge, SideTriangle } from "./marks";
 
 export const METRIC_WORDS: Record<MetricId, string> = {
@@ -401,7 +401,7 @@ export function MetricLens({ file, metric, names, nowS, focusPlayer }: { file: M
         <XgRaceChart file={file} nowS={nowS} names={names} focusPlayer={focusPlayer} />
         {best ? (
           <p className="text-sm text-muted">
-            The best chance was {best.name}&apos;s for {names[best.side]} at {best.minute}&apos;, worth {xg(best.xg_ppm)} xG; it was {best.outcome.replace("_", " ")}.
+            The best chance was {possessive(best.name)} for {names[best.side]} at {best.minute}&apos;, worth {xg(best.xg_ppm)} xG; it was {best.outcome.replace("_", " ")}.
           </p>
         ) : null}
       </div>
@@ -433,7 +433,7 @@ export function MetricLens({ file, metric, names, nowS, focusPlayer }: { file: M
     return (
       <div className="space-y-3 lg:col-span-2">
         {head}
-        <ChartFrame title="Possession over the match" sentence={`${names.home}'s running share of the passes attempted; above the middle line ${names.home} had more of the ball.`} label="Possession over the match">
+        <ChartFrame title="Possession over the match" sentence={`${possessive(names.home)} running share of the passes attempted; above the middle line ${names.home} had more of the ball.`} label="Possession over the match">
           <svg viewBox={`0 0 ${f.W} ${f.H}`} className="block h-auto w-full" role="img" aria-label={`Possession: ${names.home} ${last ? percentOfPermille(last.home_possession_permille) : "none"} at full time.`}>
             <rect x={f.L} y={f.T} width={f.R - f.L} height={(f.B - f.T) / 2} className={cn(SIDE_FILL.home, "opacity-10")} />
             <rect x={f.L} y={(f.T + f.B) / 2} width={f.R - f.L} height={(f.B - f.T) / 2} className={cn(SIDE_FILL.away, "opacity-10")} />

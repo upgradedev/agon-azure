@@ -131,6 +131,23 @@ export function winAt(file: MatchFile, nowS: number | null): WinPoint | null {
 
 /* ------------------------------------------------------------- win probability */
 
+export function possessive(name: string): string {
+  return name.endsWith("s") ? `${name}'` : `${name}'s`;
+}
+
+/* Turning point markers keep at least `gap` apart; a leader line points to the real minute. */
+function spread(xs: number[], gap: number, right: number): number[] {
+  const out: number[] = [];
+  for (const x of xs) {
+    const prev = out.length ? out[out.length - 1] : -Infinity;
+    out.push(Math.min(right, Math.max(x, prev + gap)));
+  }
+  for (let i = out.length - 2; i >= 0; i -= 1) {
+    out[i] = Math.min(out[i], out[i + 1] - gap);
+  }
+  return out;
+}
+
 export function WinProbabilityChart({ file, nowS, names, compact = false }: { file: MatchFile; nowS: number | null; names: Record<Side, string>; compact?: boolean }) {
   const f: Frame = { W: 480, H: 232, L: 34, R: 470, T: 26, B: 200 };
   const y = (ppm: number) => f.B - (ppm / 1_000_000) * (f.B - f.T);
@@ -145,6 +162,7 @@ export function WinProbabilityChart({ file, nowS, names, compact = false }: { fi
   const awayArea = `M ${xs[0]} ${f.T} L ${xs[xs.length - 1]} ${f.T} L ${back(homeDraw)} Z`;
   const now = winAt(file, nowS);
   const tps = file.turning_points;
+  const marks = spread(tps.map((t) => tx(file, f, t.at_s)), 18, f.R);
   return (
     <ChartFrame
       title="Win probability"
@@ -180,8 +198,8 @@ export function WinProbabilityChart({ file, nowS, names, compact = false }: { fi
                     {t.minute}&apos; {REASON_WORDS[t.reason] ?? t.reason}, {names[t.side]} ({SIDE_WORD[t.side].toLowerCase()})
                     {t.name ? `, ${t.name}` : ""}:{" "}
                     {t.delta_home_ppm === 0
-                      ? `the chance was big enough to matter (worth ${Math.round(t.weight_ppm / 10_000)} points of win probability had it gone in)`
-                      : `${names.home}'s win chance ${t.delta_home_ppm > 0 ? "up" : "down"} ${Math.abs(Math.round(t.delta_home_ppm / 10_000))} points`}
+                      ? `an expected swing of ${Math.round(t.weight_ppm / 10_000)} points of win probability (its xG times what a goal would have changed)`
+                      : `${possessive(names.home)} win chance ${t.delta_home_ppm > 0 ? "up" : "down"} ${Math.abs(Math.round(t.delta_home_ppm / 10_000))} points`}
                     .
                   </span>
                 </li>
@@ -209,11 +227,13 @@ export function WinProbabilityChart({ file, nowS, names, compact = false }: { fi
         {!compact
           ? tps.map((t, i) => {
               const x = tx(file, f, t.at_s);
+              const m = marks[i];
               return (
                 <g key={t.event_id}>
-                  <line x1={x} y1={f.T - 8} x2={x} y2={f.B} className="stroke-fg opacity-50" strokeDasharray="2 2" />
-                  <circle cx={x} cy={f.T - 14} r="8" className="fill-surface stroke-fg" strokeWidth="1.5" />
-                  <text x={x} y={f.T - 10.5} textAnchor="middle" className="fill-fg text-[10px] font-bold">
+                  <line x1={x} y1={f.T} x2={x} y2={f.B} className="stroke-fg opacity-50" strokeDasharray="2 2" />
+                  <line x1={m} y1={f.T - 6} x2={x} y2={f.T} className="stroke-fg opacity-50" />
+                  <circle cx={m} cy={f.T - 14} r="8" className="fill-surface stroke-fg" strokeWidth="1.5" />
+                  <text x={m} y={f.T - 10.5} textAnchor="middle" className="fill-fg text-[10px] font-bold">
                     {i + 1}
                   </text>
                 </g>

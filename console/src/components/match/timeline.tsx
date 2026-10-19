@@ -16,8 +16,8 @@ interface Layout {
   icon: number;
 }
 
-const WIDE: Layout = { width: 1000, height: 132, pad: 28, icon: 24 };
-const COMPACT: Layout = { width: 420, height: 132, pad: 14, icon: 18 };
+const WIDE: Layout = { width: 1000, height: 200, pad: 28, icon: 24 };
+const COMPACT: Layout = { width: 420, height: 176, pad: 14, icon: 18 };
 const LANES = 3;
 
 function place(marks: TimelineMark[], side: Side, layout: Layout, x: (s: number) => number) {
