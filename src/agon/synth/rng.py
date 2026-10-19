@@ -54,6 +54,7 @@ class StreamId:
     PERSONNEL = 18
     STOPPAGE = 19
     STORYLINE = 20
+    FIXTURES = 21
 
 
 def mix64(z: int) -> int:
