@@ -64,7 +64,9 @@ def command_runner(runner: str, bicep: str) -> Runner:
 
     def run(path: Path) -> BuildResult:
         if runner == "az":
-            cmd = ["az", "bicep", "build", "--file", str(path), "--stdout", "--only-show-errors"]
+            # No --only-show-errors: az reports Bicep's warnings through its own
+            # warning log, and that flag would hide exactly what this gate catches.
+            cmd = ["az", "bicep", "build", "--file", str(path), "--stdout"]
         else:
             cmd = [bicep, "build", str(path), "--stdout"]
         proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", check=False)
