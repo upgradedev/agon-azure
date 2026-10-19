@@ -35,14 +35,13 @@ function place(marks: TimelineMark[], side: Side, layout: Layout, x: (s: number)
   return out;
 }
 
-function TimelineSvg({ file, nowS, layout, className }: { file: MatchFile; nowS: number | null; layout: Layout; className?: string }) {
+function TimelineSvg({ file, marks, nowS, layout, className }: { file: MatchFile; marks: TimelineMark[]; nowS: number | null; layout: Layout; className?: string }) {
   const { width, height, pad, icon } = layout;
   const end = Math.max(1, file.axis.end_s);
   const x = (s: number) => pad + (Math.min(Math.max(s, 0), end) / end) * (width - 2 * pad);
   const mid = height / 2;
   const step = icon + 4;
   const ticks = [0, 15, 30, 45, 60, 75, 90].map((m) => ({ m, s: m * 60 + (m > 45 ? file.axis.half_offset_s : 0) }));
-  const marks = file.timeline;
   const home = place(marks, "home", layout, x);
   const away = place(marks, "away", layout, x);
   const now = nowS === null ? null : x(nowS);
@@ -81,7 +80,13 @@ function TimelineSvg({ file, nowS, layout, className }: { file: MatchFile; nowS:
   );
 }
 
-export function MatchTimeline({ file, nowS, names }: { file: MatchFile; nowS: number | null; names: Record<Side, string> }) {
+/* Fan mode keeps the big moments: goals, cards, substitutions and big chances. */
+function fanMark(m: TimelineMark): boolean {
+  return m.kind === "goal" || m.kind === "yellow" || m.kind === "red" || m.kind === "sub" || m.big_chance;
+}
+
+export function MatchTimeline({ file, nowS, names, fan = false }: { file: MatchFile; nowS: number | null; names: Record<Side, string>; fan?: boolean }) {
+  const marks = fan ? file.timeline.filter(fanMark) : file.timeline;
   const counts = (side: Side) => {
     const mine = file.timeline.filter((m) => m.side === side);
     const goals = mine.filter((m) => m.kind === "goal").length;
@@ -89,7 +94,7 @@ export function MatchTimeline({ file, nowS, names }: { file: MatchFile; nowS: nu
     const cards = mine.filter((m) => m.kind === "yellow" || m.kind === "red").length;
     return `${names[side]}: ${goals} goal${goals === 1 ? "" : "s"}, ${shots} shot${shots === 1 ? "" : "s"}, ${cards} card${cards === 1 ? "" : "s"}`;
   };
-  const kinds = Array.from(new Set(file.timeline.map((m) => m.kind)));
+  const kinds = Array.from(new Set(marks.map((m) => m.kind)));
   return (
     <figure className="space-y-2">
       <div className="flex items-center justify-between text-xs font-medium">
@@ -103,8 +108,8 @@ export function MatchTimeline({ file, nowS, names }: { file: MatchFile; nowS: nu
         </span>
       </div>
       <div className="rounded-lg border border-line bg-surface px-1">
-        <TimelineSvg file={file} nowS={nowS} layout={COMPACT} className="sm:hidden" />
-        <TimelineSvg file={file} nowS={nowS} layout={WIDE} className="hidden sm:block" />
+        <TimelineSvg file={file} marks={marks} nowS={nowS} layout={COMPACT} className="sm:hidden" />
+        <TimelineSvg file={file} marks={marks} nowS={nowS} layout={WIDE} className="hidden sm:block" />
       </div>
       <div className="flex justify-between px-1 text-[0.6875rem] text-muted tabular-nums" aria-hidden="true">
         <span>0&apos;</span>

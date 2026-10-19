@@ -29,6 +29,7 @@
   --animate-slide-left: agon-slide-left 240ms cubic-bezier(0.2, 0, 0, 1);
   --animate-rise: agon-rise 320ms cubic-bezier(0.2, 0, 0, 1);
   --animate-pulse-ring: agon-pulse-ring 1.6s ease-out infinite;
+  --animate-draw: agon-draw 1200ms cubic-bezier(0.2, 0, 0, 1) both;
 
   @keyframes agon-fade-in {
     from { opacity: 0; }
@@ -49,6 +50,10 @@
   @keyframes agon-rise {
     from { opacity: 0; transform: translateY(6px); }
     to { opacity: 1; transform: none; }
+  }
+  @keyframes agon-draw {
+    from { stroke-dashoffset: 1; }
+    to { stroke-dashoffset: 0; }
   }
   @keyframes agon-pulse-ring {
     0% { transform: scale(1); opacity: 0.55; }
