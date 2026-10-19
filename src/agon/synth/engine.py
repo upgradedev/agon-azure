@@ -1,15 +1,18 @@
-"""Match engine v0: a semi-Markov possession-chain simulator on a 16 by 12 zone grid.
+"""Match engine (synth-v0.2): a semi-Markov possession-chain simulator on a 16 by 12 zone grid.
 
 What it does, honestly: each possession is a chain of actions (pass, carry, shot) by the team in
 possession, interrupted by the defending side's pressure, tackles and fouls. Each action draws a
 sojourn time in whole seconds (the semi-Markov part), so the clock advances by action, not by a
-fixed tick. Probabilities are integers in parts per million. v0 is not calibrated: the realism
-bands and the parameter fit come later (spec section 5.1, metric M2). The rates are only meant
-to be plausible, and the tests pin wide ranges, not targets.
+fixed tick. Probabilities are integers in parts per million. The constants in the "Calibrated
+constants" block were fitted by hand on calibration seeds 1 to 200 against the realism bands
+frozen in bands.json (metric M2); the held-out result, which is below its threshold, is recorded
+in DATASET_CARD.md section 4. Storyline interventions (agon.synth.interventions) are applied only
+when passed in; a plain match never touches them.
 
 Where each style knob is read (every knob needs a reader):
 - press_height: `_press_ppm` (how often the defending side presses, higher in the attacker's own half)
-- directness: `_pass_target` (forward pass weights) and `_action_weights` (carry share)
+- directness: `_pass_target` (forward pass weights), `_action_weights` (carry share) and the
+  short-game completion bonus in `_run_chain` (`SHORT_GAME_PPM_PER_POINT`)
 - width: `_pass_target` (lateral pass weights)
 Score effects and the momentum term enter through `_effective_style` and `_momentum_bonus`.
 

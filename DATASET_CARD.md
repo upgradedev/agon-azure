@@ -166,9 +166,10 @@ was changed. The held-out seeds were read once before fitting (the v0.1 column) 
 
 M2 on the held-out seeds is **18 of 22, below the threshold of 20**, and the CLI exits 1. The two
 misses are the goal-timing bands, just above their upper edges. On the 600 calibration matches the
-same two bands sat inside (0.5693 and 0.2484), so the miss is either noise in 200 matches (one
-standard error of a share over about 516 goals is about 0.022) or a real overshoot of the fatigue
-term. We did not retune on the held-out seeds, because that would turn them into calibration seeds.
+same two bands sat inside (0.5693 and 0.2484). On the like-for-like calibration set (seeds 1 to
+200 at match index 0, the index M2 uses) they were already close to their upper edges (0.5774 and
+0.2734). So the miss is either noise in 200 matches (one standard error of a share over about 516
+goals is about 0.022) or a real overshoot of the fatigue term; the data do not tell the two apart. We did not retune on the held-out seeds, because that would turn them into calibration seeds.
 The next fit must run on calibration seeds only, and the result is reported here as it stands.
 On the calibration seeds 1 to 200 at match index 0 the same command gives 20 of 22.
 Total wall time for the 200 held-out matches: about 41 s on this machine (printed on stderr).

@@ -11,8 +11,9 @@ SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 
 
 def _expected_files() -> int:
     count = 0
-    for dirpath, _dirs, names in os.walk(os.path.join(SRC, "agon")):
-        if os.sep + "referee" in dirpath or dirpath.endswith("referee"):
+    agon = os.path.join(SRC, "agon")
+    for dirpath, _dirs, names in os.walk(agon):
+        if os.path.relpath(dirpath, agon).split(os.sep)[0] == "referee":
             continue
         count += sum(1 for n in names if n.endswith(".py"))
     return count
@@ -53,6 +54,10 @@ PLANTED = [
     ("agon/synth/f.py", "from .. import referee\n"),
     ("agon/mcp/g.py", "import importlib\nm = importlib.import_module('agon.referee.labels')\n"),
     ("agon/synth/h.py", "x = __import__('agon.referee')\n"),
+    ("agon/synth/i.py", "import importlib\nm = importlib.import_module('.referee', 'agon')\n"),
+    ("agon/synth/j.py", "from importlib import import_module\nm = import_module('..referee.labels', package='agon.synth')\n"),
+    # A sibling directory whose name merely starts with "referee" is not the referee package.
+    ("agon/referee_tools/k.py", "import agon.referee\n"),
 ]
 
 
