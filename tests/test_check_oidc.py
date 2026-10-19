@@ -115,6 +115,35 @@ def test_every_trigger_form_is_read(tmp_path: Path, on_line: str) -> None:
     assert "grants a token" in result.stdout
 
 
+def test_flow_map_grant_is_caught(tmp_path: Path) -> None:
+    text = """name: x
+on: pull_request
+permissions:
+  contents: read
+jobs:
+  a:
+    permissions: { contents: read, id-token: write }
+    runs-on: ubuntu-latest
+"""
+    root = git_repo(tmp_path, {".github/workflows/x.yml": text})
+    result = run(root)
+    assert result.returncode == 1, result.stdout
+    assert "x.yml:7: triggered by pull_request and grants a token" in result.stdout
+
+
+def test_commented_grant_is_ignored(tmp_path: Path) -> None:
+    text = """name: x
+on: pull_request
+permissions:
+  contents: read
+  # id-token: write
+jobs: {}
+"""
+    root = git_repo(tmp_path, {".github/workflows/x.yml": text})
+    result = run(root)
+    assert result.returncode == 0, result.stdout
+
+
 def test_write_all_counts_as_a_grant(tmp_path: Path) -> None:
     text = "name: x\non: pull_request\npermissions: write-all\njobs: {}\n"
     root = git_repo(tmp_path, {".github/workflows/x.yml": text})

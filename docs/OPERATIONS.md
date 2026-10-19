@@ -99,7 +99,7 @@ az deployment group create --resource-group $rg --name agon-rbac --template-file
 
 Run `what-if` with the same arguments first if anything in `rbac.bicep` changed since the last run. Grants that go beyond the spec 7.1 table are marked "BEYOND THE SPEC 7.1 TABLE" in the templates, each with the reason.
 
-**4. Remove the `pull_request` federated credential from `agon-azure-ci` (pending, do it before any pull request is opened).** First prove that nothing in the repository still needs it. Every workflow that grants `id-token: write` must have no `pull_request` trigger:
+**4. Remove the `pull_request` federated credential from `agon-azure-ci` (pending; do it as soon as possible, it is safe before or after this change merges because nothing uses that subject).** First prove that nothing in the repository still needs it. Every workflow that grants `id-token: write` must have no `pull_request` trigger:
 
 ```bash
 grep -l "id-token: write" .github/workflows/*.yml | xargs -r grep -lE '^  pull_request|^on:.*pull_request'

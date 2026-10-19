@@ -14,8 +14,8 @@ Rule, for every workflow file under .github/workflows (selected by PATH from git
 never by searching text): if any trigger name starts with "pull_request" (this
 covers pull_request_target and the review events), the file must declare a
 top-level permissions block, and must not contain "id-token: write" or
-"permissions: write-all" anywhere. A file with no readable top-level "on:" key is
-a failure, and so is scanning zero workflow files.
+"permissions: write-all" outside a comment, in block or flow form. A file with
+no readable top-level "on:" key is a failure, and so is scanning zero workflow files.
 
 The parser is line based on purpose (no third-party YAML here). It reads the
 three trigger forms GitHub accepts: a scalar (on: push), a flow list
@@ -36,9 +36,11 @@ from git_paths import list_repo_paths
 WORKFLOW_DIR = PurePosixPath(".github/workflows")
 ON_KEY = re.compile(r"""^(?:on|"on"|'on')\s*:\s*(?P<rest>.*)$""")
 TOP_LEVEL_PERMISSIONS = re.compile(r"^permissions\s*:")
+# Searched anywhere on the line, after the comment is cut, so the flow-map form
+# permissions: { contents: read, id-token: write } is caught too.
 GRANTS = (
-    re.compile(r"^\s*id-token\s*:\s*['\"]?write['\"]?\s*(?:#.*)?$"),
-    re.compile(r"^\s*permissions\s*:\s*['\"]?write-all['\"]?\s*(?:#.*)?$"),
+    re.compile(r"\bid-token\s*:\s*['\"]?write\b"),
+    re.compile(r"\bpermissions\s*:\s*['\"]?write-all\b"),
 )
 
 
@@ -98,7 +100,8 @@ def check_file(rel: str, text: str) -> list[str]:
             f"{rel}: triggered by {', '.join(pr_names)} with no top-level permissions block"
         )
     for number, line in enumerate(lines, start=1):
-        if any(grant.match(line) for grant in GRANTS):
+        code = "" if line.lstrip().startswith("#") else line.split(" #", 1)[0]
+        if any(grant.search(code) for grant in GRANTS):
             problems.append(
                 f"{rel}:{number}: triggered by {', '.join(pr_names)} and grants a token: {line.strip()}"
             )
