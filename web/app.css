@@ -1889,6 +1889,21 @@ main:focus {
   cursor: pointer;
 }
 
+/* The decision buttons stay in reach while the card scrolls, at every width,
+   so the primary action is never below the fold. */
+.acard__footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: grid;
+  gap: var(--space-2);
+  margin: 0 calc(var(--space-4) * -1) calc(var(--space-4) * -1);
+  padding: var(--space-3) var(--space-4) max(var(--space-3), env(safe-area-inset-bottom));
+  background: var(--surface);
+  border-top: 1px solid var(--border-subtle);
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+}
+
 .acard__actions {
   display: flex;
   flex-wrap: wrap;

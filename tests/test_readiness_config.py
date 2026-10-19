@@ -106,3 +106,14 @@ def test_demo_target_fails_on_a_page_without_the_label() -> None:
     stripped = page.replace("Design preview: sample run written by hand, not produced by the pipeline.", "Sample run.")
     failed = [f.check for f in readiness.check_target(target, _fetcher(target.url, stripped), rules) if not f.ok]
     assert any("Design preview" in check for check in failed), failed
+
+
+def test_demo_bundle_target_passes_on_the_sealed_manifest_and_fails_on_the_fallback_page() -> None:
+    target = _targets()["demo-bundle"]
+    assert target.url == "https://__AGON_SWA_HOSTNAME__/runs/sample-s1/manifest.json"
+    target = readiness.Target(target.name, "https://agon.example/runs/sample-s1/manifest.json", list(target.markers))
+    body = (RUNS_INDEX.parent / "sample-s1" / "manifest.json").read_text(encoding="utf-8")
+    rules = readiness.build_rules()
+    assert all(f.ok for f in readiness.check_target(target, _fetcher(target.url, body), rules))
+    fallback = (RUNS_INDEX.parent.parent / "index.html").read_text(encoding="utf-8")
+    assert not all(f.ok for f in readiness.check_target(target, _fetcher(target.url, fallback), rules))

@@ -476,12 +476,12 @@
     var hash = shortHash(run.bundle.sha256);
     if (action === "approve") {
       return "Nothing was approved or published. The decision endpoint is not deployed yet, so this stand-in card " +
-        "could not send your approval of bundle " + hash + ". In the deployed build, Approve sends that exact hash " +
-        "to the same endpoint the Teams card calls.";
+        "could not send your approval of bundle " + hash + ". Once the decision endpoint is deployed, Approve sends " +
+        "that exact hash to the same endpoint the Teams card calls.";
     }
     return "Nothing was sent. The decision endpoint is not deployed yet, so this stand-in card could not send a " +
-      "change request for bundle " + hash + ". In the deployed build, Request changes goes to the same endpoint " +
-      "the Teams card calls.";
+      "change request for bundle " + hash + ". Once the decision endpoint is deployed, Request changes goes to " +
+      "the same endpoint the Teams card calls.";
   }
 
   /* "You are attesting" versus "Gate-cleared only", from the sealed manifest's

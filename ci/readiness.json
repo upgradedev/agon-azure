@@ -6,6 +6,7 @@
     "demo markers also hold 'Newsroom Wall' (the S2 view) and the exact design preview label: while the only run is the hand-written sample, the page must say so in the same sentence, and the gate fails without it.",
     "demo-data markers: the web data contract written by agon.webdata (the generator key, one file entry per published seed and its world file of fictional names), so the recorded synthetic data the browser accepts must have shipped with the page.",
     "demo-run: the one hand-written sample run (web/runs/sample-s1.json). Its markers are the run id, the provenance and the exact design preview label, so a run file that drops the label, or a deploy without runs, fails live. tests/test_readiness_config.py holds the run id to web/runs/index.json.",
+    "demo-bundle: the sealed manifest of that run (agon.governance.seal, schema agon.bundle/1), which Verify hashes in the browser; a missing bundle folder or an HTML fallback page in its place fails live.",
     "The published seeds are pinned in two places: PUBLISHED_SEEDS in .github/workflows/deploy.yml and the demo-data markers below. Change both together."
   ],
   "targets": [
@@ -41,6 +42,15 @@
         "\"run_id\":\"sample-s1\"",
         "\"provenance\":\"design_preview\"",
         "Design preview: sample run written by hand, not produced by the pipeline."
+      ],
+      "scan_assets": false
+    },
+    {
+      "name": "demo-bundle",
+      "url": "https://__AGON_SWA_HOSTNAME__/runs/sample-s1/manifest.json",
+      "markers": [
+        "\"schema\":\"agon.bundle/1\"",
+        "\"edition-en.json\":"
       ],
       "scan_assets": false
     },
