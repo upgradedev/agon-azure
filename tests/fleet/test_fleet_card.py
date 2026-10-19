@@ -136,6 +136,8 @@ def test_the_teams_payload_is_filled_from_the_sealed_bundle(sealed_run):
     assert payload["published_url"] == f"{CONTEXT.feed_base_url}{ref.request.bundle_sha256}/manifest.json"
     assert payload["destinations"] == [{"id": d["id"], "label": d["label"]} for d in ref.request.destinations]
     assert len(payload["destinations"]) == len(inputs.manifest["destinations"]) == 6
+    # The officer reads the exact English report they attest (flows.bicep `report`).
+    assert payload["report"] == " ".join(row["text"].strip() for row in inputs.report_en["sentences"] if row["text"].strip())
     assert len(json.dumps(payload).encode("utf-8")) < card.MAX_PAYLOAD_BYTES
 
 
@@ -275,3 +277,12 @@ def test_offered_destinations_become_card_toggles_in_every_shape(sealed_run):
         destinations: list
 
     assert card._destinations(WithDestinations([{"id": "youtube", "label": "YouTube"}]), as_list) == [{"id": "youtube", "label": "YouTube"}]
+
+
+def test_the_report_text_is_shortened_out_loud_never_silently():
+    report = {"sentences": [{"sentence_id": "en-01", "text": "A" * 50}, {"sentence_id": "en-02", "text": "B" * 50}]}
+    assert card.report_text(report, 1000) == "A" * 50 + " " + "B" * 50
+    short = card.report_text(report, 20)
+    assert short.startswith("A" * 20) and short.endswith("[shortened to fit the card; the full report is in the evidence link]")
+    assert card.report_text(None, 1000) is None
+    assert card.report_text({"sentences": [{"text": "  "}]}, 1000) is None
