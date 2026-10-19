@@ -219,8 +219,9 @@
         dialog.close();
       } else {
         dialog.removeAttribute("open");
-        restoreFocus();
       }
+      /* Not left to the browser: some engines do not return focus on close. */
+      restoreFocus();
     }
 
     function restoreFocus() {
@@ -294,7 +295,7 @@
       .digest("SHA-256", new TextEncoder().encode("abc"))
       .then(function (digest) {
         if (toHex(digest) === SHA256_ABC) {
-          setCryptoResult(true, "This browser computed the standard SHA-256 test vector correctly, so it can verify published files on this device.");
+          setCryptoResult(true, "This browser computed the standard SHA-256 test vector correctly, so it supports the hashing that the planned verification will use.");
         } else {
           setCryptoResult(false, "This browser returned a wrong SHA-256 result for the standard test vector, so its verification could not be trusted.");
         }
