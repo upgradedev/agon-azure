@@ -106,8 +106,9 @@ def _flip(text: str, index: int) -> str:
 def test_signed_link_round_trip_approves_once():
     env, secrets = govkit.make_env(), govkit.TestSecrets()
     token = _token(env, secrets)
-    assert signed_link.handle(token, env.store, govkit.later(5), secrets=secrets).approved
-    replay = signed_link.handle(token, env.store, govkit.later(6), secrets=secrets)
+    ticked = govkit.offered(env)
+    assert signed_link.handle(token, env.store, govkit.later(5), secrets=secrets, destinations=ticked).approved
+    replay = signed_link.handle(token, env.store, govkit.later(6), secrets=secrets, destinations=ticked)
     assert replay.code == "already_consumed"
 
 

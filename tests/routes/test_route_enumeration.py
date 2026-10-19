@@ -10,6 +10,9 @@ route table binds each queue `decisions-<channel>` to that channel's adapter (Te
 only). Negative controls: rogue intake files and rogue route tables must each be flagged. The
 dynamic half for queue routes is tests/intake (a spy on `verifier.verify`, once per route).
 
+Destinations: every adapter hands the officer's destination choice to verify() (ticked ids, or "as
+offered" from Outlook only); the verifier, not the adapter, decides what may be approved.
+
 Scope: no HTTP router exists yet, so today the count covers the four channel adapters and the two
 queue routes. When the api's HTTP routes land, this test must enumerate them by path as well.
 """
@@ -40,7 +43,7 @@ def _signed(env):
         decision="approve",
         expires_at=govkit.later(900),
     )
-    return signed_link.handle(token, env.store, NOW, secrets=SECRETS)
+    return signed_link.handle(token, env.store, NOW, secrets=SECRETS, destinations=govkit.offered(env))
 
 
 # One valid call per adapter. A new adapter without a case here fails test_every_adapter_has_a_case.
@@ -87,6 +90,23 @@ def test_adapter_returns_only_what_verify_returns(name, monkeypatch):
     assert calls[0].nonce == env.nonce and calls[0].bundle_sha256 == env.bundle.bundle_sha256
     assert env.store.read(NONCES, env.nonce).body["status"] == "pending"
     assert env.store.keys(verifier.APPROVALS) == []
+
+
+@pytest.mark.parametrize("name", sorted(CASES))
+def test_adapter_hands_the_destinations_to_verify(name, monkeypatch):
+    """Every channel reaches verify() with the officer's destination choice: ticked ids from the
+    channels that can tick, and "as offered" only from the one that cannot (Outlook)."""
+    module, target, call = CASES[name]
+    env = govkit.make_env(target=target)
+    seen = []
+    monkeypatch.setattr(verifier, "verify", lambda d, s, n: seen.append(d) or VerifyResult(ok=False, code="spy", detail="spy"))
+    call(env)
+    decision = seen[0]
+    if module.CHANNEL in verifier.AS_OFFERED_CHANNELS:
+        assert decision.destinations_as_offered and decision.destinations == frozenset()
+    else:
+        assert not decision.destinations_as_offered
+        assert decision.destinations == frozenset(govkit.offered(env))
 
 
 @pytest.mark.parametrize("name", sorted(CASES))

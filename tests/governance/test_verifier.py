@@ -20,6 +20,7 @@ def _decision(env, **over):
         approver=govkit.OFFICER,
         channel="teams",
         received_at=govkit.T0,
+        destinations=frozenset(govkit.offered(env)),
     )
     base.update(over)
     return ApprovalDecision(**base)
