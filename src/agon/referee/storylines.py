@@ -7,6 +7,12 @@ Usage:
 Each storyline is a deterministic function of (seed, kind): which side it hits, the minute it
 starts and its size are drawn on the STORYLINE stream under a match key no real fixture uses, so
 planning never shifts a draw inside a match. Spec seed set for storylines: 2001 and up.
+
+A planned minute of 45 or more is a period-2 minute: the plan carries `period` and the engine waits
+for that period, so a second-half storyline never fires in first-half added time. The tactical
+shift starts in minutes 60 to 74 so that both of its 15-minute label windows (before and after)
+fit inside period 2; a shift at 45 to 50 would have an empty or tiny before window and its
+turning-point flag would be false for a mechanical reason, not a measured one.
 """
 
 from __future__ import annotations
@@ -19,7 +25,7 @@ from typing import Any, Sequence
 
 from agon.referee.labels import labels_from_ledger, labels_from_log
 from agon.synth.engine import MatchResult, simulate_match
-from agon.synth.interventions import INTERVENTION_KINDS, SIDES, Intervention
+from agon.synth.interventions import HALF_MINUTES, INTERVENTION_KINDS, SIDES, Intervention
 from agon.synth.manifest import parse_seeds
 from agon.synth.rng import Stream, StreamId
 from agon.synth.schema import canonical_bytes, sha256_hex
@@ -32,7 +38,7 @@ DEFAULT_MATCH_INDEX = 0
 
 MINUTE_RANGES: dict[str, tuple[int, int]] = {
     "red_card": (15, 70),
-    "tactical_shift": (30, 60),
+    "tactical_shift": (60, 74),
     "late_collapse": (70, 78),
     "goalkeeper_heroics": (1, 30),
     "injury_stoppage": (15, 40),
@@ -54,7 +60,8 @@ def plan_storyline(seed: int, kind: str) -> Intervention:
     side = SIDES[s.below(len(SIDES))]
     minute = s.between(*MINUTE_RANGES[kind])
     magnitude = s.between(*SIZE_RANGES[kind])
-    return Intervention(kind=kind, side=side, minute=minute, magnitude=magnitude)
+    period = 1 if minute < HALF_MINUTES else 2
+    return Intervention(kind=kind, side=side, period=period, minute=minute, magnitude=magnitude)
 
 
 def run_storyline(seed: int, kind: str, match_index: int = DEFAULT_MATCH_INDEX) -> tuple[Intervention, MatchResult]:

@@ -11,7 +11,13 @@ baseline added time from the counter-based RNG instead of asking the engine.
 `verify_labels` compares the two. Any difference is a failure.
 
 Label shape (canonical JSON, integers only):
-    label_id, seed, match_id, kind, side, team, minute, at_clock, anchor_event_id, effect, turning_point
+    label_id, seed, match_id, kind, side, team, period, minute, at_clock, anchor_event_id, effect,
+    turning_point
+
+`period` is the period of the activation (or anchor) event. `minute` and `at_clock` are match-clock
+values and repeat across periods (period 2 restarts the clock at 45:00 while period 1 can run past
+it in added time), so a moment is only identified by (period, at_clock). The tactical-shift before
+and after windows count only events of the activation period.
 
 `turning_point` is the ground truth a later evaluation scores against: the anchor event is a turning
 point when the intervention visibly took effect in this match, by the rule in `turning_point()`.
@@ -52,6 +58,7 @@ def _label(
     plan: Intervention,
     match_id: str,
     team: str,
+    period: int | None,
     at_clock: int | None,
     anchor: str | None,
     effect: dict[str, int],
@@ -63,6 +70,7 @@ def _label(
         "kind": plan.kind,
         "side": plan.side,
         "team": team,
+        "period": None if at_clock is None else period,
         "minute": None if at_clock is None else at_clock // 60,
         "at_clock": at_clock,
         "anchor_event_id": anchor,
@@ -71,9 +79,10 @@ def _label(
     }
 
 
-def _window_sums(by_minute: dict[int, int], m0: int) -> tuple[int, int]:
-    before = sum(n for m, n in by_minute.items() if m0 - SHIFT_WINDOW_MINUTES <= m < m0)
-    after = sum(n for m, n in by_minute.items() if m0 <= m < m0 + SHIFT_WINDOW_MINUTES)
+def _window_sums(by_minute: dict[tuple[int, int], int], period: int, m0: int) -> tuple[int, int]:
+    """Counts in the minutes before and from `m0`, inside `period` only: windows never span half-time."""
+    before = sum(n for (p, m), n in by_minute.items() if p == period and m0 - SHIFT_WINDOW_MINUTES <= m < m0)
+    after = sum(n for (p, m), n in by_minute.items() if p == period and m0 <= m < m0 + SHIFT_WINDOW_MINUTES)
     return before, after
 
 
@@ -87,8 +96,9 @@ def labels_from_ledger(seed: int, plan: Intervention, result: MatchResult) -> di
     a = entries[0]
     kind = plan.kind
     if not a["activated"] and kind in ("tactical_shift", "late_collapse", "goalkeeper_heroics"):
-        return _label(seed, plan, result.meta["match_id"], a["team"], None, None, _empty_effect(kind))
+        return _label(seed, plan, result.meta["match_id"], a["team"], None, None, None, _empty_effect(kind))
     at_clock = a["at_clock"]
+    period = a["at_period"]
     anchor = a["anchor_event_id"]
     if kind == "red_card":
         effect = {"goals_for_after": a["goals_for_after"], "goals_against_after": a["goals_against_after"]}
@@ -96,8 +106,8 @@ def labels_from_ledger(seed: int, plan: Intervention, result: MatchResult) -> di
             at_clock = None
     elif kind == "tactical_shift":
         m0 = at_clock // 60 if at_clock is not None else 0
-        pb, pa = _window_sums(a["press_by_minute"], m0)
-        ob, oa = _window_sums(a["opp_onball_by_minute"], m0)
+        pb, pa = _window_sums(a["press_by_minute"], period, m0)
+        ob, oa = _window_sums(a["opp_onball_by_minute"], period, m0)
         effect = {"press_before": pb, "onball_before": ob, "press_after": pa, "onball_after": oa}
     elif kind == "late_collapse":
         effect = {"goals_for_after": a["goals_for_after"], "goals_against_after": a["goals_against_after"]}
@@ -111,7 +121,7 @@ def labels_from_ledger(seed: int, plan: Intervention, result: MatchResult) -> di
         raise ValueError(kind)
     if not a["activated"]:
         at_clock = None
-    return _label(seed, plan, result.meta["match_id"], a["team"], at_clock, anchor, effect)
+    return _label(seed, plan, result.meta["match_id"], a["team"], period, at_clock, anchor, effect)
 
 
 # ----------------------------------------------------------------- path two: the event log only
@@ -121,8 +131,10 @@ def _clock(ev: dict[str, Any]) -> int:
     return ev["minute"] * 60 + ev["second"]
 
 
-def activation_index(events: Sequence[dict[str, Any]], minute: int) -> int | None:
-    """Index of the first event of the first possession chain that opens at or after `minute`.
+def activation_index(events: Sequence[dict[str, Any]], period: int, minute: int) -> int | None:
+    """Index of the first event of the first possession chain that opens in `period` (or later) at a
+    clock of `minute` * 60 or more. The period is compared first: a period-1 event at 48:17 of
+    first-half added time does not reach a plan for period 2, minute 48.
 
     Substitutions are skipped: they are made between chains and carry the previous chain's id.
     """
@@ -134,7 +146,7 @@ def activation_index(events: Sequence[dict[str, Any]], minute: int) -> int | Non
         if chain in seen:
             continue
         seen.add(chain)
-        if _clock(ev) >= minute * 60:
+        if ev["period"] > period or (ev["period"] == period and _clock(ev) >= minute * 60):
             return i
     return None
 
@@ -160,7 +172,8 @@ def labels_from_log(seed: int, plan: Intervention, meta: dict[str, Any], events:
     kind = plan.kind
     team = meta[plan.side]
     match_id = meta["match_id"]
-    start = activation_index(events, plan.minute)
+    start = activation_index(events, plan.period, plan.minute)
+    period: int | None = None
     at_clock: int | None = None
     anchor: str | None = None
 
@@ -170,7 +183,7 @@ def labels_from_log(seed: int, plan: Intervention, meta: dict[str, Any], events:
             for i in range(start, len(events)):
                 ev = events[i]
                 if ev["type"] == "card" and ev["team"] == team and ev["outcome"] == "red":
-                    anchor, at_clock = ev["event_id"], _clock(ev)
+                    anchor, at_clock, period = ev["event_id"], _clock(ev), ev["period"]
                     gf, ga = _goals_after(events, i + 1, team)
                     effect = {"goals_for_after": gf, "goals_against_after": ga}
                     break
@@ -178,7 +191,7 @@ def labels_from_log(seed: int, plan: Intervention, meta: dict[str, Any], events:
         effect = {"stoppage_seconds": 0}
         for ev in events:
             if ev["type"] == "sub" and ev["team"] == team and ev["qualifier"] == "injury":
-                anchor, at_clock = ev["event_id"], _clock(ev)
+                anchor, at_clock, period = ev["event_id"], _clock(ev), ev["period"]
                 base = baseline_added_seconds(seed, meta["match_index"])
                 key = "first_half" if ev["period"] == 1 else "second_half"
                 effect = {"stoppage_seconds": meta["added_seconds"][key] - base[ev["period"] - 1]}
@@ -187,18 +200,20 @@ def labels_from_log(seed: int, plan: Intervention, meta: dict[str, Any], events:
         effect = _empty_effect(kind)
     else:
         at_clock = _clock(events[start])
+        period = events[start]["period"]
         if kind == "tactical_shift":
             anchor = events[start]["event_id"]
             m0 = at_clock // 60
-            press: dict[int, int] = {}
-            onball: dict[int, int] = {}
+            press: dict[tuple[int, int], int] = {}
+            onball: dict[tuple[int, int], int] = {}
             for ev in events:
+                key = (ev["period"], ev["minute"])
                 if ev["type"] == "pressure" and ev["team"] == team:
-                    press[ev["minute"]] = press.get(ev["minute"], 0) + 1
+                    press[key] = press.get(key, 0) + 1
                 elif ev["type"] in ONBALL and ev["team"] != team:
-                    onball[ev["minute"]] = onball.get(ev["minute"], 0) + 1
-            pb, pa = _window_sums(press, m0)
-            ob, oa = _window_sums(onball, m0)
+                    onball[key] = onball.get(key, 0) + 1
+            pb, pa = _window_sums(press, period, m0)
+            ob, oa = _window_sums(onball, period, m0)
             effect = {"press_before": pb, "onball_before": ob, "press_after": pa, "onball_after": oa}
         elif kind == "late_collapse":
             gf, ga = _goals_after(events, start, team)
@@ -218,7 +233,7 @@ def labels_from_log(seed: int, plan: Intervention, meta: dict[str, Any], events:
             effect = {"saves_after": saves, "goals_against_after": ga}
         else:
             raise ValueError(kind)
-    return _label(seed, plan, match_id, team, at_clock, anchor, effect)
+    return _label(seed, plan, match_id, team, period, at_clock, anchor, effect)
 
 
 def _empty_effect(kind: str) -> dict[str, int]:

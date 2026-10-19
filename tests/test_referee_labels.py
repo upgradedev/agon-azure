@@ -122,19 +122,31 @@ def test_plans_are_deterministic_and_inside_their_ranges() -> None:
             assert a == b
             lo, hi = S.MINUTE_RANGES[kind]
             assert lo <= a.minute <= hi
+            assert a.period == (1 if a.minute < 45 else 2)
             lo, hi = S.SIZE_RANGES[kind]
             assert lo <= a.magnitude <= hi
 
 
 def test_intervention_rejects_bad_input() -> None:
     with pytest.raises(ValueError):
-        Intervention("meteor_strike", "home", 10)
+        Intervention("meteor_strike", "home", 1, 10)
     with pytest.raises(ValueError):
-        Intervention("red_card", "neutral", 10)
+        Intervention("red_card", "neutral", 1, 10)
     with pytest.raises(ValueError):
-        Intervention("tactical_shift", "home", 10, magnitude=5000)
+        Intervention("tactical_shift", "home", 1, 10, magnitude=5000)
     with pytest.raises(ValueError):
-        Intervention("red_card", "home", 95)
+        Intervention("red_card", "home", 2, 95)
+    with pytest.raises(ValueError):
+        Intervention("red_card", "home", 3, 10)
+
+
+def test_intervention_period_must_agree_with_its_minute() -> None:
+    with pytest.raises(ValueError, match="belongs to period 2"):
+        Intervention("red_card", "home", 1, 48)
+    with pytest.raises(ValueError, match="belongs to period 1"):
+        Intervention("red_card", "home", 2, 44)
+    assert Intervention("red_card", "home", 1, 44).to_dict()["period"] == 1
+    assert Intervention("red_card", "home", 2, 45).to_dict()["period"] == 2
 
 
 def test_turning_point_rule() -> None:
@@ -143,3 +155,71 @@ def test_turning_point_rule() -> None:
     assert L.turning_point("goalkeeper_heroics", "a" * 16, {"saves_after": 2, "goals_against_after": 0}) is False
     shift = {"press_before": 10, "onball_before": 100, "press_after": 12, "onball_after": 100}
     assert L.turning_point("tactical_shift", "a" * 16, shift) is True
+
+
+def _card_of(seed: int, plan: Intervention) -> dict:
+    result = simulate_match(build_world(seed), 0, (plan,))
+    events = [e.to_dict() for e in result.events]
+    label = L.labels_from_ledger(seed, plan, result)
+    assert label == L.labels_from_log(seed, plan, result.meta, events)
+    card = next(e for e in events if e["event_id"] == label["anchor_event_id"])
+    assert card["type"] == "card" and card["outcome"] == "red"
+    assert label["period"] == card["period"]
+    return card
+
+
+def test_reviewer_repro_seed_2006_red_card_minute_48_lands_in_the_second_half() -> None:
+    """Before the fix this card was shown at 48:17 of the FIRST half."""
+    plan = S.plan_storyline(2006, "red_card")
+    assert (plan.period, plan.minute) == (2, 48)
+    card = _card_of(2006, plan)
+    assert card["period"] == 2 and card["minute"] >= 48
+
+
+def test_reviewer_repro_seed_2034_red_card_minute_45_lands_in_the_second_half() -> None:
+    """Before the fix this card was shown at 45:06 of the first half."""
+    plan = S.plan_storyline(2034, "red_card")
+    assert (plan.period, plan.minute) == (2, 45)
+    assert _card_of(2034, plan)["period"] == 2
+
+
+def test_minute_44_plan_lands_in_the_first_half() -> None:
+    card = _card_of(2006, Intervention("red_card", "home", 1, 44))
+    assert card["period"] == 1 and card["minute"] >= 44
+
+
+def test_path_two_does_not_activate_a_period_two_plan_in_first_half_added_time() -> None:
+    events = [
+        {"type": "pass", "possession_chain_id": 1, "period": 1, "minute": 47, "second": 0},
+        {"type": "pass", "possession_chain_id": 2, "period": 1, "minute": 48, "second": 30},
+        {"type": "pass", "possession_chain_id": 3, "period": 2, "minute": 46, "second": 0},
+        {"type": "pass", "possession_chain_id": 4, "period": 2, "minute": 48, "second": 5},
+    ]
+    assert L.activation_index(events, 2, 48) == 3
+    assert L.activation_index(events, 1, 47) == 0
+    assert L.activation_index(events, 1, 44) == 0
+
+
+def test_shift_windows_count_only_the_activation_period() -> None:
+    """Every event counted in either window of a shift label belongs to the activation period."""
+    for seed in (2003, 2047):
+        plan, result, events = _storyline(seed, "tactical_shift")
+        label = L.labels_from_ledger(seed, plan, result)
+        assert label["period"] == plan.period == 2
+        m0 = label["at_clock"] // 60
+        team = label["team"]
+        lo, hi = m0 - L.SHIFT_WINDOW_MINUTES, m0 + L.SHIFT_WINDOW_MINUTES
+        in_window = [e for e in events if e["period"] == label["period"] and lo <= e["minute"] < hi]
+        press = [e for e in in_window if e["type"] == "pressure" and e["team"] == team]
+        onball = [e for e in in_window if e["type"] in L.ONBALL and e["team"] != team]
+        eff = label["effect"]
+        assert eff["press_before"] + eff["press_after"] == len(press)
+        assert eff["onball_before"] + eff["onball_after"] == len(onball)
+        # Both windows are full length inside period 2: the shift starts at minute 60 or later.
+        assert m0 - L.SHIFT_WINDOW_MINUTES >= 45
+
+
+def test_window_sums_ignore_the_other_period() -> None:
+    by_minute = {(1, 46): 5, (2, 46): 7, (2, 50): 1, (1, 30): 2}
+    assert L._window_sums(by_minute, 2, 48) == (7, 1)
+    assert L._window_sums(by_minute, 1, 48) == (5, 0)

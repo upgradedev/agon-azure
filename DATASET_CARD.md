@@ -187,16 +187,32 @@ minute and size from the seed. The engine applies the plan and keeps a ledger
 (`MatchResult.applied`) that never enters the meta, the event log or the manifest; a test checks
 that a storyline match's meta and events never name the storyline.
 
-Each label carries the activation clock, an anchor event id (the red card, the first event after
+A plan carries a `period` as well as a minute: minutes 0 to 44 are period 1 and 45 to 89 are
+period 2, and the engine activates a plan only once both its period and its clock are reached.
+Without that, 52 of the 161 red-card and tactical-shift plans in seeds 2001 to 2400 with a planned
+minute of 45 to 52 fired in first-half added time (for example seed 2006, a red card planned for 48
+shown at 48:17 of the first half). After the fix, 0 of the 600 period-2 red-card and tactical-shift
+plans in that range activate in period 1, and the two label paths agree on all 600 (self-measured,
+about 96 s; the sweep is a scratch script, not part of the test suite; the suite holds the seed 2006
+and 2034 repros as regression tests). The tactical shift now starts in minutes 60 to 74 (it was 30
+to 60), so both 15-minute windows of its label fall inside period 2; the windows count only events
+of the activation period. This changed the storyline plans and the label hash, not any plain match:
+plain matches never activate an intervention and their bundle hashes are unchanged. The generator
+version stays `synth-v0.2` for that reason; the `Intervention` record itself now requires `period`.
+
+Each label carries the activation period and clock (a moment is `(period, at_clock)`, because the
+match clock repeats across periods: period 2 restarts at 45:00), an anchor event id (the red card, the first event after
 the shift, the first goal conceded in a collapse, the first save, the injury replacement), the
 measured effect and a `turning_point` flag set by one written rule (for example a collapse is a
 turning point only if a goal followed). Labels are derived twice: from the engine's ledger, and
 again from the plan, the meta and the event log alone, with the injury's baseline added time
 recomputed from the RNG. `python -m agon.referee.verify_labels --seeds 1,2,3` compares the two;
-`--mutate` corrupts every label in one field and must exit 1. Self-measured on seeds 1, 2, 3:
-15 of 15 labels re-derived identically; with `--mutate`, 15 of 15 rejected and exit 1; about 2.5 s
-each. Not every storyline takes effect: in seed 3 the late collapse produced no goal, and in the
-separate seed 3 heroics match the keeper made only 2 saves, so both labels say `turning_point` false.
+`--mutate` corrupts every label in one field (anchor, clock, an effect count, the flag, the team or
+the period, in rotation) and must exit 1. Self-measured on seeds 1, 2, 3 after the period fix:
+15 of 15 labels re-derived identically; with `--mutate`, 15 of 15 rejected and exit 1; about 2.1 s
+each. Not every storyline takes effect: in seed 3 the late collapse produced no goal, in the
+separate seed 3 heroics match the keeper made only 2 saves, and in seed 1 the shift did not raise
+the press rate against the opponent's on-ball rate, so those labels say `turning_point` false.
 
 The referee package is reachable only from CI and evidence tooling: `ci/check_referee_isolation.py`
 parses every module under `src/agon` outside `src/agon/referee` and fails on any import of it.

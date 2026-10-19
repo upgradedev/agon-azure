@@ -9,7 +9,7 @@ one builds the label from the engine's ledger; path two rebuilds it from the pla
 the event log alone. They must be identical.
 
 `--mutate` corrupts every path-one label in one field (anchor event, clock, an effect count, the
-turning-point flag or the team, in rotation) before the comparison. Every corrupted label must be
+turning-point flag, the team or the period, in rotation) before the comparison. Every corrupted label must be
 rejected. That is the proof the comparison can fail.
 
 Exit codes:
@@ -33,7 +33,7 @@ from agon.synth.manifest import parse_seeds
 from agon.synth.schema import canonical_bytes, sha256_hex
 
 DEFAULT_SEEDS = "1,2,3"
-MUTATIONS: tuple[str, ...] = ("anchor_event_id", "at_clock", "effect", "turning_point", "team")
+MUTATIONS: tuple[str, ...] = ("anchor_event_id", "at_clock", "effect", "turning_point", "team", "period")
 
 
 def mutate(label: dict[str, Any], which: str, other_event_id: str) -> dict[str, Any]:
@@ -50,6 +50,8 @@ def mutate(label: dict[str, Any], which: str, other_event_id: str) -> dict[str, 
         out["turning_point"] = not out["turning_point"]
     elif which == "team":
         out["team"] = out["team"] + "x"
+    elif which == "period":
+        out["period"] = 1 if out["period"] != 1 else 2
     else:
         raise ValueError(which)
     return out
@@ -77,7 +79,7 @@ def verify(seeds: Sequence[int], do_mutate: bool) -> tuple[list[str], int, int, 
             verdict = "MATCH" if ok else "MISMATCH"
             tag = f" mutated:{which}" if which else ""
             lines.append(
-                f"seed {seed} {kind:18} {two['side']:4} minute {two['minute']} anchor {two['anchor_event_id']} "
+                f"seed {seed} {kind:18} {two['side']:4} period {two['period']} minute {two['minute']} anchor {two['anchor_event_id']} "
                 f"turning_point {two['turning_point']} {verdict}{tag}"
             )
     return lines, checked, rejected, labels

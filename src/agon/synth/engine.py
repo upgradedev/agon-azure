@@ -181,13 +181,15 @@ class _Live:
     pending_red: bool = False
     awaiting_anchor: bool = False
     at_clock: int | None = None
+    at_period: int | None = None
     anchor_event_id: str | None = None
     goals_for_after: int = 0
     goals_against_after: int = 0
     saves_after: int = 0
     stoppage_seconds: int = 0
-    press_by_minute: dict[int, int] = field(default_factory=dict)
-    opp_onball_by_minute: dict[int, int] = field(default_factory=dict)
+    # Keyed by (period, minute): the clock minute repeats across periods (45 to 49 can occur in both).
+    press_by_minute: dict[tuple[int, int], int] = field(default_factory=dict)
+    opp_onball_by_minute: dict[tuple[int, int], int] = field(default_factory=dict)
 
 
 class MatchSimulator:
@@ -268,7 +270,7 @@ class MatchSimulator:
 
     def _book(self, etype: str, team: TeamState) -> None:
         """Intervention bookkeeping at emission time (path one of the labels)."""
-        minute = self.clock // 60
+        minute = (self.period, self.clock // 60)
         for lv in self._live:
             if lv.awaiting_anchor and etype != "sub":
                 lv.anchor_event_id = self.events[-1].event_id
@@ -290,12 +292,16 @@ class MatchSimulator:
         return None
 
     def _activate_due(self) -> None:
-        """Switch on every intervention whose minute has come, at the start of a chain."""
+        """Switch on every intervention whose (period, minute) has come, at the start of a chain.
+
+        The period is compared first, so a period-2 plan never fires in first-half added time.
+        """
         for lv in self._live:
-            if lv.active or self.clock < lv.spec.minute * 60:
+            if lv.active or (self.period, self.clock) < (lv.spec.period, lv.spec.minute * 60):
                 continue
             lv.active = True
             lv.at_clock = self.clock
+            lv.at_period = self.period
             kind = lv.spec.kind
             if kind == "red_card":
                 lv.pending_red = True
@@ -341,6 +347,7 @@ class MatchSimulator:
                 "magnitude": lv.spec.magnitude,
                 "activated": lv.active,
                 "at_clock": lv.at_clock,
+                "at_period": lv.at_period,
                 "anchor_event_id": lv.anchor_event_id,
                 "goals_for_after": lv.goals_for_after,
                 "goals_against_after": lv.goals_against_after,
@@ -454,6 +461,7 @@ class MatchSimulator:
             forced_red.pending_red = False
             forced_red.anchor_event_id = self.events[-1].event_id
             forced_red.at_clock = self.clock
+            forced_red.at_period = self.period
             forced_red.counting = True
         self.clock += disc.between(15, 40)
         if card == "yellow":
