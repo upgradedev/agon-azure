@@ -17,6 +17,18 @@ Claim types and the shape of `value`:
 * ``event_ref``: a kind from `recompute.EVENT_KINDS` (``goal``, ``red_card``, ...). Every cited
   event must be of that kind.
 
+Season claim types (`SEASON_CLAIM_TYPES`) are checked against the season after the matchday of the
+match being reported, so the gate needs season data (`recompute.MatchFacts.season`) and the
+reported match must be in it; otherwise the claim is a mismatch. Each `value` is an int written in
+digits in the prose ("a 3rd win in a row", "1st in the table"), like every other claim value:
+
+* ``season_streak``: the club's current run, `stat` one of `recompute.SEASON_STREAK_STATS`
+  (``win``, ``unbeaten``, ...), `subject` a club id. "3 wins in a row" is stat ``win``, value 3.
+* ``table_position``: the club's table row, `stat` one of `recompute.TABLE_STATS`, None meaning
+  ``position``; `subject` a club id.
+* ``player_season_total``: a player's season total, `stat` one of
+  `recompute.PLAYER_SEASON_STATS` (``goals``, ``assists``, ``minutes``, ...), `subject` a player id.
+
 Author tags say who wrote the words: ``model`` (a Foundry agent), ``template`` (a deterministic
 fallback line) or ``officer`` (edited by the club media officer).
 """
@@ -26,7 +38,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-CLAIM_TYPES: tuple[str, ...] = ("score", "stat", "minute", "name", "event_ref")
+MATCH_CLAIM_TYPES: tuple[str, ...] = ("score", "stat", "minute", "name", "event_ref")
+SEASON_CLAIM_TYPES: tuple[str, ...] = ("season_streak", "table_position", "player_season_total")
+CLAIM_TYPES: tuple[str, ...] = MATCH_CLAIM_TYPES + SEASON_CLAIM_TYPES
 AUTHOR_TAGS: tuple[str, ...] = ("model", "template", "officer")
 LANGUAGES: tuple[str, ...] = ("en", "el", "es", "fr")
 

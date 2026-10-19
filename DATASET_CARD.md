@@ -76,6 +76,57 @@ A planned substitution has no qualifier. An injury replacement (only in storylin
 
 **Brief-field mapping table and tracking data.** Not built yet.
 
+### The season
+
+`agon.synth.season` builds a full fictional season for one league. Season S is the league of seed
+S and all 30 fixtures of its double round robin (`world.fixture_list()`): 10 matchdays of 3
+matches, every club at home once and away once against every other club. Leg 2 (matchdays 6 to
+10) repeats leg 1 in the same order with home and away swapped. The calendar is fictional:
+matchdays only, no dates, so nothing a page shows can expire. Each match record carries both
+starting elevens (the engine's fixed 4-3-3), because minutes played need them and the event log
+does not list them.
+
+Season 1 is the league of published seed 1, so its match 0 is the match the site replays: same
+match id `s1-m0`, same M1 sha256 `976215472f5879d54cf5545896331dbe807b39e9ef3604279309e3752aefcb66`,
+byte-identical event log (pinned in `tests/test_synth_season.py`).
+
+Self-measured, season 1, generator `synth-v0.2`, command
+`python -m agon.synth.season --season 1 --print-hash`:
+
+| What | Value |
+|---|---|
+| Matches, matchdays | 30, 10 |
+| Season sha256 | `0d5a4629fee516f8170e9aedc6c1a34272ce1939fb4dfb8df3b4825ca226b8db` on ubuntu-latest and windows-latest (CI run https://github.com/upgradedev/agon-azure/actions/runs/39276667153, job "compare ubuntu vs windows"), and on Windows 11 with Python 3.11 locally |
+| Goals; home wins, draws, away wins | 87; 17, 7, 6 (counted from the `score` field of the 30 match lines) |
+| Total wall time for the 30 matches | 3.4 s on ubuntu-latest and 5.0 s on windows-latest in that CI run; about 6.5 s locally (stderr) |
+
+**Season facts.** Defined once, in the last section of `agon.governance.recompute`, over plain
+match records (meta, events, starting elevens), never engine internals. The same definitions feed
+the console files and the Fact Gate:
+
+- Table: 3 points for a win, 1 for a draw. Tie-break (`TIEBREAK_RULE`): points, goal difference,
+  goals for; clubs still level are ordered by a head-to-head table of the matches among exactly
+  those clubs, applied again to any smaller group it leaves level; clubs it cannot separate are
+  ordered by club id, an administrative fallback and not a sporting rule.
+- Form: the last 5 results up to a matchday, oldest first. Streaks: the current run of wins,
+  draws, losses, unbeaten, winless, scoring and clean-sheet matches.
+- Player season totals: goals; assists by a written rule, because the engine emits no assist
+  field (the completed pass by a teammate to the scorer, with only his own carries and the
+  opponent's actions between it and the goal in the same possession chain; never on a penalty);
+  minutes (whole minutes, floor; a starter from 0, a replacement from his `sub` event, off at the
+  `sub` that replaces him or the card that sends him off; added time is not counted);
+  appearances, starts and cards (a second yellow counts as a yellow card and a red card, the same
+  convention as match statistics).
+- Season claims the Fact Gate recomputes: `season_streak`, `table_position` and
+  `player_season_total`, checked as of the matchday of the reported match.
+
+**Season files for the console.** `agon.webseason` writes `web/season/`: fixtures and results, the
+table after every matchday, form and streaks, player season totals, head to head, the storyline
+index (section 5) and the Data Lab facts (section 4), each hashed in a manifest. At deploy,
+`ci/stamp_web.py` writes and re-verifies the folder and stops the deploy on any broken rule. The
+player speed in those files is the events-only carry proxy from `agon.interpret.kinematics`, an
+on-ball displacement proxy and not running speed, and the file says so beside the number.
+
 ## 3. Collection process
 
 The engine (`agon.synth.engine`, `synth-v0.2`) is a semi-Markov possession-chain simulator on a 16 by 12
@@ -98,6 +149,11 @@ total. A test cuts every reader and requires all four checks to fail.
 `FIXTURES` (21) draws fixture choices. Both use match keys outside the fixture range 1 to 30, so a
 plain match draws exactly what it drew before; a test pins that a match with an empty intervention
 list is byte-identical to a plain one.
+
+**The season adds no draw.** Every season match is `simulate_match(build_world(S), i)` with the
+existing streams keyed by (seed S, match_index + 1, stream, possession, draw); `agon.synth.season`
+only orders, hashes and records the matches. `tests/test_synth_additive.py` pins the M1 hashes of
+seeds 1, 2 and 3 and the seed 1 event log as printed before the season code existed.
 
 ## 4. Calibration
 
@@ -177,6 +233,16 @@ The next fit must run on calibration seeds only, and the result is reported here
 On the calibration seeds 1 to 200 at match index 0 the same command gives 20 of 22.
 Total wall time for the 200 held-out matches: 28 to 41 s on this machine across runs (printed on stderr).
 
+**The record the Data Lab shows.** The same held-out result is committed as canonical JSON in
+`src/agon/synth/bands_heldout.json`, written by
+`python -m agon.synth.bands --seeds 1001-1200 --json-out src/agon/synth/bands_heldout.json`
+(self-measured on branch `b/season`: 18 of 22, the same rows as the v0.2 column above, CLI exit 1;
+total wall time 66.7 s for the 200 matches on the local machine in that run). The determinism
+workflow regenerates it on ubuntu-latest and windows-latest and fails when the fresh bytes differ
+from the committed file, and `agon.webseason` refuses a record whose bands hash is not
+`FROZEN_BANDS_SHA256` or whose generator is not the current one. So the page cannot show a stale,
+edited or widened result.
+
 ## 5. Labels
 
 **Storyline labels (metric M3).** Five storylines are injected as labelled interventions, one per
@@ -223,6 +289,19 @@ parses every module under `src/agon` outside `src/agon/referee` and fails on any
 Not built: the coupled counterfactual twins (spec P1, metric M5), which would give causal
 turning-point labels for any moment rather than only for injected storylines.
 
+**Storyline index (the console's storyline picker).** `python -m agon.referee.storyline_index`
+scans storyline seeds 2001 to 2030 in order and keeps, per category, the lowest 2 seeds whose
+label (both code paths agreeing) meets a written rule: red-card comeback (the side shown the red
+card was behind at some moment from the card on and did not lose), goalkeeper heroics, late
+collapse and tactical shift (each with `turning_point` true). A category with no qualifying seed is
+listed with its reason, never dropped. Self-measured with that command on branch `b/season`:
+red-card comeback seeds 2003 and 2012, goalkeeper heroics 2001 and 2002, late collapse 2001 and
+2003, tactical shift 2001 and 2003; about 5.3 s total wall time locally. Each entry is a storyline
+match (the plain fixture of that seed re-run with one planned intervention), not a season match and
+not the plain match a page replays, so it names its regenerate command and its anchor ids exist
+only in that run. The index is built in CI and handed to the web layer as data, because nothing
+under `src/agon` outside the referee may import it.
+
 **Planted-error and adversarial fixtures.** `python -m agon.synth.fixtures --seeds 1,2,3
 --print-hash` lists, per seed: three wrong-number sentences in EN, EL, ES and FR with the planted
 value, the true value and the event ids proving it; a scorer correction (one goal reassigned to an
@@ -236,6 +315,10 @@ are stated as the minute being played (event `minute` plus one).
 Supports pipeline testing and evaluation against a known ground truth. It supports no claim about
 any real league, club or player.
 
+The season supports the console's fixtures, table, form, player and head-to-head views, and the
+season claims the Fact Gate checks ("a 3rd win in a row" is recomputed from the season, not
+trusted). A table position, a streak or a player total is a fact about this fictional season only.
+
 ## 7. Distribution
 
 Seeds are stored, not generated files. To regenerate and hash:
@@ -245,7 +328,15 @@ python -m agon.synth.manifest --seeds 1,2,3 --print-hash
 python -m agon.synth.manifest --seeds 1,2,3 --out build/synth
 python -m agon.synth.fixtures --seeds 1,2,3 --out build/fixtures.json
 python -m agon.referee.storylines --seeds 1,2,3 --out build/labels.ndjson
+python -m agon.synth.season --season 1 --print-hash
+python -m agon.synth.season --season 1 --hash-out build/season-1/hash.txt --out build/season-1
+python -m agon.referee.storyline_index --out build/storylines.json
+python -m agon.webseason --season 1 --storylines build/storylines.json --out build/web-season
+python -m agon.synth.bands --seeds 1001-1200 --json-out build/bands-heldout.json
 ```
+
+`python -m agon.synth.season --season 1 --matchdays N` builds matchdays 1 to N only; a test shows
+the cut changes no match.
 
 The fixtures manifest contains a real club name (the bait) and instruction strings on purpose.
 It is test input for the gates and must never be copied into a deployed page.
@@ -253,6 +344,12 @@ It is test input for the gates and must never be copied into a deployed page.
 The per-seed hash is sha256 over the canonical JSON of the seed's world, match meta and events. The
 CI workflow `.github/workflows/determinism.yml` compares these hashes, the fixtures manifest and the
 storyline labels between ubuntu-latest and windows-latest. The hash values of record come from that CI run, not from this card.
+It compares the season 1 hash lines (one per match plus the season sha256), the season record and
+the fresh held-out M2 record too. A second negative control flips one match hash and requires the
+comparator to fail, and a deliberate windows-only divergence (9 of 10 matchdays; the run's head
+commit a036038, reverted before merge) turned the compare job red in run
+https://github.com/upgradedev/agon-azure/actions/runs/39277712146 (ubuntu season sha256
+`0d5a4629...`, windows `1672f6d5...`, first difference at line 1 of `season-1/hash.txt`).
 
 ## 8. Maintenance and known gaps
 
@@ -260,3 +357,16 @@ storyline labels between ubuntu-latest and windows-latest. The hash values of re
 - No tracking data and no video, so the sprint and distance bands cannot be measured.
 - Storyline labels cover injected interventions only; counterfactual twins are not built.
 - The sub marker location described in section 2.
+- The season is 30 independent matches of one league. Every club starts its fixed 4-3-3 in every
+  match: no rotation, no suspension carried over (a red card does not bar the player from the next
+  match), no injury carried over and no fatigue across matches.
+- Season 1 is seed 1, inside the calibration seed range 1 to 200, and its matches 0, 7 and 15 were
+  among the 600 calibration matches (section 4). Realism evidence is the held-out M2 result, not
+  the season.
+- Assists are inferred from passes by a written rule; the engine has no assist concept. Minutes are
+  floored and leave added time out.
+- Player speed in the season files is the events-only carry proxy, not running speed.
+- The storyline index points at storyline runs of seeds 2001 and up, not at season matches.
+- `web/season/` is a new folder: until `web/staticwebapp.config.json` excludes `/season/*.json`
+  from the navigation fallback, a missing season file would be served as the page with status 200
+  (an existing file is served normally). That config belongs to the web lane.
