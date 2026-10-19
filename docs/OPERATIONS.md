@@ -116,6 +116,7 @@ What it grants (each at the narrowest scope; full list in the template):
 | `id-fleet` | Foundry User (Azure AI User) | the Foundry project `agon` | spec 7.1 |
 | `id-fleet` | Cognitive Services User | the Translator account; the Speech account | spec 7.1 |
 | CI (`agon-azure-ci`) | Cognitive Services OpenAI User | the Foundry account only | beyond spec 7.1: gate C2 smoke and the evals job |
+| CI (`agon-azure-ci`) | Cognitive Services User | the Speech account only | beyond spec 7.1: the video narration, synthesised in a main-only workflow |
 | `id-api`, `id-fleet`, `id-publisher`, `id-publisher-sandbox` | AcrPull | the registry `cragon<suffix>` | spec 3.2 row 16: each job pulls the one image with its own identity |
 | `id-logicapp` | Storage Queue Data Message Sender | `decisions-teams` and `decisions-outlook` only | spec 14 item 5: the queue names the channel |
 | `id-api` | Message Processor and Reader on both decision queues; Sender on `intake-poison` | one queue each | spec 14 item 5: the decision intake |
