@@ -3,7 +3,8 @@ name: determinism
 # Metric M1: the seeded generator must produce byte-identical output on ubuntu and windows.
 # Each OS generates seeds 1,2,3 (matches, fixtures manifest, storyline labels) and the full
 # fictional season 1 (30 matches: one hash line per match plus the season sha256, and the
-# season record), uploads hash.txt plus that output, and a final job
+# season record) plus the held-out M2 record the Data Lab shows (which must also equal the
+# committed src/agon/synth/bands_heldout.json), uploads hash.txt plus that output, and a final job
 # compares them. A mismatch prints both hash files and the first diverging line and fails.
 # Two negative controls prove the comparator has teeth: one mutates a seed 1 event, one a
 # season match hash. The check is never relaxed; on divergence, fix the generator.
@@ -59,6 +60,21 @@ jobs:
         run: |
           python -m agon.synth.season --season "$SEASON" --print-hash \
             --hash-out "artifact/out/season-$SEASON/hash.txt" --out "artifact/out/season-$SEASON"
+      # The Data Lab page shows the committed M2 record, so it is re-measured here on both OS and
+      # must equal the committed bytes. Exit 1 is a measurement below the M2 threshold; exit 2
+      # means the bands were refused. The fresh record also sits under out/ for the compare job.
+      - name: Re-measure the held-out realism bands and require the committed record
+        run: |
+          set +e
+          python -m agon.synth.bands --seeds 1001-1200 --json-out artifact/out/bands-heldout.json
+          code=$?
+          set -e
+          if [ "$code" -gt 1 ]; then
+            echo "bands refused (exit $code)"
+            exit "$code"
+          fi
+          python -c "import sys; a = open(sys.argv[1], 'rb').read(); b = open(sys.argv[2], 'rb').read(); sys.exit(0 if a == b else 'the fresh M2 record differs from src/agon/synth/bands_heldout.json: re-measure and commit it')" artifact/out/bands-heldout.json src/agon/synth/bands_heldout.json
+          echo "committed M2 record reproduced"
       - uses: actions/upload-artifact@v4
         with:
           name: synth-${{ matrix.os }}
