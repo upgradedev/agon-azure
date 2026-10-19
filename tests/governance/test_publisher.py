@@ -33,7 +33,7 @@ def _publish(pub, env, approval_id, *, manifest=None, files=None, sha=None):
 def test_publish_writes_every_artifact_and_a_receipt():
     env, approval_id = _approved_env()
     sink = P.InMemorySink()
-    result = _publish(P.Publisher(env.store, sink, "feed"), env, approval_id)
+    result = _publish(govkit.publisher(env.store, sink, "feed"), env, approval_id)
     assert result.ok, result
     sha = env.bundle.bundle_sha256
     for name, data in env.files.items():
@@ -49,7 +49,7 @@ def test_publish_writes_every_artifact_and_a_receipt():
 
 def test_refuses_when_the_recomputed_hash_differs_from_the_approved_hash():
     env, approval_id = _approved_env()
-    pub = P.Publisher(env.store, P.InMemorySink(), "feed")
+    pub = govkit.publisher(env.store, P.InMemorySink(), "feed")
     tampered = dict(env.files, **{"report-en.txt": env.files["report-en.txt"] + b"!"})
     assert _publish(pub, env, approval_id, files=tampered).code == "seal_mismatch"
     other, other_files = govkit.make_bundle(tag=" v-other")
@@ -61,7 +61,7 @@ def test_refuses_when_the_recomputed_hash_differs_from_the_approved_hash():
 
 def test_refuses_without_an_approval_or_with_changes_requested():
     env = govkit.make_env()
-    pub = P.Publisher(env.store, P.InMemorySink(), "feed")
+    pub = govkit.publisher(env.store, P.InMemorySink(), "feed")
     assert _publish(pub, env, "0" * 32).code == "no_approval"
     changes = teams.handle(govkit.teams_payload(env, decision="changes"), env.store, govkit.later(5))
     assert _publish(pub, env, changes.approval_id).code == "not_approved"
@@ -71,13 +71,13 @@ def test_refuses_a_sandbox_approval_on_the_feed_publisher():
     env = govkit.make_env(target="sandbox")
     result = console.handle(govkit.console_body(env), env.store, govkit.later(5), principal=govkit.VISITOR)
     assert result.approved
-    assert _publish(P.Publisher(env.store, P.InMemorySink(), "feed"), env, result.approval_id).code == "wrong_target"
-    assert _publish(P.Publisher(env.store, P.InMemorySink(), "sandbox"), env, result.approval_id).ok
+    assert _publish(govkit.publisher(env.store, P.InMemorySink(), "feed"), env, result.approval_id).code == "wrong_target"
+    assert _publish(govkit.publisher(env.store, P.InMemorySink(), "sandbox"), env, result.approval_id).ok
 
 
 def test_second_publish_of_the_same_bundle_is_refused():
     env, approval_id = _approved_env()
-    pub = P.Publisher(env.store, P.InMemorySink(), "feed")
+    pub = govkit.publisher(env.store, P.InMemorySink(), "feed")
     assert _publish(pub, env, approval_id).ok
     assert _publish(pub, env, approval_id).code == "already_published"
 
@@ -87,7 +87,7 @@ def test_overwrite_of_different_bytes_is_refused_and_identical_bytes_resume():
     sink = P.InMemorySink()
     sha = env.bundle.bundle_sha256
     sink.put_new(f"feed/{sha}/report-el.txt", b"someone else's bytes", "text/plain")
-    result = _publish(P.Publisher(env.store, sink, "feed"), env, approval_id)
+    result = _publish(govkit.publisher(env.store, sink, "feed"), env, approval_id)
     assert result.code == "overwrite_refused"
     assert sink.get(f"feed/{sha}/report-el.txt") == b"someone else's bytes"
     assert env.store.read(P.PUBLISHED, sha) is None
@@ -98,7 +98,7 @@ def test_overwrite_of_different_bytes_is_refused_and_identical_bytes_resume():
     sink2 = P.InMemorySink()
     sha2 = env2.bundle.bundle_sha256
     sink2.put_new(f"feed/{sha2}/report-el.txt", env2.files["report-el.txt"], "text/plain")  # half-finished run
-    assert _publish(P.Publisher(env2.store, sink2, "feed"), env2, approval2).ok
+    assert _publish(govkit.publisher(env2.store, sink2, "feed"), env2, approval2).ok
 
 
 def test_gate_refused_bundle_is_never_published_even_with_a_planted_approval():
@@ -106,7 +106,7 @@ def test_gate_refused_bundle_is_never_published_even_with_a_planted_approval():
     bad, files = govkit.make_bundle(verdicts={**govkit.PASS_VERDICTS, "rights": "refused"})
     verifier.register_sealed_bundle(store, bad.manifest_bytes)
     store.create(verifier.APPROVALS, "planted", {"decision": "approve", "bundle_sha256": bad.bundle_sha256, "target": "feed"})
-    result = P.Publisher(store, P.InMemorySink(), "feed").publish(
+    result = govkit.publisher(store, P.InMemorySink(), "feed").publish(
         bundle_sha256=bad.bundle_sha256, approval_id="planted", manifest_bytes=bad.manifest_bytes, artifacts=files, now=govkit.T0
     )
     assert result.code == "bundle_refused_by_gate"
@@ -115,7 +115,7 @@ def test_gate_refused_bundle_is_never_published_even_with_a_planted_approval():
 def test_erratum_supersedes_without_touching_the_original():
     env, approval_id = _approved_env()
     sink = P.InMemorySink()
-    pub = P.Publisher(env.store, sink, "feed")
+    pub = govkit.publisher(env.store, sink, "feed")
     assert _publish(pub, env, approval_id).ok
     v1 = env.bundle.bundle_sha256
     v1_receipt = copy.deepcopy(env.store.read(P.PUBLISHED, v1).body)
@@ -143,7 +143,7 @@ def test_erratum_of_an_unpublished_parent_is_refused():
     env = govkit.make_env()
     orphan = govkit.make_env(store=env.store, kind="erratum", parent="e" * 64, tag=" orphan")
     ok = teams.handle(govkit.teams_payload(orphan), env.store, govkit.later(5))
-    result = _publish(P.Publisher(env.store, P.InMemorySink(), "feed"), orphan, ok.approval_id)
+    result = _publish(govkit.publisher(env.store, P.InMemorySink(), "feed"), orphan, ok.approval_id)
     assert result.code == "parent_not_published"
 
 
@@ -172,7 +172,7 @@ def test_hand_built_malformed_manifests_are_refused_with_nothing_written():
     for mutate in (_rename_to_traversal, _drop_media_type):
         store, data, sha, files = _hand_built(mutate)
         sink = P.InMemorySink()
-        result = P.Publisher(store, sink, "feed").publish(
+        result = govkit.publisher(store, sink, "feed").publish(
             bundle_sha256=sha, approval_id="planted", manifest_bytes=data, artifacts=files, now=govkit.T0
         )
         assert result.code == "seal_mismatch", (mutate.__name__, result)
@@ -190,7 +190,7 @@ def test_a_bundle_missing_the_rights_verdict_is_never_published_even_with_a_plan
     """Reviewer probe: a bundle that never ran the Rights Guard must not reach the public feed."""
     store, data, sha, files = _hand_built(govkit.drop_gate("rights"))
     sink = P.InMemorySink()
-    result = P.Publisher(store, sink, "feed").publish(
+    result = govkit.publisher(store, sink, "feed").publish(
         bundle_sha256=sha, approval_id="planted", manifest_bytes=data, artifacts=files, now=govkit.T0
     )
     assert result.code == "required_gate_missing" and "rights" in result.detail
@@ -203,7 +203,7 @@ def test_erratum_for_another_match_cannot_supersede_the_parent():
     and created a supersession record. It is now refused and nothing is written."""
     env, approval_id = _approved_env()
     sink = P.InMemorySink()
-    pub = P.Publisher(env.store, sink, "feed")
+    pub = govkit.publisher(env.store, sink, "feed")
     assert _publish(pub, env, approval_id).ok
     parent = env.bundle.bundle_sha256
 
@@ -226,7 +226,7 @@ def test_parent_receipt_without_a_match_id_fails_closed():
     store.create(P.PUBLISHED, parent, {"bundle_sha256": parent, "target": "feed"})  # legacy shape, no match_id
     child = govkit.make_env(store=store, kind="erratum", parent=parent, tag=" fix")
     ok = teams.handle(govkit.teams_payload(child), store, govkit.later(90))
-    assert _publish(P.Publisher(store, P.InMemorySink(), "feed"), child, ok.approval_id).code == "parent_match_mismatch"
+    assert _publish(govkit.publisher(store, P.InMemorySink(), "feed"), child, ok.approval_id).code == "parent_match_mismatch"
 
 
 def test_an_artifact_named_like_the_manifest_cannot_be_sealed():
@@ -266,7 +266,7 @@ def test_reviewer_probe_hand_built_manifest_json_artifact_writes_nothing():
     with its bytes left at feed/<hash>/manifest.json. Now it is refused before anything is written."""
     store, data, sha, files = _hand_built(_rename_to_manifest)
     sink = P.InMemorySink()
-    result = P.Publisher(store, sink, "feed").publish(
+    result = govkit.publisher(store, sink, "feed").publish(
         bundle_sha256=sha, approval_id="planted", manifest_bytes=data, artifacts=files, now=govkit.T0
     )
     assert result.code == "seal_mismatch" and "reserved" in result.detail
@@ -304,7 +304,7 @@ def test_concurrent_errata_of_one_parent_loser_writes_no_public_bytes():
     store = _RaceStore()
     env, approval_id = _approved_env(store=store)
     sink = P.InMemorySink()
-    pub = P.Publisher(store, sink, "feed")
+    pub = govkit.publisher(store, sink, "feed")
     assert _publish(pub, env, approval_id).ok
     parent = env.bundle.bundle_sha256
     a = govkit.make_env(store=store, kind="erratum", parent=parent, tag=" fix a")

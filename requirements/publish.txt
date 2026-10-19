@@ -1,0 +1,11 @@
+# Publisher job (python -m agon.publish): the Azure SDK packages it imports lazily.
+# Every line is an exact pin (ci/check_pins.py). Versions read on PyPI 2026-10-19, read only:
+# azure-storage-blob 12.31.0 (released 2026-09-30, 19 days before; requires azure-core>=1.37.0).
+# azure-storage-queue, azure-cosmos, azure-identity and azure-core are the versions already pinned
+# in requirements/intake.txt, so one job image can carry the intake and the publisher.
+-r dev.txt
+azure-storage-blob==12.31.0
+azure-storage-queue==12.18.0
+azure-cosmos==4.17.1
+azure-identity==1.26.0
+azure-core==1.41.0

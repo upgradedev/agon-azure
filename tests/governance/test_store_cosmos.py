@@ -154,8 +154,8 @@ def test_unsafe_keys_are_refused(key):
 
 def test_only_governance_containers_are_addressable():
     store, _ = make_store()
-    assert GOVERNANCE_CONTAINERS == {"bundles", "nonces", "approvals", "approvers", "runs"}
-    for name in ("checkpoints", "matchstate", "published", "provenance", "feed"):
+    assert GOVERNANCE_CONTAINERS == {"bundles", "nonces", "approvals", "approvers", "runs", "published", "supersessions"}
+    for name in ("checkpoints", "matchstate", "provenance", "feed", "artifacts"):
         with pytest.raises(ValueError):
             store.read(name, "k")
 
