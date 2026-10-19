@@ -137,11 +137,42 @@ test("score, key moments and the pressure window come from the events", () => {
   assert.deepEqual(core.scoreAt(score, 2), { home: 1, away: 0 });
   assert.deepEqual(core.scoreAt(score, 5), { home: 1, away: 1 });
 
+  /* Without a world file a sentence never shows an id. */
   const moments = core.keyMoments(events, tl);
   assert.deepEqual(moments.map((m) => m.kind), ["shot", "goal", "card", "sub", "goal"]);
   assert.equal(moments[1].minute, "5'");
-  assert.equal(moments[2].text, "Yellow card, A AP04");
-  assert.equal(moments[3].text, "Substitution, H: HP15 on for HP07");
+  assert.equal(moments[2].text, "Yellow card, Away club, a player");
+  assert.equal(moments[3].text, "Substitution, Home club: a player on for a player");
+  assert.equal(moments[2].ids, "event seq 3, team A, player AP04");
+
+  /* With one, the names are used and the ids stay in the details row. */
+  const world = {
+    generator: "synth-v0.2", seed: 1, match_id: "s1-m0", league: "Test League", home: "C1", away: "C2",
+    clubs: [
+      { club_id: "C1", name: "Home Rovers", short: "HOM", kit_primary: "teal", kit_primary_hex: "#12808a",
+        kit_secondary: "amber", kit_secondary_hex: "#e0a100",
+        players: [{ player_id: "C1P07", name: "Ann Holt", shirt: 7, position: "MF" }, { player_id: "C1P15", name: "Ben Ash", shirt: 15, position: "FW" }] },
+      { club_id: "C2", name: "Away Town", short: "AWA", kit_primary: "plum", kit_primary_hex: "#6d3a6b",
+        kit_secondary: "sky", kit_secondary_hex: "#5aa7de",
+        players: [{ player_id: "C2P04", name: "Cal Dunby", shirt: 4, position: "DF" }] }
+    ]
+  };
+  assert.deepEqual(core.validateWorld(world), []);
+  const named = events.map((e) => Object.assign({}, e, {
+    team: e.team === "H" ? "C1" : "C2",
+    player: e.player ? { HP07: "C1P07", HP10: "C1P07", AP04: "C2P04", AP09: "C2P04" }[e.player] : null,
+    related_player: e.related_player ? "C1P15" : null
+  }));
+  const names = core.nameIndex(world, "C1");
+  const namedMoments = core.keyMoments(named, core.buildTimeline(named), names);
+  assert.equal(namedMoments[2].text, "Yellow card, Away Town, Cal Dunby (4)");
+  assert.equal(namedMoments[3].text, "Substitution, Home Rovers: Ben Ash (15) on for Ann Holt (7)");
+  assert.equal(namedMoments[3].ids, "event seq 4, team C1, player C1P07, related player C1P15");
+  for (const m of namedMoments) {
+    assert.doesNotMatch(m.text, /\bC\dP?\d*\b/, "an id leaked into a sentence: " + m.text);
+  }
+  assert.deepEqual(core.unknownIds(named, world), []);
+  assert.deepEqual(core.unknownIds(events, world), ["A", "AP04", "AP09", "H", "HP07", "HP10", "HP15"]);
 
   const w = core.pressureWindow(events, tl, 5, home);
   assert.deepEqual(w.away, { under: 1, total: 2 });
@@ -190,7 +221,42 @@ function fakeFetch(routes) {
 
 const GOOD = JSON.stringify({
   generator: "synth-v0.1",
-  files: [{ name: "1.ndjson", sha256: "a".repeat(64), seed: 1, events: 3 }]
+  files: [{ name: "1.ndjson", sha256: "a".repeat(64), seed: 1, events: 3, world: "1.world.json", world_sha256: "b".repeat(64) }]
+});
+
+test("world rules agree with the Python validator on the shared cases", () => {
+  const cases = JSON.parse(fs.readFileSync(path.join(__dirname, "world_cases.json"), "utf8"));
+  assert.ok(cases.length >= 16);
+  for (const c of cases) {
+    const problems = core.validateWorld(c.world);
+    assert.equal(problems.length === 0, c.valid, c.case + ": " + problems.join("; "));
+    if (c.problem !== undefined) {
+      assert.ok(problems.some((p) => p.indexOf(c.problem) !== -1), c.case + ": " + problems.join("; "));
+    }
+  }
+});
+
+test("the fixture world loads, names every id in the fixture events and hashes to the manifest", async () => {
+  const manifest = JSON.parse(readFixture("manifest.json").toString("ascii"));
+  for (const entry of manifest.files) {
+    const bytes = readFixture(entry.world);
+    const world = core.parseWorldText(bytes.toString("utf8"));
+    assert.equal(world.seed, entry.seed);
+    const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
+    assert.equal(core.toHex(digest), entry.world_sha256);
+    const events = core.parseNdjson(readFixture(entry.name).toString("utf8"));
+    assert.equal(core.homeTeam(events), world.home);
+    assert.deepEqual(core.unknownIds(events, world), []);
+    const names = core.nameIndex(world, world.home);
+    assert.equal(names.club(world.home), world.clubs.find((c) => c.club_id === world.home).name);
+  }
+});
+
+test("unsafe world names never become URLs", () => {
+  assert.equal(core.worldUrl("data/", "1.world.json"), "data/1.world.json");
+  for (const bad of ["../1.world.json", "a/1.world.json", "https://x.example/1.world.json", "1.json", "1.ndjson", "", null]) {
+    assert.throws(() => core.worldUrl("data/", bad), /unsafe/);
+  }
 });
 
 test("resolveManifest prefers data/ when it is valid", async () => {

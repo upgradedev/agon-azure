@@ -136,3 +136,54 @@ def test_missing_manifest_fails_through_the_cli(tmp_path: Path, capsys: pytest.C
     code = stamp_web.main([str(web), "--sha", SHA, "--data-dir", str(web / "data"), "--seeds", "1"])
     assert code == 1
     assert "manifest.json does not exist" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------- world files
+
+
+def test_good_data_counts_world_files(tmp_path: Path) -> None:
+    web = make_web(tmp_path)
+    data = make_data(web, seeds=(1, 2))
+    assert stamp_web.verify_data(data, [1, 2]) == 4
+
+
+def test_tampered_world_file_fails(tmp_path: Path) -> None:
+    web = make_web(tmp_path)
+    data = make_data(web)
+    world = data / "1.world.json"
+    world.write_bytes(world.read_bytes().replace(b"Pellmoor Harriers", b"Pellmoor Rovers!"))
+    with pytest.raises(stamp_web.StampError, match="1.world.json: sha256"):
+        stamp_web.verify_data(data, [1])
+
+
+def test_missing_world_file_fails(tmp_path: Path) -> None:
+    web = make_web(tmp_path)
+    data = make_data(web)
+    (data / "1.world.json").unlink()
+    with pytest.raises(stamp_web.StampError, match="1.world.json, which does not exist"):
+        stamp_web.verify_data(data, [1])
+
+
+def test_world_file_with_a_matching_hash_but_a_bad_shape_fails(tmp_path: Path) -> None:
+    """A re-hashed manifest cannot smuggle a world the browser would refuse."""
+    import hashlib
+
+    web = make_web(tmp_path)
+    data = make_data(web)
+    bad = b'{"clubs":[],"seed":1}\n'
+    (data / "1.world.json").write_bytes(bad)
+    manifest = json.loads((data / "manifest.json").read_text(encoding="utf-8"))
+    manifest["files"][0]["world_sha256"] = hashlib.sha256(bad).hexdigest()
+    (data / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(stamp_web.StampError, match="breaks the world contract"):
+        stamp_web.verify_data(data, [1])
+
+
+def test_world_name_outside_the_contract_fails(tmp_path: Path) -> None:
+    web = make_web(tmp_path)
+    data = make_data(web)
+    manifest = json.loads((data / "manifest.json").read_text(encoding="utf-8"))
+    manifest["files"][0]["world"] = "../index.html"
+    (data / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(stamp_web.StampError, match="web data contract"):
+        stamp_web.verify_data(data, [1])

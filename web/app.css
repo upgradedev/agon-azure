@@ -1400,3 +1400,29 @@ main:focus {
     border: 1px solid CanvasText;
   }
 }
+
+/* ------------------------------------------------------------ names and ids */
+
+.kit {
+  width: 14px;
+  height: 14px;
+  flex: none;
+}
+
+.kit__dot {
+  stroke-width: 2;
+}
+
+.ids-row summary {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--target);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.ids-row p {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}

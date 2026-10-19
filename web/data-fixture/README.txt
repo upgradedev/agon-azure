@@ -5,7 +5,8 @@ What this folder is
 -------------------
 A small committed fixture so the Match Centre and the Verify page work in local
 development and in tests. It is the first 10 minutes of the first half of seed 1
-(events with period 1 and minute below 10), produced by the synthetic generator:
+(events with period 1 and minute below 10) plus the full world file of seed 1
+(the fictional league, clubs and players), produced by the synthetic generator:
 
     PYTHONPATH=src python -m agon.webdata --seeds 1 --max-minute 10 --out web/data-fixture
 
@@ -33,7 +34,8 @@ into this folder; both use agon.webdata.write_web_data)
 
     manifest.json
     {"generator": str,
-     "files": [{"name": str, "sha256": str, "seed": int, "events": int}]}
+     "files": [{"name": str, "sha256": str, "seed": int, "events": int,
+                "world": str, "world_sha256": str}]}
 
     generator  the generator version, for example synth-v0.1
     name       a bare file name next to manifest.json, exactly "<seed>.ndjson"
@@ -45,9 +47,27 @@ into this folder; both use agon.webdata.write_web_data)
                listed once, so a manifest with two entries for one seed is
                refused
     events     the number of lines in that file
+    world      exactly "<seed>.world.json" for the seed of the same entry,
+               a bare file name next to manifest.json
+    world_sha256
+               64 lowercase hex characters over the exact bytes of the
+               world file
 
 No other keys, at either level. agon.webdata.validate_manifest is the checker
 and the browser applies the same rules.
+
+    <seed>.world.json
+    {"generator": str, "seed": int, "match_id": str, "league": str,
+     "home": club id, "away": club id,
+     "clubs": [{"club_id": "C1", "name": str, "short": "ABC",
+                "kit_primary": str, "kit_primary_hex": "#rrggbb",
+                "kit_secondary": str, "kit_secondary_hex": "#rrggbb",
+                "players": [{"player_id": "C1P01", "name": str,
+                             "shirt": int, "position": "GK|DF|MF|FW"}]}]}
+    Canonical JSON (sorted keys, no spaces, ASCII) plus a final LF. A
+    projection of the generator's world: names, short codes, kit colours,
+    shirt numbers and positions only. agon.webdata.validate_world is the
+    checker; the browser applies the same rules (tests/js/world_cases.json).
 
     <seed>.ndjson
     One event per line, canonical JSON (sorted keys, no spaces, ASCII), LF line
@@ -71,5 +91,10 @@ Reading the events correctly
 3. Clock. minute and second come from a match clock where the second half
    starts at 45:00, while first-half stoppage time also runs past 45:00. Order
    events by seq, never by minute. Show first-half stoppage as 45+n.
-4. Names. Club and player names are not in the NDJSON, so the app shows ids
-   such as C1 and C1P06. All of them are synthetic and fictional.
+4. Names. Club and player names are not in the NDJSON; they come from the
+   world file of the same seed. Every sentence on screen uses the names
+   ("Pellmoor Harriers", "Liro Ellow (10)"); the ids such as C1 and C6P10
+   appear only in the "Ids in the event log" details row. If the world file
+   cannot be used, the page says so in a notice and writes "Home club" and
+   "a player" instead of ids. All names are synthetic and fictional, and
+   tests/test_web_data.py runs the Rights Guard name screen over each one.

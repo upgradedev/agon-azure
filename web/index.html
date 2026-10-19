@@ -85,6 +85,7 @@
 
             <div class="scoreboard">
               <p class="scoreboard__team">
+                <svg class="kit" viewBox="0 0 12 12" aria-hidden="true" focusable="false"><circle class="kit__dot" id="home-kit" cx="6" cy="6" r="4.5" visibility="hidden"/></svg>
                 <span class="scoreboard__name" id="home-name">Home</span>
                 <span class="scoreboard__goals" id="home-goals">0</span>
               </p>
@@ -95,6 +96,7 @@
               <p class="scoreboard__team scoreboard__team--away">
                 <span class="scoreboard__goals" id="away-goals">0</span>
                 <span class="scoreboard__name" id="away-name">Away</span>
+                <svg class="kit" viewBox="0 0 12 12" aria-hidden="true" focusable="false"><circle class="kit__dot" id="away-kit" cx="6" cy="6" r="4.5" visibility="hidden"/></svg>
               </p>
             </div>
             <p class="visually-hidden" id="score-live" aria-live="polite" aria-atomic="true"></p>
@@ -141,6 +143,10 @@
             </figure>
 
             <p class="event-caption" id="event-caption">Kick-off has not happened yet.</p>
+            <details class="ids-row">
+              <summary>Ids in the event log</summary>
+              <p class="small muted" id="event-ids">No event is shown yet.</p>
+            </details>
 
             <ul class="legend" aria-label="Pitch legend">
               <li><span class="swatch swatch--pressure" aria-hidden="true"></span>Under pressure</li>
