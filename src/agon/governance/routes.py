@@ -15,10 +15,20 @@ file text) and counted, so a refactored or renamed adapter cannot fall out of sc
 The dynamic half lives in tests/routes: it replaces `verifier.verify` with a spy and asserts every
 adapter calls it exactly once for a valid payload and returns exactly what it returned.
 
-Scope: this audits the channel adapters. No HTTP router exists yet; when the API lands, its
-approval routes must be enumerated by path here too, or M16 does not cover them.
+Queue half (`audit_intake`), run over every `.py` file in `agon/intake`, selected by PATH:
 
-Usage: python -m agon.governance.routes [--dir PATH]
+* `agon.intake.ROUTES` maps each inbound queue to a channel adapter. The queue name must be
+  `decisions-<CHANNEL>` and the channel must be an officer channel fed by a Logic App (`teams`,
+  `outlook`); the console and the signed link are never queue routes.
+* `handle_message` reaches the verifier only through `adapter.handle(...)`. No intake file may call
+  `verifier.verify` directly, build a `VerifyResult`, write a store (`.create`, `.replace`), or use
+  dynamic dispatch; its one store read is `store.read(verifier.APPROVALS, ...)` inside `_replay`.
+
+Scope: channel adapters and queue intake routes. No HTTP router exists yet; when the api's HTTP
+routes land (console stand-in, signed link), they must be enumerated by path here too, or M16
+does not cover them.
+
+Usage: python -m agon.governance.routes [--dir PATH] [--intake-dir PATH]
 """
 
 from __future__ import annotations
@@ -137,19 +147,98 @@ def audit_channels(directory: Path = CHANNELS_DIR) -> AuditReport:
     return report
 
 
+INTAKE_DIR = Path(__file__).resolve().parent.parent / "intake"
+QUEUE_CHANNELS = frozenset({"teams", "outlook"})
+
+
+def _calls_in(node: ast.AST) -> list[ast.Call]:
+    return [n for n in ast.walk(node) if isinstance(n, ast.Call)]
+
+
+def _check_intake_file(tree: ast.Module, name: str, problems: list[str]) -> None:
+    replay = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "_replay"]
+    replay_calls = {id(c) for f in replay for c in _calls_in(f)}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            mod = node.module if isinstance(node, ast.ImportFrom) else None
+            names = [a.name for a in node.names]
+            if (mod or "").startswith("importlib") or any(n.startswith("importlib") for n in names):
+                problems.append(f"intake/{name}: uses importlib")
+            if mod == VERIFIER_MODULE:
+                problems.append(f"intake/{name}: imports names from {VERIFIER_MODULE}; import the module instead")
+        if not isinstance(node, ast.Call):
+            continue
+        f = node.func
+        built = f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else None
+        if built == "VerifyResult":
+            problems.append(f"intake/{name}: builds a VerifyResult at line {node.lineno}")
+        if isinstance(f, ast.Name) and f.id in DYNAMIC_NAMES:
+            problems.append(f"intake/{name}: dynamic call {f.id}() at line {node.lineno}")
+        if isinstance(f, ast.Attribute):
+            if f.attr == "verify":
+                problems.append(f"intake/{name}: calls .verify() at line {node.lineno}; go through the channel adapter")
+            if f.attr in {"create", "replace", "publish"}:
+                problems.append(f"intake/{name}: calls .{f.attr}() at line {node.lineno}; intake never writes a store")
+            if f.attr == "read":
+                first = node.args[0] if node.args else None
+                approvals = isinstance(first, ast.Attribute) and first.attr == "APPROVALS" and isinstance(first.value, ast.Name) and first.value.id == "verifier"
+                if id(node) not in replay_calls or not approvals:
+                    problems.append(f"intake/{name}: store read at line {node.lineno} outside _replay or not on verifier.APPROVALS")
+
+
+def audit_intake(directory: Path = INTAKE_DIR) -> AuditReport:
+    """Queue half of M16. `report.adapters` lists the queue routes, as `queue->channel`."""
+    report = AuditReport()
+    for path in sorted(Path(directory).glob("*.py")):
+        report.scanned.append(path.name)
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        except (SyntaxError, UnicodeDecodeError) as exc:
+            report.problems.append(f"intake/{path.name}: cannot be parsed: {exc}")
+            continue
+        _check_intake_file(tree, path.name, report.problems)
+        if path.name == "__init__.py":
+            handlers = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "handle_message"]
+            through_adapter = any(
+                isinstance(c.func, ast.Attribute) and c.func.attr == "handle" and isinstance(c.func.value, ast.Name) and c.func.value.id == "adapter"
+                for h in handlers for c in _calls_in(h)
+            )
+            if len(handlers) != 1 or not through_adapter:
+                report.problems.append("intake/__init__.py: handle_message must call adapter.handle(...)")
+    if not report.scanned:
+        report.problems.append(f"no intake files found under {directory}")
+        return report
+    from agon import intake  # the live table, after the static pass
+
+    for queue, adapter in sorted(intake.ROUTES.items()):
+        channel = getattr(adapter, "CHANNEL", None)
+        report.adapters.append(f"{queue}->{channel}")
+        if channel not in QUEUE_CHANNELS:
+            report.problems.append(f"intake route {queue}: channel {channel!r} is not a Logic App officer channel {sorted(QUEUE_CHANNELS)}")
+        if queue != f"decisions-{channel}":
+            report.problems.append(f"intake route {queue}: the queue must be named decisions-{channel}")
+        if not callable(getattr(adapter, "handle", None)) or not callable(getattr(adapter, "parse", None)):
+            report.problems.append(f"intake route {queue}: adapter has no handle() and parse()")
+    return report
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Fail if any approval channel can skip verifier.verify().")
     parser.add_argument("--dir", type=Path, default=CHANNELS_DIR)
+    parser.add_argument("--intake-dir", type=Path, default=INTAKE_DIR)
     args = parser.parse_args(argv)
     report = audit_channels(args.dir)
-    for problem in report.problems:
+    intake_report = audit_intake(args.intake_dir)
+    problems = report.problems + intake_report.problems
+    for problem in problems:
         print(f"FAIL {problem}")
     print(
         f"channel files scanned: {len(report.scanned)}; adapters: {len(report.adapters)} "
-        f"({', '.join(report.adapters)}); routes that skip verify(): {len(report.problems)} "
-        f"(channel adapters only; no HTTP router exists yet)"
+        f"({', '.join(report.adapters)}); intake files scanned: {len(intake_report.scanned)}; "
+        f"queue routes: {len(intake_report.adapters)} ({', '.join(intake_report.adapters)}); "
+        f"routes that skip verify(): {len(problems)} (channel adapters and queue routes; no HTTP router exists yet)"
     )
-    return 0 if report.ok else 1
+    return 0 if report.ok and intake_report.ok else 1
 
 
 if __name__ == "__main__":

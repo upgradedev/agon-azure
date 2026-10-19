@@ -53,6 +53,22 @@ var containerSpecs = [
     name: 'usage'
     partitionKey: '/id'
   }
+  // Governance state the one verifier and the run ledger need (spec 14 item 5):
+  // nonces (single-use approval requests, consumed by etag compare-and-set),
+  // approvers (principal to role) and runs (the fleet's run ledger). All keyed by
+  // /id like the other key-addressed containers (agon.governance.store_cosmos).
+  {
+    name: 'nonces'
+    partitionKey: '/id'
+  }
+  {
+    name: 'approvers'
+    partitionKey: '/id'
+  }
+  {
+    name: 'runs'
+    partitionKey: '/id'
+  }
 ]
 
 resource account 'Microsoft.DocumentDB/databaseAccounts@2024-11-15' = {

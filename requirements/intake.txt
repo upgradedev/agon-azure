@@ -1,0 +1,10 @@
+# Decision intake and the governance Cosmos store: the Azure SDK packages they import lazily.
+# Every line is an exact pin (ci/check_pins.py). Versions read on PyPI 2026-10-19, read only:
+# azure-storage-queue 12.18.0 (2026-09-30), azure-cosmos 4.17.1 (2026-09-16), azure-identity
+# 1.26.0 (2026-10-01), azure-core 1.41.0 (2026-05-07). cosmos, identity and core match
+# requirements/fleet.txt so one image can carry both.
+-r dev.txt
+azure-storage-queue==12.18.0
+azure-cosmos==4.17.1
+azure-identity==1.26.0
+azure-core==1.41.0

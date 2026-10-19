@@ -5,8 +5,13 @@ Dynamic: `verifier.verify` is replaced by a spy; every adapter must call it exac
 valid payload and return exactly what it returned. Negative control: rogue adapters written to a
 temporary folder must each be flagged.
 
-Scope: no HTTP router exists yet, so today the count covers the four channel adapters only. When
-the API router lands, this test must enumerate its routes by path as well.
+Queue half: every file in agon/intake, selected by path, passes `routes.audit_intake`, and the live
+route table binds each queue `decisions-<channel>` to that channel's adapter (Teams and Outlook
+only). Negative controls: rogue intake files and rogue route tables must each be flagged. The
+dynamic half for queue routes is tests/intake (a spy on `verifier.verify`, once per route).
+
+Scope: no HTTP router exists yet, so today the count covers the four channel adapters and the two
+queue routes. When the api's HTTP routes land, this test must enumerate them by path as well.
 """
 
 from __future__ import annotations
@@ -55,6 +60,7 @@ def test_static_audit_scans_every_channel_file_and_finds_no_bypass(capsys):
     assert routes.main([]) == 0
     out = capsys.readouterr().out
     assert f"channel files scanned: {len(report.scanned)}" in out
+    assert "queue routes: 2 (decisions-outlook->outlook, decisions-teams->teams)" in out
     assert "routes that skip verify(): 0" in out
 
 
@@ -160,3 +166,77 @@ def test_negative_control_rogue_adapters_are_flagged(tmp_path):
 def test_negative_control_an_empty_folder_fails(tmp_path):
     report = routes.audit_channels(tmp_path)
     assert not report.ok and report.problems
+
+
+# ----------------------------------------------------------------- queue intake routes
+
+
+def test_static_intake_audit_scans_every_intake_file_and_finds_no_bypass():
+    report = routes.audit_intake()
+    assert report.ok, report.problems
+    assert {"__init__.py", "drain.py", "azure_queues.py", "__main__.py"} <= set(report.scanned)
+    assert report.adapters == ["decisions-outlook->outlook", "decisions-teams->teams"]
+
+
+INTAKE_ROGUES = {
+    "rogue_verify.py": """
+        from agon.governance import verifier
+        def handle_message(queue, text, store, now, sender):
+            return verifier.verify(text, store, now)
+    """,
+    "rogue_write.py": """
+        def settle(store, key):
+            store.create("approvals", key, {"decision": "approve"})
+    """,
+    "rogue_read.py": """
+        from agon.governance import verifier
+        def peek(store, key):
+            return store.read(verifier.NONCES, key)
+    """,
+    "rogue_result.py": """
+        from agon.governance import verifier
+        def fake():
+            return verifier.VerifyResult(ok=True, code="approved", detail="self")
+    """,
+    "rogue_dynamic.py": """
+        from agon.governance import verifier
+        def sneak(d, s, n):
+            return getattr(verifier, "verify")(d, s, n)
+    """,
+    "rogue_import.py": """
+        from agon.governance.verifier import approval_id_for
+    """,
+}
+
+
+def test_negative_control_rogue_intake_files_are_flagged(tmp_path):
+    for name, source in INTAKE_ROGUES.items():
+        (tmp_path / name).write_text(textwrap.dedent(source), encoding="utf-8")
+    report = routes.audit_intake(tmp_path)
+    assert not report.ok
+    for name in INTAKE_ROGUES:
+        assert any(p.startswith(f"intake/{name}:") for p in report.problems), (name, report.problems)
+    assert routes.main(["--intake-dir", str(tmp_path)]) == 1
+
+
+def test_negative_control_handle_message_that_skips_the_adapter_is_flagged(tmp_path):
+    (tmp_path / "__init__.py").write_text(textwrap.dedent("""
+        def handle_message(queue, text, store, now, sender):
+            return None
+    """), encoding="utf-8")
+    report = routes.audit_intake(tmp_path)
+    assert "intake/__init__.py: handle_message must call adapter.handle(...)" in report.problems
+
+
+@pytest.mark.parametrize("table, problem", [
+    ({"decisions-console": console}, "is not a Logic App officer channel"),
+    ({"decisions-signed_link": signed_link}, "is not a Logic App officer channel"),
+    ({"decisions-email": outlook}, "must be named decisions-outlook"),
+    ({"decisions-outlook": teams}, "must be named decisions-teams"),
+])
+def test_negative_control_rogue_route_tables_are_flagged(table, problem, monkeypatch):
+    from agon import intake
+
+    monkeypatch.setattr(intake, "ROUTES", table)
+    report = routes.audit_intake()
+    assert not report.ok and any(problem in p for p in report.problems), report.problems

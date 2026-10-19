@@ -114,6 +114,8 @@ What it grants (each at the narrowest scope; full list in the template):
 | `id-fleet` | Foundry User (Azure AI User) | the Foundry project `agon` | spec 7.1 |
 | `id-fleet` | Cognitive Services User | the Translator account; the Speech account | spec 7.1 |
 | CI (`agon-azure-ci`) | Cognitive Services OpenAI User | the Foundry account only | beyond spec 7.1: gate C2 smoke and the evals job |
+| `id-logicapp` | Storage Queue Data Message Sender | `decisions-teams` and `decisions-outlook` only | spec 14 item 5: the queue names the channel |
+| `id-api` | Message Processor and Reader on both decision queues; Sender on `intake-poison` | one queue each | spec 14 item 5: the decision intake |
 
 From Git Bash:
 
@@ -129,6 +131,7 @@ az deployment group create --resource-group "$rg" --name agon-rbac --template-fi
   --parameters storageAccountName="$(out storageAccountName)" \
                fleetPrincipalId="$(out idFleetPrincipalId)" \
                apiPrincipalId="$(out idApiPrincipalId)" \
+               logicappPrincipalId="$(out idLogicappPrincipalId)" \
                publisherPrincipalId="$(out idPublisherPrincipalId)" \
                publisherSandboxPrincipalId="$(out idPublisherSandboxPrincipalId)" \
                ciPrincipalId="$(out ciPrincipalId)" \
@@ -148,7 +151,7 @@ foreach ($d in "agon-main", "agon-ai") {
 }
 function Out-Agon($name) { az deployment group show --resource-group $rg --name agon-main --query "properties.outputs.$name.value" --output tsv }
 function Out-Ai($name) { az deployment group show --resource-group $rg --name agon-ai --query "properties.outputs.$name.value" --output tsv }
-az deployment group create --resource-group $rg --name agon-rbac --template-file infra/rbac.bicep --mode Incremental --parameters storageAccountName=$(Out-Agon storageAccountName) fleetPrincipalId=$(Out-Agon idFleetPrincipalId) apiPrincipalId=$(Out-Agon idApiPrincipalId) publisherPrincipalId=$(Out-Agon idPublisherPrincipalId) publisherSandboxPrincipalId=$(Out-Agon idPublisherSandboxPrincipalId) ciPrincipalId=$(Out-Agon ciPrincipalId) foundryAccountName=$(Out-Ai foundryAccountName) foundryProjectName=$(Out-Ai foundryProjectName) translatorAccountName=$(Out-Ai translatorAccountName) speechAccountName=$(Out-Ai speechAccountName)
+az deployment group create --resource-group $rg --name agon-rbac --template-file infra/rbac.bicep --mode Incremental --parameters storageAccountName=$(Out-Agon storageAccountName) fleetPrincipalId=$(Out-Agon idFleetPrincipalId) apiPrincipalId=$(Out-Agon idApiPrincipalId) logicappPrincipalId=$(Out-Agon idLogicappPrincipalId) publisherPrincipalId=$(Out-Agon idPublisherPrincipalId) publisherSandboxPrincipalId=$(Out-Agon idPublisherSandboxPrincipalId) ciPrincipalId=$(Out-Agon ciPrincipalId) foundryAccountName=$(Out-Ai foundryAccountName) foundryProjectName=$(Out-Ai foundryProjectName) translatorAccountName=$(Out-Ai translatorAccountName) speechAccountName=$(Out-Ai speechAccountName)
 ```
 
 `ciPrincipalId` is the object id of the `agon-azure-ci` service principal, not its appId. To cross-check it owner-side: `az ad sp show --id <appId> --query id --output tsv` must print the same value as `out ciPrincipalId`.

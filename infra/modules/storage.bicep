@@ -42,6 +42,13 @@ var queueNames = [
   'decisions'
   'publish-requests'
   'sandbox-publish-requests'
+  // Spec 14 item 5: one inbound queue per Logic App officer channel. Only
+  // id-logicapp may send to them (infra/rbac.bicep), so the queue a decision
+  // arrives on names its channel (agon.intake). Undeliverable decisions move to
+  // intake-poison and are never dropped.
+  'decisions-teams'
+  'decisions-outlook'
+  'intake-poison'
 ]
 
 resource account 'Microsoft.Storage/storageAccounts@2023-05-01' = {

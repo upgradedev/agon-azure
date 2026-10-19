@@ -1,5 +1,7 @@
 # Governance evidence: M12 (rights), M15 (exactly-once approval) and M16 (no approval route skips
-# the verifier), each printed under its own step so a run URL can be cited beside the number.
+# the verifier, channel adapters and queue routes), each printed under its own step so a run URL
+# can be cited beside the number. The intake-sdk job checks the Azure adapters against the
+# pinned SDK.
 # Separate from the main CI workflow so the governance lane can change it without touching
 # platform files. Stdlib only, plus the pinned test runner.
 name: governance
@@ -35,5 +37,43 @@ jobs:
         run: python -m pytest tests/approval_concurrency -q -s -p no:cacheprovider
       - name: M12 rights guard, block lists, roster false positives and injection fixtures
         run: python -m pytest tests/rights -q -p no:cacheprovider
-      - name: Fact gate, seal, verifier, channels and publisher
+      - name: Fact gate, seal, verifier, channels, publisher and the Cosmos store adapter (fake)
         run: python -m pytest tests/governance -q -p no:cacheprovider
+      - name: Decision intake, queue routes through the channel adapters (spec 14 item 5)
+        run: python -m pytest tests/intake -q -p no:cacheprovider
+      # The SDK contract test must FAIL, not skip, when it is required and the SDK is absent.
+      # This job has no Azure SDK, so a skip here would mean the guard is broken.
+      - name: Negative control, the SDK contract test fails without the SDK when required
+        env:
+          AGON_REQUIRE_AZURE_SDK: "1"
+        run: |
+          set +e
+          python -m pytest tests/intake/test_azure_sdk_contract.py -q -p no:cacheprovider > sdk_guard.txt 2>&1
+          code=$?
+          set -e
+          cat sdk_guard.txt
+          if [ "$code" -eq 0 ]; then echo "expected a failure, got exit 0"; exit 1; fi
+          grep -q "AGON_REQUIRE_AZURE_SDK=1 but the Azure SDK packages are not installed" sdk_guard.txt
+
+  intake-sdk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install the pinned Azure SDK for the intake and the Cosmos store
+        run: python -m pip install -r requirements/intake.txt
+      - name: Install the package (editable, pinned backend, no isolation)
+        run: python -m pip install --no-build-isolation --no-deps -e .
+      - name: SDK contract, the adapters' calls exist in the pinned SDK (no network)
+        env:
+          AGON_REQUIRE_AZURE_SDK: "1"
+        run: python -m pytest tests/intake/test_azure_sdk_contract.py -q -p no:cacheprovider -rs
+      - name: Intake and store tests with the SDK present
+        run: python -m pytest tests/intake tests/governance/test_store_cosmos.py -q -p no:cacheprovider
+      - name: Record the resolved set
+        run: python -m pip freeze --exclude-editable | sort
