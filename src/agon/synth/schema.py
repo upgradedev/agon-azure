@@ -67,6 +67,9 @@ QUALIFIERS: dict[str, frozenset[str]] = {
     "shot": frozenset({"open_play", "header", "penalty", "free_kick"}),
 }
 
+# A planned substitution carries no qualifier; an injury replacement carries "injury".
+SUB_QUALIFIERS: tuple[str | None, ...] = (None, "injury")
+
 # Types that must carry an end location.
 TYPES_WITH_END: frozenset[str] = frozenset({"pass", "carry", "shot"})
 # Types where `player` may be None (team-level events).
@@ -233,6 +236,8 @@ def validate_event(event: dict[str, Any]) -> list[str]:
         problems.append(f"qualifier {event['qualifier']!r} not allowed for {etype}")
     if etype == "sub" and not event["related_player"]:
         problems.append("sub needs related_player (the player coming on)")
+    if etype == "sub" and event["qualifier"] not in SUB_QUALIFIERS:
+        problems.append(f"qualifier {event['qualifier']!r} not allowed for sub")
     if not isinstance(event["event_id"], str) or len(event["event_id"]) != EVENT_ID_HEX:
         problems.append("event_id must be 16 hex characters")
     elif compute_event_id(event) != event["event_id"]:

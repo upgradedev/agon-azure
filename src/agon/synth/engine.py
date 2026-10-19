@@ -20,8 +20,9 @@ chain id). No floats, no `random`, no `hash()`, no set iteration on any path tha
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Sequence
 
+from agon.synth.interventions import Intervention
 from agon.synth.rng import PPM, Stream, StreamId
 from agon.synth.schema import COORDINATE_FRAME, PITCH_X_DM, PITCH_Y_DM, Event, make_event
 from agon.synth.world import Club, League, Player, Style, fixture_list
@@ -36,6 +37,8 @@ CENTRE = (PITCH_X_DM // 2, PITCH_Y_DM // 2)
 PENALTY_SPOT = (PITCH_X_DM - 110, PITCH_Y_DM // 2)
 GOAL_Y_LO = 304
 GOAL_Y_HI = 376
+# Added time per period is drawn uniformly from these ranges (seconds) on the STOPPAGE stream.
+STOPPAGE_RANGES: tuple[tuple[int, int], tuple[int, int]] = ((60, 240), (120, 420))
 
 Zone = tuple[int, int]
 
@@ -151,14 +154,43 @@ class Restart:
 
 @dataclass
 class MatchResult:
+    """`applied` is the intervention ledger. It is empty for a plain match and is never part of
+    the meta, the events or the manifest, so nothing an agent reads names a storyline."""
+
     meta: dict[str, Any]
     events: list[Event]
+    applied: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass
+class _Live:
+    """Engine-side state and bookkeeping for one intervention: the first of two label code paths.
+
+    Counters are kept at the moment things happen inside the engine. The referee re-derives the
+    same quantities from the event log alone and the two must agree exactly.
+    """
+
+    spec: Intervention
+    team: TeamState
+    index: int
+    active: bool = False
+    counting: bool = False
+    pending_red: bool = False
+    awaiting_anchor: bool = False
+    at_clock: int | None = None
+    anchor_event_id: str | None = None
+    goals_for_after: int = 0
+    goals_against_after: int = 0
+    saves_after: int = 0
+    stoppage_seconds: int = 0
+    press_by_minute: dict[int, int] = field(default_factory=dict)
+    opp_onball_by_minute: dict[int, int] = field(default_factory=dict)
 
 
 class MatchSimulator:
     """Simulates one fixture of a league. Construct, then call `run()` once."""
 
-    def __init__(self, league: League, match_index: int = 0) -> None:
+    def __init__(self, league: League, match_index: int = 0, interventions: Sequence[Intervention] = ()) -> None:
         fixtures = fixture_list(len(league.clubs))
         if not 0 <= match_index < len(fixtures):
             raise ValueError(f"match_index must be in 0..{len(fixtures) - 1}")
@@ -176,6 +208,11 @@ class MatchSimulator:
         self.period = 1
         self.period_end = 0
         self.last_team: TeamState | None = None
+        self._added = [0, 0]
+        self._live: list[_Live] = [
+            _Live(spec=iv, team=self.home if iv.side == "home" else self.away, index=i)
+            for i, iv in enumerate(interventions)
+        ]
 
     @staticmethod
     def _team(club: Club) -> TeamState:
@@ -223,6 +260,94 @@ class MatchSimulator:
                 related_player=related.player_id if related else None,
             )
         )
+        if self._live:
+            self._book(etype, team)
+
+    def _book(self, etype: str, team: TeamState) -> None:
+        """Intervention bookkeeping at emission time (path one of the labels)."""
+        minute = self.clock // 60
+        for lv in self._live:
+            if lv.awaiting_anchor and etype != "sub":
+                lv.anchor_event_id = self.events[-1].event_id
+                lv.awaiting_anchor = False
+            if lv.spec.kind != "tactical_shift":
+                continue
+            if etype == "pressure" and team is lv.team:
+                lv.press_by_minute[minute] = lv.press_by_minute.get(minute, 0) + 1
+            elif etype in ("pass", "carry", "shot") and team is not lv.team:
+                lv.opp_onball_by_minute[minute] = lv.opp_onball_by_minute.get(minute, 0) + 1
+
+    def _active(self, team: TeamState, kind: str) -> list[_Live]:
+        return [lv for lv in self._live if lv.active and lv.team is team and lv.spec.kind == kind]
+
+    def _pending_red(self, team: TeamState) -> _Live | None:
+        for lv in self._live:
+            if lv.pending_red and lv.team is team:
+                return lv
+        return None
+
+    def _activate_due(self) -> None:
+        """Switch on every intervention whose minute has come, at the start of a chain."""
+        for lv in self._live:
+            if lv.active or self.clock < lv.spec.minute * 60:
+                continue
+            lv.active = True
+            lv.at_clock = self.clock
+            kind = lv.spec.kind
+            if kind == "red_card":
+                lv.pending_red = True
+            elif kind == "injury_stoppage":
+                self._injure(lv)
+            else:
+                lv.counting = True
+                if kind == "tactical_shift":
+                    lv.awaiting_anchor = True
+
+    def _injure(self, lv: _Live) -> None:
+        """An outfield player is injured and replaced; play stops and the time is added on."""
+        team = lv.team
+        s = Stream(self.seed, self.match_key, StreamId.STORYLINE, possession=lv.index)
+        outfield = [p for p in team.on_pitch if p.position != "GK"]
+        if not outfield or not team.bench or team.subs_used >= MAX_SUBS:
+            return
+        off = outfield[s.below(len(outfield))]
+        same = [p for p in team.bench if p.position == off.position]
+        options = same or [p for p in team.bench if p.position != "GK"]
+        if not options:
+            return
+        on = options[s.below(len(options))]
+        team.on_pitch = [on if p.player_id == off.player_id else p for p in team.on_pitch]
+        team.bench = [p for p in team.bench if p.player_id != on.player_id]
+        team.subs_used += 1
+        self._emit("sub", team, off, (PITCH_X_DM // 2, 0), outcome="on", qualifier="injury", related=on)
+        lv.anchor_event_id = self.events[-1].event_id
+        delay = lv.spec.magnitude
+        lv.stoppage_seconds = delay
+        self.clock += delay
+        self.period_end += delay
+        self._added[self.period - 1] += delay
+
+    def _ledger(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "index": lv.index,
+                "kind": lv.spec.kind,
+                "side": lv.spec.side,
+                "team": lv.team.club_id,
+                "planned_minute": lv.spec.minute,
+                "magnitude": lv.spec.magnitude,
+                "activated": lv.active,
+                "at_clock": lv.at_clock,
+                "anchor_event_id": lv.anchor_event_id,
+                "goals_for_after": lv.goals_for_after,
+                "goals_against_after": lv.goals_against_after,
+                "saves_after": lv.saves_after,
+                "stoppage_seconds": lv.stoppage_seconds,
+                "press_by_minute": dict(sorted(lv.press_by_minute.items())),
+                "opp_onball_by_minute": dict(sorted(lv.opp_onball_by_minute.items())),
+            }
+            for lv in self._live
+        ]
 
     # ----------------------------------------------------------------- tactics
 
@@ -238,6 +363,8 @@ class MatchSimulator:
         elif diff > 0 and minute >= 70:
             press -= 150
             direct -= 100
+        for lv in self._active(team, "tactical_shift"):
+            press += lv.spec.magnitude
         short = 11 - len(team.on_pitch)
         press -= 100 * short
         return Style(_clamp(press, 50, 950), _clamp(direct, 50, 950), _clamp(width, 50, 950))
@@ -291,6 +418,8 @@ class MatchSimulator:
         shot = shot * (1000 + self._momentum_bonus(team) // 2) // 1000
         if team.goals < self._opponent(team).goals and self.clock >= 75 * 60:
             shot = shot * 13 // 10
+        if self._live and self._active(self._opponent(team), "late_collapse"):
+            shot = shot * 3 // 2
         pas = PASS_ACTION_WEIGHT
         carry = max(60, 250 + carrier.pace * 3 - style.directness // 4)
         if carrier.position == "GK":
@@ -299,11 +428,15 @@ class MatchSimulator:
 
     # ----------------------------------------------------------------- discipline
 
-    def _foul(self, offender_team: TeamState, offender: Player, point: tuple[int, int]) -> None:
+    def _foul(
+        self, offender_team: TeamState, offender: Player, point: tuple[int, int], forced_red: _Live | None = None
+    ) -> None:
         """Emit the foul and any card; a red or second yellow removes the player."""
         self._emit("foul", offender_team, offender, point, outcome="committed")
         disc = self._stream(StreamId.DISCIPLINE)
-        if disc.chance_ppm(STRAIGHT_RED_BASE_PPM + (100 - offender.discipline) * STRAIGHT_RED_PER_POINT_PPM):
+        if forced_red is not None or disc.chance_ppm(
+            STRAIGHT_RED_BASE_PPM + (100 - offender.discipline) * STRAIGHT_RED_PER_POINT_PPM
+        ):
             card = "red"
         elif disc.chance_ppm(
             (YELLOW_BASE_PPM + (100 - offender.discipline) * YELLOW_PER_POINT_PPM)
@@ -314,6 +447,11 @@ class MatchSimulator:
         else:
             return
         self._emit("card", offender_team, offender, point, outcome=card)
+        if forced_red is not None:
+            forced_red.pending_red = False
+            forced_red.anchor_event_id = self.events[-1].event_id
+            forced_red.at_clock = self.clock
+            forced_red.counting = True
         self.clock += disc.between(15, 40)
         if card == "yellow":
             offender_team.yellows[offender.player_id] = offender_team.yellows.get(offender.player_id, 0) + 1
@@ -400,10 +538,24 @@ class MatchSimulator:
             late = self.clock // 60 - 45
             if late > 0:
                 xg = xg * (1000 + SECOND_HALF_XG_PER_MINUTE * late) // 1000
+        if self._live and qualifier != "penalty":
+            for lv in self._active(opp, "late_collapse"):
+                xg = xg * lv.spec.magnitude // 1000
         xg = _clamp(xg, 4_000, 900_000)
-        rest = PPM - xg
+        saved_bonus = 0
+        if self._live:
+            for lv in self._active(opp, "goalkeeper_heroics"):
+                kept = xg * lv.spec.magnitude // 1000
+                saved_bonus += xg - kept
+                xg = kept
+        rest = PPM - xg - saved_bonus
         outcome = ("goal", "saved", "off_target", "blocked")[
-            s.weighted((xg, rest * SAVED_SHARE_PCT // 100, rest * OFF_TARGET_SHARE_PCT // 100, rest * BLOCKED_SHARE_PCT // 100))
+            s.weighted((
+                xg,
+                rest * SAVED_SHARE_PCT // 100 + saved_bonus,
+                rest * OFF_TARGET_SHARE_PCT // 100,
+                rest * BLOCKED_SHARE_PCT // 100,
+            ))
         ]
         if outcome in ("goal", "saved"):
             end = (PITCH_X_DM, s.between(GOAL_Y_LO, GOAL_Y_HI))
@@ -413,6 +565,8 @@ class MatchSimulator:
         else:
             end = (_clamp(point[0] + s.between(10, 40), 0, PITCH_X_DM), point[1])
         self._emit("shot", team, shooter, point, end=end, under_pressure=pressed, outcome=outcome, qualifier=qualifier)
+        if self._live:
+            self._book_shot(team, outcome)
         team.momentum += 120
         self.clock += s.between(1, 3)
         if outcome == "goal":
@@ -433,6 +587,23 @@ class MatchSimulator:
             self.clock += s.between(20, 35)
             return Restart(team, zone_of(*corner_point), "corner", None, corner_point)
         return Restart(opp, mirror_zone(zone), None, "shot_end")
+
+    def _book_shot(self, team: TeamState, outcome: str) -> None:
+        shot_id = self.events[-1].event_id
+        for lv in self._live:
+            if not lv.counting:
+                continue
+            if outcome == "goal":
+                if team is lv.team:
+                    lv.goals_for_after += 1
+                else:
+                    lv.goals_against_after += 1
+                    if lv.spec.kind == "late_collapse" and lv.anchor_event_id is None:
+                        lv.anchor_event_id = shot_id
+            elif outcome == "saved" and team is not lv.team:
+                lv.saves_after += 1
+                if lv.spec.kind == "goalkeeper_heroics" and lv.anchor_event_id is None:
+                    lv.anchor_event_id = shot_id
 
     def _run_chain(self, restart: Restart) -> Restart | None:
         """Play one possession. Returns the next restart, or None when the period clock runs out."""
@@ -456,18 +627,23 @@ class MatchSimulator:
                 return None
             pressed = False
             if step > 0 or restart.kind is None:
-                if pressure.chance_ppm(self._press_ppm(opp, zone)):
+                red = self._pending_red(opp) if self._live else None
+                if red is not None or pressure.chance_ppm(self._press_ppm(opp, zone)):
                     presser = self._choose_player(pressure, opp, mirror_zone(zone))
+                    if red is not None and presser.position == "GK":
+                        outfield = [p for p in opp.on_pitch if p.position != "GK"]
+                        if outfield:
+                            presser = outfield[pressure.below(len(outfield))]
                     mpoint = (PITCH_X_DM - point[0], PITCH_Y_DM - point[1])
                     self._emit("pressure", opp, presser, mpoint, outcome="applied")
                     pressed = True
-                    if pressure.chance_ppm(220_000 + (presser.tackling - carrier.pace) * 2_000):
+                    if red is not None or pressure.chance_ppm(220_000 + (presser.tackling - carrier.pace) * 2_000):
                         in_box = zone[0] >= 14 and 3 <= zone[1] <= 8
                         foul_ppm = FOUL_BASE_PPM + (100 - presser.discipline) * 3_000
                         if in_box:
                             foul_ppm //= 6  # defenders are careful in their own box
-                        if pressure.chance_ppm(foul_ppm):
-                            self._foul(opp, presser, mpoint)
+                        if red is not None or pressure.chance_ppm(foul_ppm):
+                            self._foul(opp, presser, mpoint, forced_red=red)
                             self.clock += timing.between(15, 40)
                             if in_box:
                                 return Restart(team, zone, "penalty", None, PENALTY_SPOT)
@@ -542,24 +718,26 @@ class MatchSimulator:
         if self.events:
             raise RuntimeError("a MatchSimulator runs once")
         stoppage = Stream(self.seed, self.match_key, StreamId.STOPPAGE)
-        added = (stoppage.between(60, 240), stoppage.between(120, 420))
+        self._added = [stoppage.between(*STOPPAGE_RANGES[0]), stoppage.between(*STOPPAGE_RANGES[1])]
         self._plan_subs()
         kick_off_teams = (self.home, self.away)
         for period in (1, 2):
             self.period = period
             self.clock = (period - 1) * HALF_SECONDS
-            self.period_end = period * HALF_SECONDS + added[period - 1]
+            self.period_end = period * HALF_SECONDS + self._added[period - 1]
             self.home.momentum = 0
             self.away.momentum = 0
             self.last_team = None
             restart: Restart | None = Restart(kick_off_teams[period - 1], (7, 6), "kick_off", "kick_off", CENTRE)
             while restart is not None and self.clock < self.period_end:
+                if self._live:
+                    self._activate_due()
                 if period == 2:
                     self._due_subs()
                 restart = self._run_chain(restart)
-        return MatchResult(meta=self._meta(added), events=self.events)
+        return MatchResult(meta=self._meta(self._added), events=self.events, applied=self._ledger())
 
-    def _meta(self, added: tuple[int, int]) -> dict[str, Any]:
+    def _meta(self, added: list[int]) -> dict[str, Any]:
         return {
             "generator": GENERATOR_VERSION,
             "match_id": self.match_id,
@@ -577,6 +755,6 @@ class MatchSimulator:
         }
 
 
-def simulate_match(league: League, match_index: int = 0) -> MatchResult:
-    """Convenience wrapper: one fixture of `league`, deterministic in (league.seed, match_index)."""
-    return MatchSimulator(league, match_index).run()
+def simulate_match(league: League, match_index: int = 0, interventions: Sequence[Intervention] = ()) -> MatchResult:
+    """Convenience wrapper: one fixture of `league`, deterministic in (league.seed, match_index, interventions)."""
+    return MatchSimulator(league, match_index, interventions).run()
