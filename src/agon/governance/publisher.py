@@ -11,8 +11,9 @@ Rules, in order. The first is the seal check, and it is never skipped:
 5. Writes are create-only. A path that already holds different bytes is refused, never
    overwritten. Identical bytes at the same content-addressed path count as already written, so a
    publish interrupted half way can be resumed without overwriting anything.
-6. An erratum names its parent. The parent must be published and not yet superseded; a new
-   supersession record links parent to child. The parent's receipt and bytes are never touched.
+6. An erratum names its parent. The parent must be published on this target, for the same
+   match_id (a receipt without one fails closed), and not yet superseded; a new supersession
+   record links parent to child. The parent's receipt and bytes are never touched.
 
 The receipt is a create-only record keyed by the bundle hash, with its own sha256.
 """
@@ -122,6 +123,11 @@ class Publisher:
             parent_receipt = self.store.read(PUBLISHED, parent)
             if parent_receipt is None or parent_receipt.body.get("target") != self.target:
                 return _refuse("parent_not_published", f"parent {parent} is not published on {self.target}")
+            if parent_receipt.body.get("match_id") != manifest["match_id"]:
+                return _refuse(
+                    "parent_match_mismatch",
+                    f"parent {parent} is for match {parent_receipt.body.get('match_id')}, the erratum is for {manifest['match_id']}",
+                )
             superseded = self.store.read(SUPERSESSIONS, parent)
             if superseded is not None and superseded.body.get("child") != check.bundle_sha256:
                 return _refuse("parent_already_superseded", f"parent {parent} is already superseded by {superseded.body.get('child')}")
@@ -155,7 +161,8 @@ class Publisher:
             "approver": approval.get("approver"),
             "channel": approval.get("channel"),
             "target": self.target,
-            "kind": manifest.get("kind"),
+            "kind": manifest["kind"],
+            "match_id": manifest["match_id"],
             "published_at": published_at,
             "manifest_path": f"{prefix}/{MANIFEST_NAME}",
             "files": {name: listed[name]["sha256"] for name in sorted(listed)},

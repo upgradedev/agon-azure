@@ -42,6 +42,8 @@ def test_publish_writes_every_artifact_and_a_receipt():
     body = {k: v for k, v in receipt.items() if k != "receipt_sha256"}
     assert receipt["receipt_sha256"] == S.sha256_hex(S.canonical_utf8(body))
     assert receipt["approver"] == govkit.OFFICER and receipt["channel"] == "teams"
+    assert receipt["match_id"] == env.bundle.manifest["match_id"] == "s9-m0"
+    assert receipt["kind"] == "fulltime"
 
 
 def test_refuses_when_the_recomputed_hash_differs_from_the_approved_hash():
@@ -189,3 +191,34 @@ def test_a_bundle_missing_the_rights_verdict_is_never_published_even_with_a_plan
     assert result.code == "required_gate_missing" and "rights" in result.detail
     assert sink.blobs == {}
     assert store.keys(P.PUBLISHED) == []
+
+
+def test_erratum_for_another_match_cannot_supersede_the_parent():
+    """Reviewer probe: an erratum sealed for s11-m0 naming a published s9-m0 parent was published
+    and created a supersession record. It is now refused and nothing is written."""
+    env, approval_id = _approved_env()
+    sink = P.InMemorySink()
+    pub = P.Publisher(env.store, sink, "feed")
+    assert _publish(pub, env, approval_id).ok
+    parent = env.bundle.bundle_sha256
+
+    other = govkit.make_env(store=env.store, kind="erratum", parent=parent, seed=11, tag=" wrong match")
+    assert other.bundle.manifest["match_id"] == "s11-m0"
+    ok = teams.handle(govkit.teams_payload(other), env.store, govkit.later(90))
+    assert ok.approved
+    before = dict(sink.blobs)
+    result = _publish(pub, other, ok.approval_id)
+    assert result.code == "parent_match_mismatch"
+    assert env.store.read(P.SUPERSESSIONS, parent) is None
+    assert env.store.read(P.PUBLISHED, other.bundle.bundle_sha256) is None
+    assert sink.blobs == before
+
+
+def test_parent_receipt_without_a_match_id_fails_closed():
+    env, approval_id = _approved_env()
+    store = env.store
+    parent = env.bundle.bundle_sha256
+    store.create(P.PUBLISHED, parent, {"bundle_sha256": parent, "target": "feed"})  # legacy shape, no match_id
+    child = govkit.make_env(store=store, kind="erratum", parent=parent, tag=" fix")
+    ok = teams.handle(govkit.teams_payload(child), store, govkit.later(90))
+    assert _publish(P.Publisher(store, P.InMemorySink(), "feed"), child, ok.approval_id).code == "parent_match_mismatch"
