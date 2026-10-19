@@ -49,7 +49,7 @@ for (const viewport of [
     await page.getByRole("tab", { name: /^EL/ }).click();
     const panel = page.locator('[data-view="recap"] [role="tabpanel"]');
     await expect(panel.locator('p[lang="el"]')).toBeVisible();
-    const sentence = panel.locator('p[lang="el"] button').first();
+    const sentence = panel.locator('p[lang="el"] a').first();
     await sentence.click();
     const drawer = page.getByRole("dialog", { name: "Why this sentence says this" });
     await expect(drawer).toBeVisible();
@@ -96,7 +96,7 @@ test("judge path with the keyboard only, at 1280 px", async ({ page }) => {
   await page.keyboard.press("ArrowRight");
   await expect(page.getByRole("tab", { name: /^EL/ })).toBeFocused();
   await expect(page.getByRole("tab", { name: /^EL/ })).toHaveAttribute("aria-selected", "true");
-  const sentence = page.locator('[data-view="recap"] p[lang="el"] button').first();
+  const sentence = page.locator('[data-view="recap"] p[lang="el"] a').first();
   await tabTo(page, sentence);
   await page.keyboard.press("Enter");
   await expect(page.getByRole("dialog", { name: "Why this sentence says this" })).toBeVisible();

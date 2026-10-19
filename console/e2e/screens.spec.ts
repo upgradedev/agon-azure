@@ -1,7 +1,9 @@
 /*
   Every screen at 375 and 1280 px, in light and dark: no horizontal scroll at
   375, axe with zero serious or critical violations, and a full-page
-  screenshot into screenshots/ (uploaded as a CI artifact on every run).
+  screenshot into screenshots/ (uploaded as a CI artifact on every run), plus
+  the first screen at 375 px as a phone shows it. In the full-page shots the
+  phone's sticky Blow full time bar appears where the first screen ended.
   Reduced motion keeps the screenshots still.
 */
 import { appReady, expect, expectNoHorizontalScroll, expectNoSeriousAxe, test } from "./fixtures";
@@ -44,6 +46,10 @@ for (const viewport of VIEWPORTS) {
         await settled(page, screen.view);
         await expectNoHorizontalScroll(page);
         await expectNoSeriousAxe(page, `${screen.name} ${viewport.width} ${theme}`);
+        if (viewport.width === 375) {
+          /* What a phone shows before any scrolling, sticky bar included. */
+          await page.screenshot({ path: `screenshots/${screen.name}-${viewport.width}-${theme}-fold.png` });
+        }
         await page.screenshot({ path: `screenshots/${screen.name}-${viewport.width}-${theme}.png`, fullPage: true });
       });
     }

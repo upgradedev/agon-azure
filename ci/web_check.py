@@ -66,7 +66,8 @@ UNSAFE_JS = (
     (re.compile(r"document\.write"), "document.write is forbidden"),
     (re.compile(r"\beval\s*\("), "eval is blocked by the CSP"),
     (re.compile(r"\bnew\s+Function\s*\("), "new Function is blocked by the CSP"),
-    (re.compile(r"setAttribute\(\s*['\"](?:style|on\w+)['\"]"), "style or handler attributes are blocked by the CSP"),
+    # Quotes, apostrophes or backticks: a minifier may print every string literal as a template.
+    (re.compile(r"setAttribute\(\s*['\"`](?:style|on\w+)['\"`]"), "style or handler attributes are blocked by the CSP"),
     (re.compile(r"set(?:Timeout|Interval)\(\s*['\"`]"), "string timers are blocked by the CSP"),
 )
 
@@ -83,6 +84,7 @@ UNSAFE_JS = (
 VENDOR_CHUNK = re.compile(r"^assets/vendor-[A-Za-z0-9_-]+\.js$")
 VENDOR_SINKS: tuple[tuple[str, int, str], ...] = (
     (".innerHTML", 3, "react-dom: dangerouslySetInnerHTML (two code paths) and a <script> element made through a div; the console uses neither"),
+    ("setAttribute(`oninput`", 1, "react-dom: a feature test for the input event, run only when 'oninput' in document is false, never in a current browser"),
 )
 
 # Only the WCAG 2.2 AA thresholds are accepted, so a row cannot pass by

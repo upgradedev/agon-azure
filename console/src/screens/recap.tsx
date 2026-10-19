@@ -106,7 +106,7 @@ export function Recap({ active, route, loaded, error, blownSeed }: Props) {
   const [open, setOpen] = useState<Open | null>(null);
   const tabRefs = useRef(new Map<string, HTMLButtonElement>());
   const opener = useRef<HTMLElement | null>(null);
-  const sentenceRefs = useRef(new Map<number, HTMLButtonElement>());
+  const sentenceRefs = useRef(new Map<number, HTMLElement>());
   const panelId = useId();
   const tabIdBase = useId().replace(/[^A-Za-z0-9_-]/g, "");
 
@@ -247,11 +247,11 @@ export function Recap({ active, route, loaded, error, blownSeed }: Props) {
                   {loaded.manifest.attested_scope.attested.includes(current.meta.file) ? "Attested by the officer" : "Gate-cleared only"}
                 </Badge>
               </div>
-              <p className="sr-only">Each sentence below is a button that opens why it says what it says.</p>
+              <p className="sr-only">Each sentence below is a link that opens why it says what it says.</p>
               <p lang={current.data.language} className="prose-reading">
                 {current.data.sentences.map((sentence, index) => (
                   <span key={sentence.sentence_id}>
-                    <button
+                    <a
                       ref={(node) => {
                         if (node) {
                           sentenceRefs.current.set(index, node);
@@ -259,19 +259,20 @@ export function Recap({ active, route, loaded, error, blownSeed }: Props) {
                           sentenceRefs.current.delete(index);
                         }
                       }}
-                      type="button"
+                      href={hrefFor("recap", run.run_id, { s: sentence.sentence_id })}
                       aria-haspopup="dialog"
                       onClick={(event) => {
+                        event.preventDefault();
                         opener.current = event.currentTarget;
                         setOpen({ edition: current.meta.edition, index });
                       }}
                       className={cn(
-                        "inline rounded-sm text-left decoration-line-strong decoration-dotted decoration-2 underline-offset-[6px] transition-colors",
-                        "hover:bg-accent-bg hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
+                        "rounded-sm text-fg decoration-line-strong decoration-dotted decoration-1 underline-offset-[6px] transition-colors",
+                        "hover:bg-accent-bg hover:decoration-primary hover:decoration-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
                       )}
                     >
                       {sentence.text}
-                    </button>{" "}
+                    </a>{" "}
                   </span>
                 ))}
               </p>

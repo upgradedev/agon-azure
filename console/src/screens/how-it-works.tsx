@@ -6,7 +6,7 @@
   in a sheet.
 */
 import { useRef, useState } from "react";
-import { ArrowDown, ChevronRight } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { Card, CardBody, CardHeader, CardTitle } from "../components/ui/card";
 import { Badge, type BadgeTone } from "../components/ui/badge";
 import { Dialog } from "../components/ui/dialog";
@@ -77,14 +77,21 @@ export function HowItWorks({ active }: { active: boolean }) {
       />
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_26rem]">
-        <ol className="space-y-2" aria-label="Pipeline stages">
+        <ol aria-label="Pipeline stages" className="rounded-xl border border-line bg-surface p-4 shadow-card sm:p-5">
           {groups.map((group, gi) => (
-            <li key={group.stage}>
-              <div className="rounded-xl border border-line bg-surface p-3 shadow-card">
-                <p className="mb-2 px-1 text-xs font-semibold tracking-wide text-muted uppercase">
-                  {gi + 1}. {group.stage}
+            <li key={group.stage} className="grid grid-cols-[2rem_minmax(0,1fr)] gap-x-3">
+              <div className="flex flex-col items-center" aria-hidden="true">
+                <span className="inline-flex size-8 shrink-0 items-center justify-center rounded-full border border-line-strong bg-surface text-xs font-semibold text-fg tabular-nums">
+                  {gi + 1}
+                </span>
+                {gi < groups.length - 1 ? <span className="my-1 w-px flex-1 bg-line" /> : null}
+              </div>
+              <div className={cn("min-w-0", gi < groups.length - 1 ? "pb-5" : "")}>
+                <p className="mt-1.5 text-xs font-semibold tracking-wide text-muted uppercase">
+                  <span className="sr-only">Stage {gi + 1}: </span>
+                  {group.stage}
                 </p>
-                <ul className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                <ul className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                   {group.nodes.map((n) => {
                     const isSelected = n.id === node.id;
                     return (
@@ -119,11 +126,6 @@ export function HowItWorks({ active }: { active: boolean }) {
                   })}
                 </ul>
               </div>
-              {gi < groups.length - 1 ? (
-                <div className="flex justify-center py-1" aria-hidden="true">
-                  <ArrowDown className="size-4 text-line-strong" />
-                </div>
-              ) : null}
             </li>
           ))}
         </ol>

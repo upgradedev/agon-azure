@@ -150,6 +150,22 @@ const MOMENT_MARK: Record<Moment["kind"], string> = {
   sub: "fill-info",
 };
 
+/* The full club name, shortened to its three-letter code on a phone; screen
+   readers always hear the full name. */
+function ClubName({ name, short, className }: { name: string; short: string | null; className?: string }) {
+  if (!short) {
+    return <span className={cn("truncate text-sm font-medium text-fg", className)}>{name}</span>;
+  }
+  return (
+    <span className={cn("min-w-0 truncate text-sm font-medium text-fg", className)}>
+      <span className="sm:hidden" aria-hidden="true">
+        {short}
+      </span>
+      <span className="sr-only sm:not-sr-only">{name}</span>
+    </span>
+  );
+}
+
 interface Props {
   active: boolean;
   runs: RunsData | null;
@@ -464,7 +480,7 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
                 <svg viewBox="0 0 12 12" className="size-3 shrink-0" aria-hidden="true" focusable="false">
                   {homeKit ? <circle cx="6" cy="6" r="4.5" fill={homeKit.kit_primary_hex} stroke={homeKit.kit_secondary_hex} strokeWidth="1.5" /> : null}
                 </svg>
-                <span className="truncate text-sm font-medium text-fg">{homeName}</span>
+                <ClubName name={homeName} short={homeKit?.short ?? null} />
                 <span className="ml-auto text-2xl font-semibold tabular-nums text-fg">{view ? view.score.home : 0}</span>
               </p>
               <p className="flex flex-col items-center px-2 text-center">
@@ -475,7 +491,7 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
               </p>
               <p className="flex min-w-0 items-center gap-2">
                 <span className="text-2xl font-semibold tabular-nums text-fg">{view ? view.score.away : 0}</span>
-                <span className="ml-auto truncate text-right text-sm font-medium text-fg">{awayName}</span>
+                <ClubName name={awayName} short={awayKit?.short ?? null} className="ml-auto text-right" />
                 <svg viewBox="0 0 12 12" className="size-3 shrink-0" aria-hidden="true" focusable="false">
                   {awayKit ? <circle cx="6" cy="6" r="4.5" fill={awayKit.kit_primary_hex} stroke={awayKit.kit_secondary_hex} strokeWidth="1.5" /> : null}
                 </svg>
