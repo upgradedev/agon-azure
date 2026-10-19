@@ -71,11 +71,14 @@ Known quirk: a `sub` event is stored at `(525, 0)`, a fixed marker on the `y_dm 
 substituting team's frame. In the fixed frame the two clubs' substitutions therefore appear on
 opposite touchlines. It is a marker, not a location of play.
 
+A planned substitution has no qualifier. An injury replacement (only in storyline matches, section
+5) has `qualifier` `injury`; `validate_event` allows exactly these two.
+
 **Brief-field mapping table and tracking data.** Not built yet.
 
 ## 3. Collection process
 
-The engine (`agon.synth.engine`, v0) is a semi-Markov possession-chain simulator on a 16 by 12
+The engine (`agon.synth.engine`, `synth-v0.2`) is a semi-Markov possession-chain simulator on a 16 by 12
 zone grid. Club style vectors, player attributes, score effects and a simple momentum term drive
 the choice between pass, carry and shot, the pressure rate and the foul rate.
 
@@ -83,6 +86,18 @@ Randomness comes from a counter-based integer RNG (`agon.synth.rng`, splitmix64 
 (seed, match, stream, possession, draw, replicate). Each concern has its own named stream
 (`StreamId`), so adding draws to one concern never shifts another. Sampling uses integer
 thresholds in parts per million, with no `exp`, `log` or `pow` in the sampling path.
+
+**Knobs and their readers.** Each style knob is read in the engine and moves its metric in the
+stated direction, checked by `python -m agon.synth.sensitivity` (metric M4, all clubs set to 200
+then 800 on the same seeds): press height raises pressures per on-ball action; directness raises
+the share of passes gaining 13 m or more and lowers pass completion; width raises the mean
+lateral pass distance. Self-measured on seeds 1 to 8, `synth-v0.2`: 4 of 4 checks pass, about 11 s
+total. A test cuts every reader and requires all four checks to fail.
+
+**Streams added in v0.2.** `STORYLINE` (20) draws storyline plans and the injured player;
+`FIXTURES` (21) draws fixture choices. Both use match keys outside the fixture range 1 to 30, so a
+plain match draws exactly what it drew before; a test pins that a match with an empty intervention
+list is byte-identical to a plain one.
 
 ## 4. Calibration
 
@@ -157,9 +172,41 @@ term. We did not retune on the held-out seeds, because that would turn them into
 The next fit must run on calibration seeds only, and the result is reported here as it stands.
 On the calibration seeds 1 to 200 at match index 0 the same command gives 20 of 22.
 Total wall time for the 200 held-out matches: about 41 s on this machine (printed on stderr).
+
 ## 5. Labels
 
-Not built yet (turning-point labels, storyline labels, planted-error manifests).
+**Storyline labels (metric M3).** Five storylines are injected as labelled interventions, one per
+storyline match: red card, tactical shift (press height up), late collapse (the opponent's scoring
+chance multiplied), goalkeeper heroics (part of each chance becomes a save) and injury stoppage
+(a replacement and added time). `agon.referee.storylines.plan_storyline(seed, kind)` picks the side,
+minute and size from the seed. The engine applies the plan and keeps a ledger
+(`MatchResult.applied`) that never enters the meta, the event log or the manifest; a test checks
+that a storyline match's meta and events never name the storyline.
+
+Each label carries the activation clock, an anchor event id (the red card, the first event after
+the shift, the first goal conceded in a collapse, the first save, the injury replacement), the
+measured effect and a `turning_point` flag set by one written rule (for example a collapse is a
+turning point only if a goal followed). Labels are derived twice: from the engine's ledger, and
+again from the plan, the meta and the event log alone, with the injury's baseline added time
+recomputed from the RNG. `python -m agon.referee.verify_labels --seeds 1,2,3` compares the two;
+`--mutate` corrupts every label in one field and must exit 1. Self-measured on seeds 1, 2, 3:
+15 of 15 labels re-derived identically; with `--mutate`, 15 of 15 rejected and exit 1; about 2.5 s
+each. Not every storyline takes effect: in seed 3 the late collapse produced no goal, and in the
+separate seed 3 heroics match the keeper made only 2 saves, so both labels say `turning_point` false.
+
+The referee package is reachable only from CI and evidence tooling: `ci/check_referee_isolation.py`
+parses every module under `src/agon` outside `src/agon/referee` and fails on any import of it.
+
+Not built: the coupled counterfactual twins (spec P1, metric M5), which would give causal
+turning-point labels for any moment rather than only for injected storylines.
+
+**Planted-error and adversarial fixtures.** `python -m agon.synth.fixtures --seeds 1,2,3
+--print-hash` lists, per seed: three wrong-number sentences in EN, EL, ES and FR with the planted
+value, the true value and the event ids proving it; a scorer correction (one goal reassigned to an
+outfield teammate on the pitch at that moment, `published` for seeds in `PUBLISHED_SEEDS`, which is
+provisionally 1, 2, 3); a player name carrying an instruction string (planted only in a world
+copy); and a free-text note naming a real club, drawn at run time from the blocklist. Goal minutes
+are stated as the minute being played (event `minute` plus one).
 
 ## 6. Uses
 
@@ -173,14 +220,20 @@ Seeds are stored, not generated files. To regenerate and hash:
 ```
 python -m agon.synth.manifest --seeds 1,2,3 --print-hash
 python -m agon.synth.manifest --seeds 1,2,3 --out build/synth
+python -m agon.synth.fixtures --seeds 1,2,3 --out build/fixtures.json
+python -m agon.referee.storylines --seeds 1,2,3 --out build/labels.ndjson
 ```
 
+The fixtures manifest contains a real club name (the bait) and instruction strings on purpose.
+It is test input for the gates and must never be copied into a deployed page.
+
 The per-seed hash is sha256 over the canonical JSON of the seed's world, match meta and events. The
-CI workflow `.github/workflows/determinism.yml` compares these hashes between ubuntu-latest and
-windows-latest. The hash values of record come from that CI run, not from this card.
+CI workflow `.github/workflows/determinism.yml` compares these hashes, the fixtures manifest and the
+storyline labels between ubuntu-latest and windows-latest. The hash values of record come from that CI run, not from this card.
 
 ## 8. Maintenance and known gaps
 
 - Engine constants fitted by hand on calibration seeds; M2 held-out is 18 of 22 (section 4).
-- No tracking data and no video.
+- No tracking data and no video, so the sprint and distance bands cannot be measured.
+- Storyline labels cover injected interventions only; counterfactual twins are not built.
 - The sub marker location described in section 2.
