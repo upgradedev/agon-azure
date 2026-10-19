@@ -82,7 +82,9 @@ index.json
     desk_editor_flags  [{"sentence_id", "text"}]
     approval           {"status": awaiting | approved | changes_requested,
                         "approved_at": "YYYY-MM-DDTHH:MM:SSZ" or null,
-                        "approver_role": str or null, "channel": str or null}
+                        "approver_role": str or null, "channel": str or null,
+                        "approved_bundle_sha256": the bundle.sha256 that was
+                        approved, or null}
 
 Rules the checker (agon.webrun.validate_run) and the browser
 (AgonCore.validateRun) both enforce, from one case list
@@ -91,7 +93,11 @@ Rules the checker (agon.webrun.validate_run) and the browser
    approved. ci/web_check.py also refuses a design_preview run without it,
    and the readiness gate fails if the live page or run file lacks it.
 2. approval.status "approved" if and only if state is APPROVED or PUBLISHED,
-   with approved_at, approver_role and channel set.
+   with approved_at, approver_role and channel set, and with
+   approved_bundle_sha256 equal to bundle.sha256. A run that is not approved
+   has approved_bundle_sha256 null. The browser shows the approved edition
+   label only when the two hashes match (AgonRuns.isApproved), so an
+   approval can never float free of the hash Verify recomputes.
 3. Every injury, referee, quote and transfer sentence has a Confirm row.
 
 <run_id>/edition-<id>.json

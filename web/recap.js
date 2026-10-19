@@ -8,8 +8,9 @@
   claim types, gate verdicts, author tag and whether the officer attests it.
 
   The edition label says "AI-drafted ... approved by the club media office
-  at <time>" only when the run is an approved pipeline run
-  (AgonRuns.editionLabel); the design preview says what it is instead.
+  at <time>" only when the run is an approved pipeline run whose approval
+  names its bundle hash (AgonRuns.isApproved, AgonRuns.editionLabel); the
+  design preview says what it is instead.
 
   Tabs follow the ARIA tabs pattern: arrow keys, Home and End move between
   tabs, and each panel carries the lang of its edition.
@@ -211,7 +212,7 @@
     state.loaded = loaded;
     setText(el.match, data.matchLine(run));
     setText(el.label, runs.editionLabel(run));
-    el.label.classList.toggle("edition-label--approved", run.approval.status === "approved" && run.provenance === "pipeline");
+    el.label.classList.toggle("edition-label--approved", runs.isApproved(run));
     renderTabs(run);
     select(Object.prototype.hasOwnProperty.call(loaded.editions, state.edition) ? state.edition : run.editions[0].edition, false);
     openFromQuery(query);

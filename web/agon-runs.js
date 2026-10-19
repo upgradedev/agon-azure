@@ -345,8 +345,9 @@
       problems.push("desk_editor_flags must be a list of {sentence_id, text}");
     }
     var approval = run.approval;
-    if (!keysAre(approval, ["approved_at", "approver_role", "channel", "status"]) || APPROVAL_STATUSES.indexOf(approval.status) === -1) {
-      problems.push("approval must be {status, approved_at, approver_role, channel} with a known status");
+    if (!keysAre(approval, ["approved_at", "approved_bundle_sha256", "approver_role", "channel", "status"]) ||
+        APPROVAL_STATUSES.indexOf(approval.status) === -1) {
+      problems.push("approval must be {status, approved_at, approver_role, channel, approved_bundle_sha256} with a known status");
     } else {
       var approved = approval.status === "approved";
       if (approved !== (run.state === "APPROVED" || run.state === "PUBLISHED")) {
@@ -361,6 +362,13 @@
       }
       if (approved && provenance === "design_preview") {
         problems.push("a design preview run can never be approved");
+      }
+      var stated = isObject(bundle) ? bundle.sha256 : undefined;
+      if (approved && (approval.approved_bundle_sha256 === null || approval.approved_bundle_sha256 !== stated)) {
+        problems.push("an approved run must name the approved bundle: approved_bundle_sha256 must equal bundle.sha256");
+      }
+      if (!approved && approval.approved_bundle_sha256 !== null) {
+        problems.push("a run that is not approved has no approved_bundle_sha256");
       }
     }
     return problems;
@@ -514,14 +522,27 @@
     return m[4] + ":" + m[5] + " UTC on " + m[1] + "-" + m[2] + "-" + m[3];
   }
 
+  /* Approved means a pipeline run whose approval names the very bundle hash
+     the run states (the hash Verify recomputes). A status of "approved" on
+     its own is never enough, even if a caller skipped validateRun. */
+  function isApproved(run) {
+    return isObject(run) && run.provenance === "pipeline" && isObject(run.approval) && isObject(run.bundle) &&
+      run.approval.status === "approved" && typeof run.bundle.sha256 === "string" &&
+      SHA256_HEX.test(run.bundle.sha256) && run.approval.approved_bundle_sha256 === run.bundle.sha256;
+  }
+
   /* The edition label. The approved wording appears only on an approved
-     pipeline run; everything else says what it is. */
+     pipeline run whose approval matches its bundle hash; everything else
+     says what it is. */
   function editionLabel(run) {
-    if (run.provenance === "pipeline" && run.approval.status === "approved") {
+    if (isApproved(run)) {
       return APPROVED_LABEL_PREFIX + formatUtc(run.approval.approved_at) + ".";
     }
     if (run.provenance === "design_preview") {
       return "Not approved. " + DESIGN_PREVIEW_LABEL + " No AI wrote these editions and no media officer has approved them.";
+    }
+    if (run.approval.status === "approved") {
+      return "AI-drafted. Numbers and names checked by code. Not approved: the approval on file does not name this bundle hash.";
     }
     if (run.approval.status === "changes_requested") {
       return "AI-drafted. Numbers and names checked by code. The club media office asked for changes, so this edition is not approved.";
@@ -630,6 +651,7 @@
     stateWords: stateWords,
     shortHash: shortHash,
     approveAttempt: approveAttempt,
+    isApproved: isApproved,
     notDeployedMessage: notDeployedMessage,
     attestation: attestation,
     formatUtc: formatUtc,

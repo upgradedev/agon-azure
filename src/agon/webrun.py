@@ -88,7 +88,9 @@ RUN_KEYS = frozenset({
     "sentence_gates", "confirm_rows", "desk_editor_flags", "approval",
 })
 EDITION_KEYS = frozenset({"edition", "language", "name", "file"})
-APPROVAL_KEYS = frozenset({"status", "approved_at", "approver_role", "channel"})
+# approved_bundle_sha256 names the exact bundle the media officer approved. It must equal bundle.sha256
+# on an approved run and be null otherwise, so "approved" can never float free of the hash Verify checks.
+APPROVAL_KEYS = frozenset({"status", "approved_at", "approver_role", "channel", "approved_bundle_sha256"})
 
 # ---------------------------------------------------------------- the hand-written sample
 
@@ -417,7 +419,10 @@ def build_sample_run(seed: int = SAMPLE_SEED) -> tuple[dict[str, Any], dict[str,
         "desk_editor_flags": [
             {"sentence_id": "en-05", "text": "The log shows the substitution, not the reason for it. A person must confirm the medical part."},
         ],
-        "approval": {"status": "awaiting", "approved_at": None, "approver_role": None, "channel": None},
+        "approval": {
+            "status": "awaiting", "approved_at": None, "approver_role": None, "channel": None,
+            "approved_bundle_sha256": None,
+        },
     }
     problems_run = validate_run(run)
     if problems_run:
@@ -646,7 +651,9 @@ def validate_run(run: Any) -> list[str]:
         problems.append("desk_editor_flags must be a list of {sentence_id, text}")
     approval = run["approval"]
     if not isinstance(approval, dict) or set(approval) != APPROVAL_KEYS or approval.get("status") not in APPROVAL_STATUSES:
-        problems.append("approval must be {status, approved_at, approver_role, channel} with a known status")
+        problems.append(
+            "approval must be {status, approved_at, approver_role, channel, approved_bundle_sha256} with a known status"
+        )
     else:
         approved = approval["status"] == "approved"
         if approved != (state in ("APPROVED", "PUBLISHED")):
@@ -658,6 +665,11 @@ def validate_run(run: Any) -> list[str]:
             problems.append("a run that is not approved has no approved_at")
         if approved and provenance == DESIGN_PREVIEW:
             problems.append("a design preview run can never be approved")
+        stated = bundle.get("sha256") if isinstance(bundle, dict) else None
+        if approved and (approval["approved_bundle_sha256"] is None or approval["approved_bundle_sha256"] != stated):
+            problems.append("an approved run must name the approved bundle: approved_bundle_sha256 must equal bundle.sha256")
+        if not approved and approval["approved_bundle_sha256"] is not None:
+            problems.append("a run that is not approved has no approved_bundle_sha256")
     return problems
 
 

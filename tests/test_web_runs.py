@@ -44,6 +44,12 @@ def _apply(run: dict, case: dict):
             target = target[key]
         if op.get("delete"):
             del target[op["path"][-1]]
+        elif "from" in op:
+            # copy a value already in the run (the bundle hash), so no case pins a hash
+            source = out
+            for key in op["from"]:
+                source = source[key]
+            target[op["path"][-1]] = copy.deepcopy(source)
         else:
             target[op["path"][-1]] = op["value"]
     return out
@@ -84,7 +90,9 @@ def test_sample_is_labelled_unapproved_and_awaiting():
     assert run["provenance"] == "design_preview"
     assert run["label"] == LABEL
     assert run["state"] == "AWAITING_APPROVAL"
-    assert run["approval"] == {"status": "awaiting", "approved_at": None, "approver_role": None, "channel": None}
+    assert run["approval"] == {
+        "status": "awaiting", "approved_at": None, "approver_role": None, "channel": None, "approved_bundle_sha256": None,
+    }
     assert [s["state"] for s in run["states"]] == ["DRAFT", "CHECKED", "SEALED", "AWAITING_APPROVAL"]
 
 
@@ -146,6 +154,8 @@ def test_run_cases_cover_the_honesty_rules():
     assert "a design preview run must carry the exact design preview label" in pinned
     assert "a design preview run can never be approved" in pinned
     assert "every injury, referee, quote and transfer sentence needs a Confirm row" in pinned
+    assert "an approved run must name the approved bundle: approved_bundle_sha256 must equal bundle.sha256" in pinned
+    assert "a run that is not approved has no approved_bundle_sha256" in pinned
     assert sum(1 for c in RUN_CASES if not c["valid"]) >= 20
 
 

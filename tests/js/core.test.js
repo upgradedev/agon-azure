@@ -321,6 +321,13 @@ function applyCase(run, c) {
     const last = op.path[op.path.length - 1];
     if (op.delete) {
       delete target[last];
+    } else if (Object.prototype.hasOwnProperty.call(op, "from")) {
+      // copy a value already in the run (the bundle hash), so no case pins a hash
+      let source = out;
+      for (const key of op.from) {
+        source = source[key];
+      }
+      target[last] = JSON.parse(JSON.stringify(source));
     } else {
       target[last] = op.value;
     }
@@ -422,15 +429,50 @@ test("the approved edition label appears only on an approved pipeline run", () =
   approved.label = "Recorded run, 2026-10-23, commit 0123abc";
   approved.state = "APPROVED";
   approved.states[3].state = "APPROVED";
-  approved.approval = { status: "approved", approved_at: "2026-10-23T16:05:00Z", approver_role: "media_officer", channel: "teams" };
+  approved.approval = {
+    status: "approved", approved_at: "2026-10-23T16:05:00Z", approver_role: "media_officer", channel: "teams",
+    approved_bundle_sha256: run.bundle.sha256
+  };
   assert.deepEqual(runsApi.validateRun(approved), []);
+  assert.equal(runsApi.isApproved(approved), true);
   assert.equal(runsApi.editionLabel(approved),
     "AI-drafted. Numbers and names checked by code. Headline report and flagged sentences approved by the club media office at 16:05 UTC on 2026-10-23.");
   const awaiting = JSON.parse(JSON.stringify(approved));
   awaiting.state = "AWAITING_APPROVAL";
   awaiting.states[3].state = "AWAITING_APPROVAL";
-  awaiting.approval = { status: "awaiting", approved_at: null, approver_role: null, channel: null };
+  awaiting.approval = { status: "awaiting", approved_at: null, approver_role: null, channel: null, approved_bundle_sha256: null };
   assert.equal(runsApi.editionLabel(awaiting).indexOf(runsApi.APPROVED_LABEL_PREFIX), -1);
+});
+
+test("the approved label is withheld when the approval names another bundle, even without validateRun", () => {
+  const run = sampleRun();
+  const approved = JSON.parse(JSON.stringify(run));
+  approved.provenance = "pipeline";
+  approved.label = "Recorded run, 2026-10-23, commit 0123abc";
+  approved.state = "APPROVED";
+  approved.states[3].state = "APPROVED";
+  approved.approval = {
+    status: "approved", approved_at: "2026-10-23T16:05:00Z", approver_role: "media_officer", channel: "teams",
+    approved_bundle_sha256: "0".repeat(64)
+  };
+  assert.ok(runsApi.validateRun(approved).length > 0);
+  assert.equal(runsApi.isApproved(approved), false);
+  assert.equal(runsApi.editionLabel(approved).indexOf(runsApi.APPROVED_LABEL_PREFIX), -1);
+  assert.match(runsApi.editionLabel(approved), /does not name this bundle hash/);
+  for (const missing of [null, undefined]) {
+    const bare = JSON.parse(JSON.stringify(approved));
+    if (missing === undefined) {
+      delete bare.approval.approved_bundle_sha256;
+    } else {
+      bare.approval.approved_bundle_sha256 = missing;
+    }
+    assert.equal(runsApi.isApproved(bare), false);
+    assert.equal(runsApi.editionLabel(bare).indexOf(runsApi.APPROVED_LABEL_PREFIX), -1);
+  }
+  const preview = JSON.parse(JSON.stringify(run));
+  preview.approval.status = "approved";
+  preview.approval.approved_bundle_sha256 = run.bundle.sha256;
+  assert.equal(runsApi.isApproved(preview), false);
 });
 
 test("the Why drawer lists event ids, claim types, gate verdicts and the author tag", () => {
