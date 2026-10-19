@@ -245,6 +245,9 @@ resource teamsFlow 'Microsoft.Logic/workflows@2019-05-01' = {
                 report: {
                   type: 'string'
                 }
+                flags: {
+                  type: 'array'
+                }
                 gate_cleared: {
                   type: 'string'
                 }
@@ -353,10 +356,26 @@ resource teamsFlow 'Microsoft.Logic/workflows@2019-05-01' = {
             actions: {}
           }
         }
+        Flag_lines: {
+          type: 'Select'
+          runAfter: {
+            Destination_toggles: [
+              'Succeeded'
+            ]
+          }
+          inputs: {
+            from: '@coalesce(triggerBody()?[\'flags\'], json(\'[]\'))'
+            select: {
+              type: 'TextBlock'
+              wrap: true
+              text: '@{item()}'
+            }
+          }
+        }
         Erratum_notice: {
           type: 'Compose'
           runAfter: {
-            Destination_toggles: [
+            Flag_lines: [
               'Succeeded'
             ]
           }
@@ -451,6 +470,16 @@ resource teamsFlow 'Microsoft.Logic/workflows@2019-05-01' = {
               {
                 type: 'Container'
                 items: '@if(empty(body(\'Confirm_rows\')), createArray(json(\'{"type":"TextBlock","wrap":true,"isSubtle":true,"text":"No sentence on this bundle needs a tick."}\')), body(\'Confirm_rows\'))'
+              }
+              {
+                type: 'TextBlock'
+                wrap: true
+                weight: 'Bolder'
+                text: 'Flags raised by the checks and the Desk Editor'
+              }
+              {
+                type: 'Container'
+                items: '@if(empty(body(\'Flag_lines\')), createArray(json(\'{"type":"TextBlock","wrap":true,"isSubtle":true,"text":"No flag was raised on this bundle."}\')), body(\'Flag_lines\'))'
               }
               {
                 type: 'TextBlock'

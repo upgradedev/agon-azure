@@ -49,7 +49,7 @@ from agon.governance.recompute import score_after
 TEAMS_KEYS: frozenset[str] = frozenset({
     "run_id", "bundle_sha256", "nonce", "title", "match_line", "expires_at", "editions", "attested",
     "gate_cleared", "confirm_rows", "destinations", "evidence_url", "published_url", "verify_url",
-    "parent_message_id", "erratum_note", "report",
+    "parent_message_id", "erratum_note", "report", "flags",
 })
 TEAMS_REQUIRED: frozenset[str] = frozenset({"run_id", "bundle_sha256", "nonce", "title", "published_url"})
 OUTLOOK_KEYS: frozenset[str] = frozenset({"run_id", "bundle_sha256", "nonce", "subject", "summary", "confirm_rows", "verify_url", "report"})
@@ -99,6 +99,7 @@ class CardInputs:
     manifest: dict[str, Any]
     record: MatchRecord
     report_en: dict[str, Any] | None
+    card: dict[str, Any] | None = None
 
 
 def load_inputs(store: Any, artifacts: Any, record: MatchRecord, bundle_sha256: str) -> CardInputs:
@@ -120,7 +121,14 @@ def load_inputs(store: Any, artifacts: Any, record: MatchRecord, bundle_sha256: 
         if raw is None:
             raise CardError("report-en.json is missing from the artifact store")
         report_en = json.loads(raw.decode("utf-8"))
-    return CardInputs(manifest=manifest, record=record, report_en=report_en)
+    card = None
+    card_entry = manifest["artifacts"].get("card.json")
+    if card_entry is not None:
+        raw_card = artifacts.get(card_entry["sha256"])
+        if raw_card is None:
+            raise CardError("card.json is missing from the artifact store")
+        card = json.loads(raw_card.decode("utf-8"))
+    return CardInputs(manifest=manifest, record=record, report_en=report_en, card=card)
 
 
 def _score_line(record: MatchRecord) -> tuple[str, str]:
@@ -192,6 +200,33 @@ def report_text(report_en: Mapping[str, Any] | None, limit: int) -> str | None:
     return text
 
 
+FLAG_LINES_MAX = 8
+
+
+def flag_lines(card: Mapping[str, Any] | None, limit: int) -> list[str]:
+    """The sealed flags (gates, Desk Editor, fallbacks) as plain lines for the card.
+
+    A flag never becomes a Confirm row and never changes what the officer must tick; it is shown
+    so the officer reads it before approving. More than FLAG_LINES_MAX flags end with a line that
+    says how many more are in the bundle, never silently.
+    """
+    if card is None:
+        return []
+    lines: list[str] = []
+    flags = [f for f in card.get("flags", []) if isinstance(f, Mapping)]
+    for flag in flags[:FLAG_LINES_MAX]:
+        who = str(flag.get("by") or "check")
+        what = str(flag.get("detail") or flag.get("code") or "flag")
+        sentence = flag.get("sentence_id")
+        line = f"{who}{' on ' + str(sentence) if sentence else ''}: {what}"
+        if len(line) > limit:
+            line = line[: limit - 3].rstrip() + "..."
+        lines.append(line)
+    if len(flags) > FLAG_LINES_MAX:
+        lines.append(f"{len(flags) - FLAG_LINES_MAX} more flags are in the sealed card.json.")
+    return lines
+
+
 def _destinations(request: ApprovalRequest, manifest: Mapping[str, Any]) -> list[dict[str, str]]:
     """The destinations this bundle offers, as the card's {id, label} toggles; [] means feed only.
 
@@ -252,6 +287,9 @@ def teams_payload(request: ApprovalRequest, inputs: CardInputs, match_ref: Mappi
         report = report_text(inputs.report_en, limit * REPORT_CHARS_PER_ROW_CHAR)
         if report is not None:
             payload["report"] = report
+        flags = flag_lines(inputs.card, limit)
+        if flags:
+            payload["flags"] = flags
         if context.site_url.startswith("https://"):
             payload["evidence_url"] = context.site_url.rstrip("/") + "/#/newsroom"
         return payload

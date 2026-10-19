@@ -155,7 +155,7 @@ export const PIPELINE: PipelineNode[] = [
     status: "ci",
     statusText: "In the repo, tested in CI.",
     summary:
-      "Flags the sentences code cannot check, such as a medical assessment, so a person confirms them on the approval card.",
+      "Challenges claims code cannot check, such as which moment turned the match, and adds flags the officer reads on the approval card; it never removes a flag and never changes which sentences the officer must tick.",
     evidence: [{ kind: "file", label: "The desk editor step", path: "src/agon/fleet/workflow.py", line: 141, snippet: "class DeskEditorExecutor(" }],
   },
   {

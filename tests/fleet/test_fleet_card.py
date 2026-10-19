@@ -136,6 +136,10 @@ def test_the_teams_payload_is_filled_from_the_sealed_bundle(sealed_run):
     assert payload["published_url"] == f"{CONTEXT.feed_base_url}{ref.request.bundle_sha256}/manifest.json"
     assert payload["destinations"] == [{"id": d["id"], "label": d["label"]} for d in ref.request.destinations]
     assert len(payload["destinations"]) == len(inputs.manifest["destinations"]) == 6
+    # Every sealed flag reaches the card as a line; a flag never becomes a Confirm row.
+    expected_flags = card.flag_lines(inputs.card, card.ROW_TEXT_MAX)
+    assert payload.get("flags", []) == expected_flags
+    assert inputs.card is not None and len(expected_flags) == min(len(inputs.card.get("flags", [])), card.FLAG_LINES_MAX) + (len(inputs.card.get("flags", [])) > card.FLAG_LINES_MAX)
     # The officer reads the exact English report they attest (flows.bicep `report`).
     assert payload["report"] == " ".join(row["text"].strip() for row in inputs.report_en["sentences"] if row["text"].strip())
     assert len(json.dumps(payload).encode("utf-8")) < card.MAX_PAYLOAD_BYTES
@@ -286,3 +290,18 @@ def test_the_report_text_is_shortened_out_loud_never_silently():
     assert short.startswith("A" * 20) and short.endswith("[shortened to fit the card; the full report is in the evidence link]")
     assert card.report_text(None, 1000) is None
     assert card.report_text({"sentences": [{"text": "  "}]}, 1000) is None
+
+
+def test_flags_reach_the_card_as_lines_and_never_silently_drop():
+    sealed = {"flags": [{"by": "desk_editor", "code": "desk_flag", "sentence_id": "s2", "detail": "the red card is called the turning point"},
+                        {"by": "factgate", "code": "factgate_retry", "detail": "sent back to the Writer once"}]}
+    assert card.flag_lines(sealed, 400) == [
+        "desk_editor on s2: the red card is called the turning point",
+        "factgate: sent back to the Writer once",
+    ]
+    many = {"flags": [{"by": "check", "detail": f"flag {i}"} for i in range(card.FLAG_LINES_MAX + 3)]}
+    lines = card.flag_lines(many, 400)
+    assert len(lines) == card.FLAG_LINES_MAX + 1 and lines[-1] == "3 more flags are in the sealed card.json."
+    assert card.flag_lines(None, 400) == [] and card.flag_lines({"flags": []}, 400) == []
+    long = card.flag_lines({"flags": [{"by": "x", "detail": "y" * 500}]}, 60)
+    assert len(long[0]) == 60 and long[0].endswith("...")
