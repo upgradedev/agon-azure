@@ -616,6 +616,7 @@ def _print(line: Line) -> None:
 
 async def serve(config: WorkerConfig, args: argparse.Namespace) -> int:
     from agon.agents.foundry import PromptProvenanceError
+    from agon.agents.publish import PublishError
     from agon.fleet.checkpoints import CosmosRoleMissing
 
     def say(text: str) -> None:
@@ -633,8 +634,9 @@ async def serve(config: WorkerConfig, args: argparse.Namespace) -> int:
                 elif args.idle_exit and time.monotonic() - idle_since >= args.idle_exit:
                     return 0
                 await asyncio.sleep(args.poll_seconds)
-    except PromptProvenanceError as exc:
-        say(json.dumps({"agon": "fleet", "startup": "refused", "code": "prompt_provenance", "detail": redact(str(exc))[:600]}))
+    except (PromptProvenanceError, PublishError) as exc:
+        code = "prompt_provenance" if isinstance(exc, PromptProvenanceError) else "prompt_agent_publish"
+        say(json.dumps({"agon": "fleet", "startup": "refused", "code": code, "detail": redact(str(exc))[:600]}))
         return 3
     except CosmosRoleMissing as exc:
         say(json.dumps({"agon": "fleet", "startup": "refused", "code": "cosmos_role_missing", "detail": str(exc)[:300]}))
