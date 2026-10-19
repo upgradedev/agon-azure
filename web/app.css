@@ -1724,6 +1724,18 @@ main:focus {
   box-shadow: var(--shadow-1);
 }
 
+.acard__standin {
+  margin: calc(var(--space-4) * -1) calc(var(--space-4) * -1) 0;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border-strong);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  background: var(--notice-bg);
+  color: var(--notice-text);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-semibold);
+  line-height: var(--lh-snug);
+}
+
 .acard__head {
   display: flex;
   align-items: center;
