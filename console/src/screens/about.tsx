@@ -55,7 +55,7 @@ export function About({ active, runs }: { active: boolean; runs: RunsData | null
             </p>
             {recorded && shown ? (
               <p>
-                The Newsroom Wall, the stand-in approval card and the recap first show a recorded run, labelled on every screen: {shown.label}.
+                The Newsroom Wall, the stand-in approval card and the recap open on a recorded run, labelled on every screen: {shown.label}.
                 It was exported from the bundle the pipeline sealed and the club media office approved, and Verify recomputes its hash and every
                 file the Publisher published. The hand-written sample stays listed after it, labelled: {DESIGN_PREVIEW_LABEL} No agent runs on
                 this site, this site publishes nothing and no account is needed.
