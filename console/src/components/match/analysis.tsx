@@ -9,6 +9,7 @@
   Every value is read from the match analysis (agon.webmatch, computed by
   agon.interpret and agon.governance.recompute); nothing is computed here.
 */
+import { useState } from "react";
 import { cn } from "../../lib/cn";
 import {
   KIND_WORDS,
@@ -38,6 +39,7 @@ export const METRIC_WORDS: Record<MetricId, string> = {
   shots: "Shots",
 };
 
+const STORY_LATEST = 6;
 const FAN_STATS = ["possession", "shots", "shots_on_target", "corners", "yellow_cards", "red_cards"];
 
 /* ------------------------------------------------------------- team stats */
@@ -252,9 +254,11 @@ function storySentence(mark: TimelineMark, file: MatchFile, names: Record<Side, 
 }
 
 export function Story({ file, names, nowSeq, club, player }: { file: MatchFile; names: Record<Side, string>; nowSeq: number | null; club: Side | null; player: string | null }) {
+  const [all, setAll] = useState(false);
   const big = file.timeline.filter((m) => m.kind === "goal" || m.kind === "red" || m.kind === "yellow" || m.kind === "sub" || m.big_chance);
   const past = nowSeq === null ? [] : big.filter((m) => m.seq <= nowSeq);
   const left = big.length - past.length;
+  const shown = all ? [...past].reverse() : [...past].reverse().slice(0, STORY_LATEST);
   return (
     <section aria-labelledby="h-story" className="min-w-0 rounded-xl border border-line bg-surface p-4 shadow-card lg:col-span-2">
       <h3 id="h-story" className="text-sm font-semibold text-fg">
@@ -263,7 +267,7 @@ export function Story({ file, names, nowSeq, club, player }: { file: MatchFile; 
       <p className="mt-1 text-xs leading-5 text-muted">Goals, cards, substitutions and big chances in plain words, as the replay reaches them.</p>
       {past.length ? (
         <ol className="mt-3 space-y-2">
-          {[...past].reverse().map((m) => {
+          {shown.map((m) => {
             const mine = club === m.side;
             const theirPlayer = player !== null && m.player === player;
             return (
@@ -284,6 +288,16 @@ export function Story({ file, names, nowSeq, club, player }: { file: MatchFile; 
       ) : (
         <p className="mt-3 text-sm text-muted">Nothing big has happened yet. Press Play, or move the match time.</p>
       )}
+      {past.length > STORY_LATEST ? (
+        <button
+          type="button"
+          onClick={() => setAll((v) => !v)}
+          aria-expanded={all}
+          className="mt-2 text-sm font-medium text-link underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+        >
+          {all ? `Show the latest ${STORY_LATEST}` : `Show all ${past.length} moments so far`}
+        </button>
+      ) : null}
       {left > 0 ? <p className="mt-2 text-xs text-muted">{left} more to come in the replay.</p> : null}
     </section>
   );

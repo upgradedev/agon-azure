@@ -23,6 +23,8 @@ test("fan mode tells the story in words, with the scoreboard, timeline and star 
   await openAtFullTime(page, 375, 812);
   await expect(page.getByRole("heading", { name: "The match, told for a fan" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "The story so far" })).toBeVisible();
+  await expect(page.getByText(/Goal for Pellmoor Harriers \(home\): Arno Quenrick scores\./)).toBeVisible();
+  await page.getByRole("button", { name: /Show all \d+ moments so far/ }).click();
   await expect(page.getByText(/Goal for Zennmark Town \(away\): Liro Ellow scores\./)).toBeVisible();
   await expect(page.getByRole("heading", { name: "Star player" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Territory" })).toHaveCount(0);

@@ -90,7 +90,8 @@ describe("every view of the analysis renders", () => {
   it("fan mode tells the story in words and keeps to simple stats", () => {
     const html = render({ mode: "fan" });
     expect(html).toContain("The story so far");
-    expect(html).toContain("Goal for Zennmark Town (away): Liro Ellow scores.");
+    expect(html).toContain("Goal for Pellmoor Harriers (home): Arno Quenrick scores.");
+    expect(html).toContain("Show all");
     expect(html).toContain("Star player");
     expect(html).not.toContain("PPDA (lower presses harder)");
     expect(html).not.toContain("Territory");
