@@ -27,7 +27,7 @@ from agon.fleet.contracts import (
 from agon.fleet.local import fake_deps
 from agon.governance import verifier
 from agon.governance.claims import Claim, Sentence
-from agon.governance.factgate import check_translation
+from agon.governance.factgate import GateReport, SentenceVerdict, check_translation
 from agon.governance.recompute import recompute_stat
 from agon.governance.seal import verify_manifest
 from agon.synth.fixtures import seed_fixtures
@@ -169,6 +169,38 @@ def test_a_retry_that_does_not_fix_the_number_becomes_a_flagged_template_line() 
     assert ref.writer_runs == 2, "the retry edge is bounded: one retry, never a third Writer call"
     assert {"factgate_retry", "factgate_template_line"} <= set(_codes(d))
     assert d.gate_verdicts["factgate"] == "pass"
+
+
+def test_a_second_pass_mismatch_seals_a_refused_bundle_and_issues_no_nonce(monkeypatch) -> None:
+    """Spec 4: a gate refusal is shown on the card, never a crash. Forces the second pass to fail."""
+    real = steps.run_factgate
+    calls = {"n": 0}
+
+    def second_pass_fails(sentences, facts):
+        calls["n"] += 1
+        report = real(sentences, facts)
+        if calls["n"] < 2:
+            return report
+        first, *rest = report.verdicts
+        broken = SentenceVerdict(first.sentence_id, first.language, "mismatch", ("forced by the test: second pass mismatch",))
+        return GateReport(status="mismatch", verdicts=(broken, *rest))
+
+    monkeypatch.setattr(steps, "run_factgate", second_pass_fails)
+    deps = _deps()
+    ref = run(run_to_request(deps, run_input()))
+    assert calls["n"] == 2, "no retry: the first pass was clean, so the second pass is the next call"
+    assert ref.request is None and ref.outcome is not None
+    assert ref.outcome.status == REFUSED_BY_GATE and ref.outcome.code == "bundle_refused_by_gate"
+    assert ref.sealed is not None and ref.outcome.bundle_sha256 == ref.sealed.bundle_sha256
+    manifest = _manifest_ok(deps, ref.sealed)
+    assert manifest["gate_verdicts"]["factgate"] == "mismatch"
+    card = json.loads(deps.artifacts.get(manifest["artifacts"]["card.json"]["sha256"]))
+    assert any("forced by the test" in r for r in card["gate_reasons"]["factgate"])
+    assert "factgate_mismatch" in [f["code"] for f in card["flags"]]
+    assert deps.store.keys(verifier.NONCES) == [], "a refused bundle never gets an Approve button"
+    assert [h["status"] for h in deps.ledger.history("run-1")] == [
+        stores.DRAFT, stores.CHECKED, stores.SEALED, stores.REFUSED,
+    ]
 
 
 def test_analyst_invented_event_ids_are_retried_once_then_fall_back() -> None:

@@ -302,12 +302,17 @@ async def factgate(deps: FleetDeps, draft: Draft) -> tuple[Literal["retry", "che
         d.triage.update({s.sentence_id: _route(s, None) for s in final if s.sentence_id in reasons})
         d.confirm_rows = sorted(sid for sid, row in d.triage.items() if row["route"] == "confirm")
     second = run_factgate(final, facts)
-    d.gate_verdicts["factgate"] = "pass" if second.passed else "mismatch"
-    d.gate_reasons["factgate"] = [f"{sid}: {r}" for sid, rs in sorted(reasons.items()) for r in rs] + [
-        f"{v.sentence_id}: {r}" for v in second.verdicts if not v.passed for r in v.reasons
-    ]
-    if second.passed:
-        deps.ledger.advance(d.run_id, stores.CHECKED, "fact gate passed")
+    verdict = "pass" if second.passed else "mismatch"
+    still_wrong = [f"{v.sentence_id}: {r}" for v in second.verdicts if not v.passed for r in v.reasons]
+    d.gate_verdicts["factgate"] = verdict
+    d.gate_reasons["factgate"] = [f"{sid}: {r}" for sid, rs in sorted(reasons.items()) for r in rs] + still_wrong
+    if still_wrong:
+        add_flag(d, "factgate_mismatch", "template lines still disagree with the event log: " + "; ".join(still_wrong), "factgate")
+    # CHECKED means "the Fact Gate ran and its verdict is recorded", not "it passed". A mismatch
+    # still seals, so the officer sees the refusal on the card; `prepare_approval` then refuses
+    # the bundle (SEALED to REFUSED) and no nonce is issued. The transition table is unchanged:
+    # no run reaches SEALED without passing through this step.
+    deps.ledger.advance(d.run_id, stores.CHECKED, f"fact gate {verdict}", factgate=verdict)
     return "checked", d
 
 
