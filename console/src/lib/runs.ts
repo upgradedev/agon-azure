@@ -6,17 +6,16 @@
   problem wording as agon.webrun.validate_run, and tests/runs.test.ts holds it
   to the shared case list tests/js/run_cases.json at the repository root.
 
-  One addition the Python side does not have yet: an optional `destinations`
-  key (owner decision 2026-10-19). A run without it is checked exactly as
-  before; a run with it must carry a well-formed list. agon.webrun still
-  refuses the key, so no run can ship with it until the pipeline side accepts
-  it; the stricter side wins at deploy time.
+  The optional `destinations` key follows agon.publish.webview (documented in
+  web/runs/README.txt): validateDestinations ports its destination_problems
+  rule by rule, with the same wording.
 */
 import type {
   BundleArtifact,
   BundleManifest,
   BundleState,
   ConfirmRow,
+  DeliveryKind,
   DestinationId,
   DestinationStatus,
   EditionMeta,
@@ -102,10 +101,34 @@ const RUN_KEYS = [
 ];
 const OPTIONAL_RUN_KEYS = ["destinations"];
 
-export const DESTINATION_IDS: DestinationId[] = ["club_site", "feeds", "instagram", "youtube", "newsroom_teams", "journalist_email"];
-const DESTINATION_STATUSES: DestinationStatus[] = ["selected", "not_selected", "published", "sent", "not_posted"];
+/* The destination registry (agon.governance.destinations): ids in order, their
+   text labels, and how each one receives the approved bytes in this build. */
+export const DESTINATION_LABELS: [DestinationId, string][] = [
+  ["club_site", "Club website (CMS feed)"],
+  ["feeds", "RSS and JSON Feed"],
+  ["instagram", "Instagram"],
+  ["youtube", "YouTube"],
+  ["newsroom_teams", "Internal newsroom (Teams)"],
+  ["journalist_email", "Journalist email digest"],
+];
+export const DESTINATION_IDS: DestinationId[] = DESTINATION_LABELS.map(([id]) => id);
+export const DELIVERY: Record<DestinationId, DeliveryKind> = {
+  club_site: "written",
+  feeds: "written",
+  instagram: "preview",
+  youtube: "preview",
+  newsroom_teams: "outbox",
+  journalist_email: "outbox",
+};
 /* Destinations that are previews only: nothing is ever posted to them. */
 export const PREVIEW_ONLY: DestinationId[] = ["instagram", "youtube"];
+const DESTINATION_STATUSES: DestinationStatus[] = ["delivered", "preview_not_posted", "not_selected", "not_offered"];
+/* The notes agon.publish.webview requires, verbatim. */
+export const PREVIEW_LABEL = "Preview: not posted; posting needs Meta and Google app approval.";
+export const OUTBOX_LABEL =
+  "Not sent yet: the payload and its queue message are recorded; the send is a Logic App step that is not deployed yet.";
+export const WAITING_NOTE = "Approved; not written yet: the Publisher job has not published this bundle.";
+const PREVIEW_KEYS = ["kind", "note", "path", "payload_sha256", "text", "title"];
 
 function has(obj: object, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(obj, key);
@@ -163,44 +186,67 @@ export function validateIndex(index: unknown): string[] {
   return problems;
 }
 
-/* The optional destinations list: known ids, once each, a label, a known
-   status, and a preview flag. A preview-only destination (Instagram, YouTube)
-   must be marked preview and can never claim it was posted or sent. */
-export function validateDestinations(value: unknown): string[] {
-  if (!Array.isArray(value) || value.length === 0) {
-    return ["destinations must be a non-empty list when present"];
+/* The optional destinations key, with the rules and the wording of
+   agon.publish.webview.destination_problems: all six destinations in registry
+   order with their labels, a known status, a preview exactly when offered, and
+   on a run that is not approved nothing delivered or previewed. */
+export function validateDestinations(rows: unknown, approved: boolean, state: string): string[] {
+  if (!Array.isArray(rows) || rows.length !== DESTINATION_IDS.length) {
+    return [`destinations must list all ${DESTINATION_IDS.length} destinations`];
   }
   const problems: string[] = [];
-  const seen = new Set<string>();
-  value.forEach((row: unknown, i: number) => {
+  rows.forEach((row: unknown, i: number) => {
     const where = `destinations[${i}]`;
+    const destId = DESTINATION_IDS[i];
     if (!keysAre(row, ["id", "label", "preview", "status"])) {
       problems.push(`${where} keys must be exactly id, label, preview and status`);
       return;
     }
-    const id = row.id;
-    if (typeof id !== "string" || !DESTINATION_IDS.includes(id as DestinationId)) {
-      problems.push(`${where}.id must be one of ${DESTINATION_IDS.join(", ")}`);
-    } else if (seen.has(id)) {
-      problems.push(`${where}.id ${id} is listed twice`);
-    } else {
-      seen.add(id);
+    if (row.id !== destId) {
+      problems.push(`${where}.id must be ${destId} (registry order)`);
+      return;
     }
-    if (!nonEmpty(row.label)) {
-      problems.push(`${where}.label must be a non-empty string`);
+    const label = DESTINATION_LABELS[i][1];
+    if (row.label !== label) {
+      problems.push(`${where}.label must be '${label}'`);
     }
-    if (typeof row.status !== "string" || !DESTINATION_STATUSES.includes(row.status as DestinationStatus)) {
+    const status = row.status;
+    const preview = row.preview;
+    if (typeof status !== "string" || !DESTINATION_STATUSES.includes(status as DestinationStatus)) {
       problems.push(`${where}.status must be one of ${DESTINATION_STATUSES.join(", ")}`);
+      return;
     }
-    if (typeof row.preview !== "boolean") {
-      problems.push(`${where}.preview must be true or false`);
+    if ((status === "not_offered") !== (preview === null)) {
+      problems.push(`${where}: preview is null exactly when the status is not_offered`);
+      return;
     }
-    if (typeof id === "string" && PREVIEW_ONLY.includes(id as DestinationId)) {
-      if (row.preview !== true) {
-        problems.push(`${where} ${id} is a preview-only destination and must be marked preview`);
-      }
-      if (row.status === "published" || row.status === "sent") {
-        problems.push(`${where} ${id} is a preview-only destination and can never be ${String(row.status)}`);
+    if (!approved && status !== "not_offered" && status !== "not_selected") {
+      problems.push(`${where}: a run that is not approved has no delivered or previewed destination`);
+    }
+    if (preview === null) {
+      return;
+    }
+    if (!keysAre(preview, PREVIEW_KEYS)) {
+      problems.push(`${where}.preview keys must be exactly kind, note, path, payload_sha256, text and title`);
+      return;
+    }
+    const kind = preview.kind;
+    if (kind !== DELIVERY[destId]) {
+      problems.push(`${where}.preview.kind must be ${DELIVERY[destId]}`);
+    }
+    if (typeof preview.payload_sha256 !== "string" || !SHA256_HEX.test(preview.payload_sha256)) {
+      problems.push(`${where}.preview.payload_sha256 must be 64 lowercase hex characters`);
+    }
+    if (typeof preview.title !== "string" || typeof preview.text !== "string") {
+      problems.push(`${where}.preview title and text must be strings`);
+    }
+    if (status === "delivered" && (kind !== "written" || state !== "PUBLISHED" || typeof preview.path !== "string")) {
+      problems.push(`${where}: delivered means written bytes on a PUBLISHED run, with their path`);
+    }
+    if (status === "preview_not_posted") {
+      const expected = kind === "preview" ? PREVIEW_LABEL : kind === "outbox" ? OUTBOX_LABEL : WAITING_NOTE;
+      if (preview.note !== expected) {
+        problems.push(`${where}.preview.note must say '${expected}'`);
       }
     }
   });
@@ -450,7 +496,8 @@ export function validateRun(run: unknown): string[] {
     }
   }
   if (has(run, "destinations")) {
-    problems.push(...validateDestinations(run.destinations));
+    const approvedRun = isObject(approval) && approval.status === "approved";
+    problems.push(...validateDestinations(run.destinations, approvedRun, String(run.state)));
   }
   return problems;
 }

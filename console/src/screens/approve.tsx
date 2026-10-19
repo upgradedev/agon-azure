@@ -29,10 +29,8 @@ import {
 } from "../lib/runs";
 import {
   DESIGN_PREVIEW_DESTINATIONS_SENTENCE,
-  PREVIEW_ONLY_SENTENCE,
   RUN_DESTINATIONS_SENTENCE,
-  destinationsFor,
-  initiallyTicked,
+  chipsFor,
   isPreviewOnly,
 } from "../lib/destinations";
 import { hrefFor } from "../lib/router";
@@ -60,10 +58,10 @@ function EvidenceLink({ runId, sentenceId }: { runId: string; sentenceId: string
 
 export function Approve({ active, loaded, error, blownSeed, onDecided }: Props) {
   const run = loaded?.run ?? null;
-  const choice = run ? destinationsFor(run) : null;
+  const choice = run ? chipsFor(run) : null;
   const [ticked, setTicked] = useState<string[]>([]);
   const [missing, setMissing] = useState<string[]>([]);
-  const [chosen, setChosen] = useState<DestinationId[]>(() => (choice ? initiallyTicked(choice.destinations) : []));
+  const [chosen, setChosen] = useState<DestinationId[]>(() => (choice ? choice.chips.filter((c) => c.ticked).map((c) => c.id) : []));
   const [result, setResult] = useState<Result>(null);
   const boxes = useRef(new Map<string, HTMLInputElement>());
   const confirmHint = useId();
@@ -86,8 +84,8 @@ export function Approve({ active, loaded, error, blownSeed, onDecided }: Props) 
 
   const att = attestation(run, loaded.manifest);
   const waiting = run.state === "AWAITING_APPROVAL";
-  const chosenLabels = choice.destinations
-    .filter((d) => chosen.includes(d.id))
+  const chosenLabels = choice.chips
+    .filter((d) => d.offered && chosen.includes(d.id))
     .map((d) => (isPreviewOnly(d.id) ? `${d.label} (preview only, never posted)` : d.label));
 
   function toggleRow(rowId: string, on: boolean): void {
@@ -263,18 +261,20 @@ export function Approve({ active, loaded, error, blownSeed, onDecided }: Props) 
                 {choice.fromRun ? RUN_DESTINATIONS_SENTENCE : DESIGN_PREVIEW_DESTINATIONS_SENTENCE}
               </p>
               <ul className="grid gap-2 sm:grid-cols-2">
-                {choice.destinations.map((d) => {
+                {choice.chips.map((d) => {
                   const inputId = `destination-${d.id}`;
                   const noteId = `destination-${d.id}-note`;
                   const preview = isPreviewOnly(d.id);
-                  const on = chosen.includes(d.id);
+                  const on = d.offered && chosen.includes(d.id);
+                  const described = d.note || d.status ? noteId : undefined;
                   return (
                     <li key={d.id}>
                       <label
                         htmlFor={inputId}
                         className={cn(
-                          "flex h-full cursor-pointer items-start gap-2.5 rounded-lg border px-3 py-2.5 transition-colors",
-                          on ? "border-primary bg-accent-bg" : "border-line hover:bg-surface-2",
+                          "flex h-full items-start gap-2.5 rounded-lg border px-3 py-2.5 transition-colors",
+                          d.offered ? "cursor-pointer" : "cursor-not-allowed bg-surface-2",
+                          on ? "border-primary bg-accent-bg" : d.offered ? "border-line hover:bg-surface-2" : "border-line",
                           "has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-focus",
                         )}
                       >
@@ -282,8 +282,9 @@ export function Approve({ active, loaded, error, blownSeed, onDecided }: Props) 
                           id={inputId}
                           type="checkbox"
                           checked={on}
+                          disabled={!d.offered}
                           onChange={(event) => toggleDestination(d.id, event.target.checked)}
-                          aria-describedby={preview ? noteId : undefined}
+                          aria-describedby={described}
                           className="mt-0.5 size-4 shrink-0 accent-primary focus-visible:outline-none"
                         />
                         <span className="min-w-0">
@@ -291,9 +292,9 @@ export function Approve({ active, loaded, error, blownSeed, onDecided }: Props) 
                             {d.label}
                             {preview ? <Badge tone="preview">Preview</Badge> : null}
                           </span>
-                          {preview ? (
+                          {described ? (
                             <span id={noteId} className="mt-0.5 block text-xs leading-5 text-muted">
-                              {PREVIEW_ONLY_SENTENCE}
+                              {[d.note, d.status && d.status !== d.note ? d.status : null].filter(Boolean).join(" ")}
                             </span>
                           ) : null}
                         </span>

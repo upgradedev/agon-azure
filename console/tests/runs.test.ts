@@ -10,7 +10,11 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
+  DELIVERY,
   DESIGN_PREVIEW_LABEL,
+  DESTINATION_LABELS,
+  OUTBOX_LABEL,
+  PREVIEW_LABEL,
   approveAttempt,
   attestation,
   bundleCheck,
@@ -25,9 +29,9 @@ import {
   wallItems,
   why,
 } from "../src/lib/runs";
-import { DESTINATION_PREVIEW, destinationsFor } from "../src/lib/destinations";
+import { chipsFor } from "../src/lib/destinations";
 import { loadRunsData } from "../src/lib/loader";
-import type { BundleManifest, Run } from "../src/lib/types";
+import type { BundleManifest, Destination, Run } from "../src/lib/types";
 import { CASES, WEB, diskFetch, readJson } from "./helpers";
 
 type Op = { path: (string | number)[]; delete?: boolean; value?: unknown; from?: (string | number)[] };
@@ -91,22 +95,67 @@ describe("shared run cases", () => {
   });
 });
 
-describe("destinations", () => {
-  it("accept a well-formed list and refuse a preview-only destination that claims it was posted", () => {
+/* Rows in the shape agon.publish.webview writes, for a run that is not approved
+   (every offered destination not_selected) and for a published one. */
+function offeredRows(): Destination[] {
+  return DESTINATION_LABELS.map(([id, label]): Destination => ({
+    id,
+    label,
+    status: "not_selected",
+    preview: { kind: DELIVERY[id], note: null, title: label, text: "", payload_sha256: "a".repeat(64), path: null },
+  }));
+}
+
+function publishedRows(): Destination[] {
+  return offeredRows().map((row): Destination => {
+    if (!row.preview) {
+      return row;
+    }
+    if (row.preview.kind === "written") {
+      return { ...row, status: "delivered", preview: { ...row.preview, path: `feed/${row.id}.json` } };
+    }
+    const note = row.preview.kind === "preview" ? PREVIEW_LABEL : OUTBOX_LABEL;
+    return { ...row, status: "preview_not_posted", preview: { ...row.preview, note } };
+  });
+}
+
+describe("destinations, held to agon.publish.webview", () => {
+  it("accepts all six offered and not selected on a run that is not approved", () => {
     const run = sampleRun();
-    expect(validateRun({ ...run, destinations: DESTINATION_PREVIEW })).toEqual([]);
-    const posted = DESTINATION_PREVIEW.map((d) => (d.id === "instagram" ? { ...d, status: "published" } : d));
-    expect(validateDestinations(posted).join(" ")).toContain("can never be published");
-    const unmarked = DESTINATION_PREVIEW.map((d) => (d.id === "youtube" ? { ...d, preview: false } : d));
-    expect(validateDestinations(unmarked).join(" ")).toContain("must be marked preview");
-    expect(validateDestinations([]).join(" ")).toContain("non-empty");
-    expect(validateRun({ ...run, destinations: [{ id: "fax" }] }).join(" ")).toContain("destinations[0]");
+    expect(validateRun({ ...run, destinations: offeredRows() })).toEqual([]);
   });
 
-  it("come from the run when present and from the labelled preview otherwise", () => {
+  it("refuses the shapes destination_problems refuses, in its words", () => {
     const run = sampleRun();
-    expect(destinationsFor(run).fromRun).toBe(false);
-    expect(destinationsFor(run).destinations.map((d) => d.label)).toEqual([
+    expect(validateDestinations(offeredRows().slice(0, 5), false, "AWAITING_APPROVAL")).toEqual(["destinations must list all 6 destinations"]);
+    const swapped = offeredRows();
+    [swapped[0], swapped[1]] = [swapped[1], swapped[0]];
+    expect(validateDestinations(swapped, false, "AWAITING_APPROVAL")[0]).toBe("destinations[0].id must be club_site (registry order)");
+    const relabelled = offeredRows().map((r): Destination => (r.id === "instagram" ? { ...r, label: "IG" } : r));
+    expect(validateDestinations(relabelled, false, "AWAITING_APPROVAL")).toEqual(["destinations[2].label must be 'Instagram'"]);
+    const early = publishedRows();
+    expect(validateDestinations(early, false, "AWAITING_APPROVAL").join(" ")).toContain("a run that is not approved has no delivered or previewed destination");
+    const nullPreview = offeredRows().map((r): Destination => (r.id === "feeds" ? { ...r, preview: null } : r));
+    expect(validateDestinations(nullPreview, false, "AWAITING_APPROVAL")).toEqual([
+      "destinations[1]: preview is null exactly when the status is not_offered",
+    ]);
+    expect(validateRun({ ...run, destinations: [{ id: "fax" }] })).toEqual(["destinations must list all 6 destinations"]);
+  });
+
+  it("holds delivered to a written path on a PUBLISHED run and every note to its exact sentence", () => {
+    expect(validateDestinations(publishedRows(), true, "PUBLISHED")).toEqual([]);
+    expect(validateDestinations(publishedRows(), true, "APPROVED").join(" ")).toContain("delivered means written bytes on a PUBLISHED run");
+    const wrongNote = publishedRows().map((r): Destination => (r.id === "youtube" && r.preview ? { ...r, preview: { ...r.preview, note: "Posted." } } : r));
+    expect(validateDestinations(wrongNote, true, "PUBLISHED")).toEqual([`destinations[3].preview.note must say '${PREVIEW_LABEL}'`]);
+    const posted = publishedRows().map((r): Destination => (r.id === "instagram" && r.preview ? { ...r, status: "delivered" } : r));
+    expect(validateDestinations(posted, true, "PUBLISHED").join(" ")).toContain("delivered means written bytes on a PUBLISHED run");
+  });
+
+  it("drives the card chips from the run, and falls back to the labelled preview without the key", () => {
+    const run = sampleRun();
+    const preview = chipsFor(run);
+    expect(preview.fromRun).toBe(false);
+    expect(preview.chips.map((c) => c.label)).toEqual([
       "Club website (CMS feed)",
       "RSS and JSON Feed",
       "Instagram",
@@ -114,8 +163,12 @@ describe("destinations", () => {
       "Internal newsroom (Teams)",
       "Journalist email digest",
     ]);
-    const withList = { ...run, destinations: DESTINATION_PREVIEW.slice(0, 2) };
-    expect(destinationsFor(withList).fromRun).toBe(true);
+    expect(preview.chips.filter((c) => c.note === PREVIEW_LABEL).map((c) => c.id)).toEqual(["instagram", "youtube"]);
+    const notOffered = offeredRows().map((r): Destination => (r.id === "journalist_email" ? { ...r, status: "not_offered", preview: null } : r));
+    const fromRun = chipsFor({ ...run, destinations: notOffered });
+    expect(fromRun.fromRun).toBe(true);
+    expect(fromRun.chips.find((c) => c.id === "journalist_email")?.offered).toBe(false);
+    expect(fromRun.chips.every((c) => !c.ticked)).toBe(true);
   });
 });
 

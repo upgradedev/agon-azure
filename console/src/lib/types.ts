@@ -169,13 +169,25 @@ export interface Approval {
 
 export type DestinationId = "club_site" | "feeds" | "instagram" | "youtube" | "newsroom_teams" | "journalist_email";
 
-export type DestinationStatus = "selected" | "not_selected" | "published" | "sent" | "not_posted";
+/* The destinations key as agon.publish.webview writes it (web/runs/README.txt). */
+export type DestinationStatus = "delivered" | "preview_not_posted" | "not_selected" | "not_offered";
+
+export type DeliveryKind = "written" | "outbox" | "preview";
+
+export interface DestinationPreview {
+  kind: DeliveryKind;
+  note: string | null;
+  title: string;
+  text: string;
+  payload_sha256: string;
+  path: string | null;
+}
 
 export interface Destination {
   id: DestinationId;
   label: string;
   status: DestinationStatus;
-  preview: boolean;
+  preview: DestinationPreview | null;
 }
 
 export interface Run {
