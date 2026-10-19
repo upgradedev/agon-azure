@@ -225,7 +225,7 @@ export function NewsroomWall({ active, loaded, error, blownSeed, replayRequest }
             Replay walks through the run one step at a time. With reduced motion it waits for Next step instead of moving on its own.
           </p>
 
-          <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
             <div className="min-w-0">
               <section aria-labelledby="h-desks" className="hidden md:block">
                 <h2 id="h-desks" className="mb-3 text-sm font-semibold text-fg">

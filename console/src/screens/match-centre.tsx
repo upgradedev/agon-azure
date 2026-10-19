@@ -463,7 +463,7 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
       />
       <GuideCard progress={progress} />
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
         <Card aria-labelledby="h-replay" data-state={ready ? "ready" : match.status} className="min-w-0">
           <CardHeader>
             <CardTitle id="h-replay">Replay</CardTitle>

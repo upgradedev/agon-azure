@@ -136,7 +136,7 @@ export function Approve({ active, loaded, error, blownSeed, onDecided }: Props) 
 
       <SeedNotice blownSeed={blownSeed} run={run} />
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,42rem)_minmax(0,1fr)]">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,42rem)_minmax(0,1fr)]">
         <article aria-labelledby="acard-title" className="min-w-0 overflow-hidden rounded-xl border border-line bg-surface shadow-raised">
           <p className="border-b border-line bg-info-bg px-5 py-2.5 text-sm leading-6 font-medium text-info">{STANDIN_HEADER}</p>
 

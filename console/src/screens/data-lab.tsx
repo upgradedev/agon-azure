@@ -171,7 +171,7 @@ export function DataLab({ active }: { active: boolean }) {
         lead="The league table and the realism bands of the synthetic season, read from the season files this site publishes and checked against their hashes in your browser."
       />
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_24rem]">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_24rem]">
         <div className="min-w-0" data-state={state.status}>
           {state.status === "idle" || state.status === "loading" ? (
             <Notice tone="loading">Looking for the season files on this site and hashing them in your browser.</Notice>

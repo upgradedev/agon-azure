@@ -29,7 +29,7 @@ export function About({ active }: { active: boolean }) {
         title="What Agon is for"
         lead="Agon is being built as the full-time newsroom for a small club media office: agents write and translate the report, code checks it and seals it, and nothing is published until the media officer approves that exact sealed bundle in Microsoft Teams."
       />
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card aria-labelledby="h-who">
           <CardHeader>
             <CardTitle id="h-who">Who it is for</CardTitle>

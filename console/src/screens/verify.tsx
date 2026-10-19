@@ -244,7 +244,7 @@ export function Verify({ active }: { active: boolean }) {
         </p>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card aria-labelledby="h-bundle" className="lg:col-span-2" data-state={phase}>
           <CardHeader>
             <CardTitle id="h-bundle">Run bundle</CardTitle>

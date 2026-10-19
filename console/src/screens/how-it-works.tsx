@@ -76,7 +76,7 @@ export function HowItWorks({ active }: { active: boolean }) {
         lead="The pipeline as it is built in the public repository; choose any step to see what it does, what exists today and the file or CI run that proves it."
       />
 
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_26rem]">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_26rem]">
         <ol aria-label="Pipeline stages" className="rounded-xl border border-line bg-surface p-4 shadow-card sm:p-5">
           {groups.map((group, gi) => (
             <li key={group.stage} className="grid grid-cols-[2rem_minmax(0,1fr)] gap-x-3">
