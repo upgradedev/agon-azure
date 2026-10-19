@@ -92,7 +92,11 @@ def urllib_transport(url: str, headers: dict[str, str], body: bytes, timeout: fl
 
 def hint(status: int) -> str:
     """A next step for the statuses this smoke is expected to meet."""
-    if status in (401, 403):
+    if status == 401:
+        return ("the token was refused: check its audience (this workflow asks for "
+                "https://cognitiveservices.azure.com; the v1 API page also documents https://ai.azure.com) "
+                "and that the token is for the tenant that holds the Foundry account")
+    if status == 403:
         return ("the CI identity holds no inference role on this account yet: deploy infra/rbac.bicep "
                 "(docs/OPERATIONS.md, owner step 3) and allow a few minutes for the grant to propagate")
     if status == 404:
