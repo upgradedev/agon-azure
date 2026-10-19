@@ -20,7 +20,9 @@ on:
       - "tests/matchfacts_kit.py"
       - "tests/test_interpret.py"
       - "tests/test_wp_compare.py"
-      - "requirements/mcp.txt"
+      - "requirements/mcp*.txt"
+      - "ci/check_pins.py"
+      - "ci/git_paths.py"
       - ".github/workflows/mcp.yml"
   push:
     branches: [main]
@@ -34,7 +36,9 @@ on:
       - "tests/matchfacts_kit.py"
       - "tests/test_interpret.py"
       - "tests/test_wp_compare.py"
-      - "requirements/mcp.txt"
+      - "requirements/mcp*.txt"
+      - "ci/check_pins.py"
+      - "ci/git_paths.py"
       - ".github/workflows/mcp.yml"
   workflow_dispatch:
 
