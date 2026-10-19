@@ -293,3 +293,195 @@ test("resolveManifest says why when data/manifest.json exists but breaks the con
 test("resolveManifest fails loudly when neither manifest loads", async () => {
   await assert.rejects(core.resolveManifest(fakeFetch({})), /No match data could be loaded/);
 });
+
+/* ------------------------------------------------------------------
+   Runs (web/agon-runs.js): the Newsroom Wall, the stand-in card, the
+   recap and the Verify bundle check. Kept in this file because the
+   web-check workflow runs exactly this file.
+   ------------------------------------------------------------------ */
+
+const runsApi = require(path.join(ROOT, "web", "agon-runs.js"));
+const RUNS = path.join(ROOT, "web", "runs");
+const LABEL = "Design preview: sample run written by hand, not produced by the pipeline.";
+
+function sampleRun() {
+  return JSON.parse(fs.readFileSync(path.join(RUNS, "sample-s1.json"), "utf8"));
+}
+
+function applyCase(run, c) {
+  if (Object.prototype.hasOwnProperty.call(c, "replace")) {
+    return c.replace;
+  }
+  const out = JSON.parse(JSON.stringify(run));
+  for (const op of c.ops) {
+    let target = out;
+    for (const key of op.path.slice(0, -1)) {
+      target = target[key];
+    }
+    const last = op.path[op.path.length - 1];
+    if (op.delete) {
+      delete target[last];
+    } else {
+      target[last] = op.value;
+    }
+  }
+  return out;
+}
+
+test("run rules agree with the Python validator on the shared cases", () => {
+  const cases = JSON.parse(fs.readFileSync(path.join(__dirname, "run_cases.json"), "utf8"));
+  assert.ok(cases.length >= 25);
+  const run = sampleRun();
+  for (const c of cases) {
+    const problems = runsApi.validateRun(applyCase(run, c));
+    assert.equal(problems.length === 0, c.valid, c.case + ": " + problems.join("; "));
+    if (c.problem !== undefined) {
+      assert.ok(problems.some((p) => p.indexOf(c.problem) !== -1), c.case + ": " + problems.join("; "));
+    }
+  }
+});
+
+test("the runs index is valid and names the sample", () => {
+  const index = JSON.parse(fs.readFileSync(path.join(RUNS, "index.json"), "utf8"));
+  assert.deepEqual(runsApi.validateIndex(index), []);
+  assert.equal(index.runs[0].run_id, "sample-s1");
+  assert.ok(runsApi.validateIndex({ format: "agon.web-runs/1", runs: [] }).length > 0);
+});
+
+test("the design preview label is pinned and the sample carries it", () => {
+  assert.equal(runsApi.DESIGN_PREVIEW_LABEL, LABEL);
+  assert.equal(sampleRun().label, LABEL);
+  const html = fs.readFileSync(path.join(ROOT, "web", "index.html"), "utf8");
+  assert.ok(html.indexOf(LABEL) !== -1);
+  assert.ok(html.indexOf(runsApi.STANDIN_HEADER) !== -1);
+});
+
+test("the WebCrypto bundle check recomputes the sample's bundle hash and every edition", async () => {
+  const run = sampleRun();
+  const manifestBytes = fs.readFileSync(path.join(RUNS, "sample-s1", "manifest.json"));
+  const manifest = JSON.parse(manifestBytes.toString("utf8"));
+  const computed = { manifest: core.toHex(await globalThis.crypto.subtle.digest("SHA-256", manifestBytes)), files: {} };
+  for (const name of Object.keys(manifest.artifacts)) {
+    const bytes = fs.readFileSync(path.join(RUNS, "sample-s1", name));
+    computed.files[name] = { sha256: core.toHex(await globalThis.crypto.subtle.digest("SHA-256", bytes)), bytes: bytes.length };
+  }
+  const good = runsApi.bundleCheck(run, manifest, computed);
+  assert.equal(good.ok, true);
+  assert.equal(good.rows.length, 5);
+
+  /* A flipped byte in one edition: that row and the whole check fail. */
+  const bytes = Buffer.from(fs.readFileSync(path.join(RUNS, "sample-s1", "edition-fr.json")));
+  bytes[30] = bytes[30] === 0x5a ? 0x59 : 0x5a;
+  const flipped = JSON.parse(JSON.stringify(computed));
+  flipped.files["edition-fr.json"].sha256 = core.toHex(await globalThis.crypto.subtle.digest("SHA-256", bytes));
+  const bad = runsApi.bundleCheck(run, manifest, flipped);
+  assert.equal(bad.ok, false);
+  assert.equal(bad.rows.find((r) => r.name === "edition-fr.json").status, "mismatch");
+
+  /* A manifest that hashes differently from the card's hash fails too. */
+  const other = runsApi.bundleCheck(run, manifest, Object.assign({}, computed, { manifest: "0".repeat(64) }));
+  assert.equal(other.bundleMatches, false);
+  assert.equal(other.ok, false);
+
+  /* A file that could not be fetched is reported, never skipped. */
+  const missing = JSON.parse(JSON.stringify(computed));
+  delete missing.files["edition-el.json"];
+  const gone = runsApi.bundleCheck(run, manifest, missing);
+  assert.equal(gone.rows.find((r) => r.name === "edition-el.json").status, "error");
+  assert.equal(gone.ok, false);
+});
+
+test("Approve names every unticked Confirm row, then explains that nothing was sent", () => {
+  const run = sampleRun();
+  const none = runsApi.approveAttempt(run, []);
+  assert.equal(none.ok, false);
+  assert.equal(none.message, "Tick the referee sentence and the injury sentence before approving.");
+  const one = runsApi.approveAttempt(run, ["confirm-en-04"]);
+  assert.equal(one.message, "Tick the injury sentence before approving.");
+  const all = runsApi.approveAttempt(run, ["confirm-en-04", "confirm-en-05"]);
+  assert.equal(all.ok, true);
+  assert.match(all.message, /^Nothing was approved or published\. The decision endpoint is not deployed yet/);
+  assert.ok(all.message.indexOf(run.bundle.sha256.slice(0, 12)) !== -1);
+  assert.match(runsApi.notDeployedMessage("changes", run), /^Nothing was sent\. The decision endpoint is not deployed yet/);
+});
+
+test("attestation counts come from the sealed manifest and the Confirm rows", () => {
+  const run = sampleRun();
+  const manifest = JSON.parse(fs.readFileSync(path.join(RUNS, "sample-s1", "manifest.json"), "utf8"));
+  const att = runsApi.attestation(run, manifest);
+  assert.equal(att.attesting, "You are attesting: headline report and 2 flagged sentences");
+  assert.equal(att.cleared, "Gate-cleared only: 4 editions");
+});
+
+test("the approved edition label appears only on an approved pipeline run", () => {
+  const run = sampleRun();
+  assert.ok(runsApi.editionLabel(run).indexOf(LABEL) !== -1);
+  assert.equal(runsApi.editionLabel(run).indexOf(runsApi.APPROVED_LABEL_PREFIX), -1);
+  const approved = JSON.parse(JSON.stringify(run));
+  approved.provenance = "pipeline";
+  approved.label = "Recorded run, 2026-10-23, commit 0123abc";
+  approved.state = "APPROVED";
+  approved.states[3].state = "APPROVED";
+  approved.approval = { status: "approved", approved_at: "2026-10-23T16:05:00Z", approver_role: "media_officer", channel: "teams" };
+  assert.deepEqual(runsApi.validateRun(approved), []);
+  assert.equal(runsApi.editionLabel(approved),
+    "AI-drafted. Numbers and names checked by code. Headline report and flagged sentences approved by the club media office at 16:05 UTC on 2026-10-23.");
+  const awaiting = JSON.parse(JSON.stringify(approved));
+  awaiting.state = "AWAITING_APPROVAL";
+  awaiting.states[3].state = "AWAITING_APPROVAL";
+  awaiting.approval = { status: "awaiting", approved_at: null, approver_role: null, channel: null };
+  assert.equal(runsApi.editionLabel(awaiting).indexOf(runsApi.APPROVED_LABEL_PREFIX), -1);
+});
+
+test("the Why drawer lists event ids, claim types, gate verdicts and the author tag", () => {
+  const run = sampleRun();
+  const edition = JSON.parse(fs.readFileSync(path.join(RUNS, "sample-s1", "edition-en.json"), "utf8"));
+  const meta = run.editions.find((e) => e.edition === "en");
+  const w = runsApi.why(run, meta, edition.sentences[4], 4);
+  assert.equal(w.sentenceId, "en-05");
+  assert.deepEqual(w.eventIds, ["1407b818a8237c56"]);
+  assert.deepEqual(w.claimTypes, ["Event", "Minute", "Name"]);
+  assert.deepEqual(w.gates.map((g) => g.name + ": " + g.words), ["Fact Gate: Pass", "Rights Guard: Pass"]);
+  assert.equal(w.authorTag, "hand");
+  assert.match(w.author, /Written by hand/);
+  assert.equal(w.type, "Injury or medical");
+  assert.match(w.scope, /Confirm row/);
+  const easy = JSON.parse(fs.readFileSync(path.join(RUNS, "sample-s1", "edition-easy.json"), "utf8"));
+  const we = runsApi.why(run, run.editions.find((e) => e.edition === "easy"), easy.sentences[0], 0);
+  assert.match(we.scope, /^Gate-cleared only/);
+  assert.equal(we.eventIds.length, 0);
+});
+
+test("the wall walks DRAFT, CHECKED, SEALED, AWAITING_APPROVAL in step order", () => {
+  const run = sampleRun();
+  assert.equal(runsApi.stateAt(run, 0), "");
+  assert.equal(runsApi.stateWords(runsApi.stateAt(run, 0)), "No bundle yet");
+  const seen = [];
+  for (let step = 1; step <= runsApi.lastStep(run); step += 1) {
+    const s = runsApi.stateAt(run, step);
+    if (s && seen[seen.length - 1] !== s) {
+      seen.push(s);
+    }
+  }
+  assert.deepEqual(seen, runsApi.WALL_STATES);
+  const items = runsApi.wallItems(run);
+  for (let i = 1; i < items.length; i += 1) {
+    assert.ok(items[i - 1].step <= items[i].step);
+  }
+  assert.ok(items.some((x) => x.kind === "handoff" && x.to === "Approval card"));
+  for (const item of items) {
+    assert.doesNotMatch(item.text, /\bC\d+P\d+\b/, "an id leaked into the wall: " + item.text);
+  }
+});
+
+test("run and bundle URLs refuse unsafe names", () => {
+  const run = sampleRun();
+  assert.equal(runsApi.runUrl("sample-s1"), "runs/sample-s1.json");
+  assert.equal(runsApi.bundleFileUrl(run, "edition-en.json"), "runs/sample-s1/edition-en.json");
+  for (const bad of ["../x", "A", "", "a/b"]) {
+    assert.throws(() => runsApi.runUrl(bad), /unsafe/);
+  }
+  for (const bad of ["../manifest.json", "index.html", "edition-en.json/x"]) {
+    assert.throws(() => runsApi.bundleFileUrl(run, bad), /unsafe/);
+  }
+});

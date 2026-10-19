@@ -16,7 +16,11 @@
   var COMMIT_PATTERN = /^[0-9a-f]{7,40}$/i;
   var REPO_URL = "https://github.com/upgradedev/agon-azure";
   var THEME_KEY = "agon-theme";
-  var ROUTES = ["/", "/verify", "/about"];
+  /* Views. "/approve" and "/recap" take a run id as a second segment
+     (#/approve/sample-s1); a query after "?" is passed on untouched
+     (#/recap/sample-s1?s=en-05 opens that sentence's Why drawer). */
+  var ROUTES = ["/", "/newsroom", "/approve", "/recap", "/verify", "/about"];
+  var PARAM_PATTERN = /^[a-z0-9][a-z0-9-]{0,62}$/;
 
   /* SHA-256 of "abc", from FIPS 180-2 appendix B.1. Used as a known answer test. */
   var SHA256_ABC = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
@@ -124,8 +128,30 @@
     return path;
   }
 
+  function queryFromHash(hash) {
+    var at = (hash || "").indexOf("?");
+    return at === -1 ? "" : hash.slice(at + 1);
+  }
+
+  /* "/approve/sample-s1" to {key: "/approve", param: "sample-s1"}. A second
+     segment is accepted only on views that take one, and only if it is a
+     safe run id; anything else is the not-found view. */
+  function splitPath(path) {
+    var parts = path.split("/");
+    var key = "/" + (parts[1] || "");
+    var param = parts.length > 2 ? parts.slice(2).join("/") : "";
+    if (ROUTES.indexOf(key) === -1) {
+      return { key: "not-found", param: "" };
+    }
+    if (param && ((key !== "/approve" && key !== "/recap" && key !== "/newsroom") || !PARAM_PATTERN.test(param))) {
+      return { key: "not-found", param: "" };
+    }
+    return { key: key, param: param };
+  }
+
   function render(path, moveFocus) {
-    var key = ROUTES.indexOf(path) === -1 ? "not-found" : path;
+    var split = splitPath(path);
+    var key = split.key;
     var views = document.querySelectorAll("[data-view]");
     var active = null;
     for (var i = 0; i < views.length; i += 1) {
@@ -149,7 +175,9 @@
 
     /* match.js and verify.js listen for this to pause or start their work. */
     if (typeof window.CustomEvent === "function") {
-      document.dispatchEvent(new window.CustomEvent("agon:route", { detail: { path: key } }));
+      document.dispatchEvent(new window.CustomEvent("agon:route", {
+        detail: { path: key, param: split.param, query: queryFromHash(window.location.hash) }
+      }));
     }
 
     if (active) {

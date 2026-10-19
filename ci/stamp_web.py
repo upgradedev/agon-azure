@@ -16,6 +16,11 @@ Rules, each a hard failure:
   every world file it lists must exist with the stated sha256 and pass agon.webdata.validate_world;
   every file under the data directory other than manifest.json must be listed.
 
+* when the web directory holds runs/: every run listed in runs/index.json must
+  pass agon.webrun.validate_run and its sealed bundle must recompute to the
+  bundle hash the run states (agon.webrun.verify_run_dir); a file in runs/
+  that the index does not list fails.
+
 Stdlib only. Writes are binary, so line endings never change.
 
 Usage:
@@ -140,6 +145,19 @@ def verify_data(data_dir: Path, seeds: list[int]) -> int:
     return len(listed)
 
 
+def verify_runs(web_dir: Path) -> list[str]:
+    """Verify web_dir/runs when it exists; returns the run ids verified (none without runs/)."""
+    runs_dir = web_dir / "runs"
+    if not runs_dir.is_dir():
+        return []
+    from agon.webrun import verify_run_dir  # the one definition of the run format
+
+    try:
+        return verify_run_dir(runs_dir)
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise StampError(f"runs: {exc}") from exc
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("web_dir", type=Path)
@@ -153,6 +171,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.data_dir is not None:
             count = verify_data(args.data_dir, parse_seeds(args.seeds))
             print(f"verified {count} data files against {args.data_dir.as_posix()}/manifest.json")
+        runs = verify_runs(args.web_dir)
+        print(f"verified {len(runs)} runs under {args.web_dir.as_posix()}/runs" + (f": {', '.join(runs)}" if runs else ""))
     except (StampError, KeyError, TypeError, ValueError) as exc:
         print(f"stamp_web: FAIL: {exc}")
         return 1

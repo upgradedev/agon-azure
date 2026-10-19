@@ -12,7 +12,12 @@
   <link rel="stylesheet" href="app.css">
   <script src="theme.js"></script>
   <script src="agon-core.js" defer></script>
+  <script src="agon-runs.js" defer></script>
+  <script src="runs.js" defer></script>
   <script src="match.js" defer></script>
+  <script src="newsroom.js" defer></script>
+  <script src="approve.js" defer></script>
+  <script src="recap.js" defer></script>
   <script src="verify.js" defer></script>
   <script src="app.js" defer></script>
 </head>
@@ -32,6 +37,8 @@
 
       <nav class="nav" aria-label="Primary">
         <a href="#/" data-route="/">Match Centre</a>
+        <a href="#/newsroom" data-route="/newsroom">Newsroom</a>
+        <a href="#/recap" data-route="/recap">Recap</a>
         <a href="#/verify" data-route="/verify">Verify</a>
         <a href="#/about" data-route="/about">About</a>
       </nav>
@@ -252,9 +259,138 @@
             </div>
             <div class="status-row">
               <span class="status-dot" aria-hidden="true"></span>
-              <p>The agents, the checks and the approval step are planned and not connected to this preview. The replay above reads the generator's event file directly. <a href="#/about">Read what each one will do.</a></p>
+              <p>The agents and the approval step are not connected to this replay, which reads the generator's event file directly. The Newsroom Wall, the approval card and the recap show a design preview: sample run written by hand, not produced by the pipeline. <a href="#/newsroom">Open the Newsroom Wall.</a></p>
             </div>
           </section>
+        </div>
+      </div>
+    </section>
+
+    <!-- S2 Newsroom Wall -->
+    <section class="view" data-view="/newsroom" data-title="Newsroom Wall" aria-labelledby="h-newsroom-wall" hidden>
+      <div class="container">
+        <header class="view-head">
+          <p class="eyebrow">Newsroom Wall</p>
+          <h1 id="h-newsroom-wall" tabindex="-1">What the newsroom did at full time</h1>
+          <p class="run-kind" id="wall-label">Design preview: sample run written by hand, not produced by the pipeline. The gate verdicts were computed by the real checks over these hand-written sentences.</p>
+          <p class="lead" id="wall-match">Loading the run.</p>
+        </header>
+
+        <div class="wall-state" id="wall-state-bar">
+          <p class="wall-state__now">
+            <span class="wall-state__label">Bundle state</span>
+            <span class="chip chip--state" id="wall-state-chip">Loading</span>
+          </p>
+          <ol class="state-steps" id="wall-states" aria-label="Bundle states"></ol>
+          <p class="visually-hidden" id="wall-live" aria-live="polite" aria-atomic="true"></p>
+        </div>
+
+        <div class="wall-actions">
+          <a class="button button--primary" id="wall-approve" href="#/approve/sample-s1">Open the approval card</a>
+          <button type="button" class="button button--secondary" id="wall-replay" aria-describedby="wall-replay-hint">Replay the run</button>
+          <button type="button" class="button button--secondary" id="wall-next" aria-describedby="wall-replay-hint">Next step</button>
+          <p class="hint" id="wall-replay-hint">Replay walks through the run one step at a time. With reduced motion it waits for Next step instead of moving on its own.</p>
+          <p class="small muted" id="wall-step">Showing every step.</p>
+        </div>
+        <p class="notice" id="wall-notice" hidden></p>
+
+        <div class="wall">
+          <section class="wall__desks" aria-labelledby="h-desks">
+            <h2 id="h-desks">Desks</h2>
+            <div class="desk-grid" id="wall-desks"></div>
+            <h2 id="h-handoffs">Handoffs into the bundle</h2>
+            <ol class="handoffs" id="wall-handoffs" aria-labelledby="h-handoffs"></ol>
+          </section>
+
+          <section class="wall__timeline" aria-labelledby="h-timeline">
+            <h2 id="h-timeline">Timeline</h2>
+            <ol class="timeline" id="wall-timeline" aria-labelledby="h-timeline"></ol>
+          </section>
+
+          <aside class="wall__rail card" aria-labelledby="h-gates">
+            <h2 id="h-gates">Gate verdicts</h2>
+            <ul class="gate-list" id="wall-gates"></ul>
+            <p class="hint">Each verdict comes from deterministic code, not from a model. Open a row's details to see the gate's own output.</p>
+            <a href="#/recap/sample-s1" id="wall-recap">Read the editions with a Why for every sentence</a>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <!-- S3 Approval, stand-in card -->
+    <section class="view" data-view="/approve" data-title="Approval card" aria-labelledby="h-approve" hidden>
+      <div class="container">
+        <header class="view-head">
+          <p class="eyebrow">Approval</p>
+          <h1 id="h-approve" tabindex="-1">Stand-in for the Microsoft Teams card. It calls the same decision endpoint. The real Teams card is in the video.</h1>
+          <p class="run-kind" id="approve-label">Design preview: sample run written by hand, not produced by the pipeline.</p>
+        </header>
+
+        <article class="acard" aria-labelledby="acard-title">
+          <header class="acard__head">
+            <svg class="acard__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M7 9h10M7 13h6"/></svg>
+            <div>
+              <p class="acard__app">Agon newsroom</p>
+              <h2 class="acard__title" id="acard-title">Full-time report ready for approval</h2>
+            </div>
+          </header>
+          <p class="acard__match" id="acard-match">Loading the run.</p>
+          <p class="notice" id="acard-notice" hidden></p>
+
+          <div class="acard__hash">
+            <p class="acard__key">Bundle hash</p>
+            <p><code class="hash" id="acard-hash">not loaded</code></p>
+            <button type="button" class="button button--secondary button--sm" id="acard-copy">Copy hash</button>
+            <p class="small muted" id="acard-copy-status" aria-live="polite"></p>
+          </div>
+
+          <div>
+            <p class="acard__key">Editions in this bundle</p>
+            <ul class="edition-chips" id="acard-editions"></ul>
+          </div>
+
+          <div class="acard__scope">
+            <p class="scope scope--attested" id="acard-attesting">You are attesting: not loaded</p>
+            <p class="scope scope--cleared" id="acard-cleared">Gate-cleared only: not loaded</p>
+          </div>
+
+          <div id="acard-flags-block">
+            <p class="acard__key">Desk Editor flags</p>
+            <ul class="flag-list" id="acard-flags"></ul>
+          </div>
+
+          <fieldset class="confirm" aria-describedby="acard-confirm-hint">
+            <legend class="acard__key">Confirm rows</legend>
+            <p class="hint" id="acard-confirm-hint">Code cannot check these sentences against the event log. Tick each one you have confirmed before approving.</p>
+            <ul class="confirm-list" id="acard-confirm"></ul>
+          </fieldset>
+
+          <div class="acard__actions">
+            <button type="button" class="button button--primary" id="acard-approve">Approve</button>
+            <button type="button" class="button button--secondary" id="acard-changes">Request changes</button>
+          </div>
+          <p class="acard__result" id="acard-result" aria-live="polite"></p>
+        </article>
+      </div>
+    </section>
+
+    <!-- S4 Recap -->
+    <section class="view" data-view="/recap" data-title="Recap" aria-labelledby="h-recap" hidden>
+      <div class="container">
+        <header class="view-head">
+          <p class="eyebrow">Recap</p>
+          <h1 id="h-recap" tabindex="-1">Match report</h1>
+          <p class="lead" id="recap-match">Loading the run.</p>
+          <p class="edition-label" id="recap-label">Not approved. Design preview: sample run written by hand, not produced by the pipeline.</p>
+        </header>
+        <p class="notice" id="recap-notice" hidden></p>
+
+        <div class="recap">
+          <div class="tabs" role="tablist" aria-label="Editions" id="recap-tabs"></div>
+          <div class="recap__panel card" role="tabpanel" id="recap-panel" tabindex="0" aria-labelledby="recap-tabs">
+            <p class="hint" id="recap-hint">Choose any sentence to see why it says what it says: the events it cites, its claims, the gate verdicts and who wrote it.</p>
+            <div class="recap__text" id="recap-text"></div>
+          </div>
         </div>
       </div>
     </section>
@@ -283,6 +419,17 @@
             <div class="control-with-reason">
               <button type="button" class="button button--secondary" id="recompute"><span id="recompute-text">Recompute again</span></button>
             </div>
+          </section>
+
+          <section class="card verify-card" aria-labelledby="h-bundle">
+            <div class="card__head">
+              <h2 id="h-bundle">Run bundle</h2>
+              <span class="chip chip--neutral" id="bundle-chip">Not run</span>
+            </div>
+            <p class="run-kind" id="bundle-label">Design preview: sample run written by hand, not produced by the pipeline.</p>
+            <p id="bundle-source">The bundle check starts when you open this page. It downloads the run's sealed manifest and every edition file it lists, hashes them on your device and compares the results with the hash on the approval card.</p>
+            <p class="verify-overall" id="bundle-overall" aria-live="polite">Not run yet.</p>
+            <ul class="verify-list" id="bundle-list"></ul>
           </section>
 
           <section class="card" aria-labelledby="h-browser">
@@ -342,7 +489,7 @@
               <h2 id="h-real">What is real in this preview</h2>
               <span class="chip">Built</span>
             </div>
-            <p>This preview is a static site. The Match Centre replays synthetic matches from the generator's event files, and the Verify page recomputes those files' hashes in your browser. No agents run, nothing is published and no account is needed.</p>
+            <p>This preview is a static site. The Match Centre replays synthetic matches from the generator's event files, with fictional names from each seed's names file, and the Verify page recomputes those files' hashes in your browser. The Newsroom Wall, the stand-in approval card and the recap show one run, labelled on every screen as a design preview: sample run written by hand, not produced by the pipeline. Its gate verdicts and its bundle hash are computed by the real checks and the real seal over those hand-written sentences. No agents run, nothing is published and no account is needed.</p>
           </section>
 
           <section class="card" aria-labelledby="h-fulltime">
@@ -398,6 +545,19 @@
       <p><a href="https://github.com/upgradedev/agon-azure">Source on GitHub</a>, MIT licence.</p>
     </div>
   </footer>
+
+  <dialog class="dialog drawer" id="why-dialog" aria-labelledby="why-title">
+    <div class="dialog__body">
+      <span class="chip chip--neutral" id="why-edition">Edition</span>
+      <h2 id="why-title">Why this sentence says this</h2>
+      <blockquote class="why__quote" id="why-quote"></blockquote>
+      <dl class="why__list" id="why-list"></dl>
+      <p class="small"><a href="#/verify" id="why-verify">Recompute the bundle hash on Verify</a></p>
+      <div class="dialog__actions">
+        <button type="button" class="button button--secondary" id="why-close">Close</button>
+      </div>
+    </div>
+  </dialog>
 
   <dialog class="dialog" id="full-time-dialog" aria-labelledby="ft-title" aria-describedby="ft-desc">
     <div class="dialog__body">
