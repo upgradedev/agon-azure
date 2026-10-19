@@ -1,0 +1,84 @@
+name: determinism
+
+# Metric M1: the seeded generator must produce byte-identical output on ubuntu and windows.
+# Each OS generates seeds 1,2,3, uploads hash.txt plus the NDJSON output, and a final job
+# compares them. A mismatch prints both hash files and the first diverging event and fails.
+# The check is never relaxed; on divergence, fix the generator.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PYTHONPATH: src
+  PYTHONHASHSEED: random
+  SEEDS: "1,2,3"
+
+jobs:
+  generate:
+    name: generate (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install test runner (exact pin)
+        run: python -m pip install pytest==9.0.2
+      - name: Unit tests
+        run: python -m pytest -q -p no:cacheprovider tests
+      - name: Generate seeds and hashes
+        run: |
+          python -m agon.synth.manifest --seeds "$SEEDS" --print-hash \
+            --hash-out artifact/hash.txt --out artifact/out
+      - uses: actions/upload-artifact@v4
+        with:
+          name: synth-${{ matrix.os }}
+          path: artifact/
+          if-no-files-found: error
+          retention-days: 14
+
+  compare:
+    name: compare ubuntu vs windows
+    needs: generate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: synth-*
+          path: hashes
+      - name: List what was downloaded
+        run: find hashes -maxdepth 2 | sort
+      - name: Negative control (a one-byte change must fail the comparator)
+        run: |
+          cp -r hashes/synth-ubuntu-latest mutated
+          python - <<'PY'
+          path = "mutated/out/seed-0001/events.ndjson"
+          data = bytearray(open(path, "rb").read())
+          pos = data.index(b'"seq":3,')
+          data[pos + 6] = ord("4")
+          open(path, "wb").write(bytes(data))
+          PY
+          if python -m agon.synth.crosscheck hashes/synth-ubuntu-latest mutated; then
+            echo "comparator passed a mutated output: the gate has no teeth"
+            exit 1
+          fi
+          echo "negative control failed as required"
+      - name: Compare ubuntu and windows outputs
+        run: python -m agon.synth.crosscheck hashes/synth-ubuntu-latest hashes/synth-windows-latest
