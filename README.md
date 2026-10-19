@@ -6,7 +6,7 @@ Status: work in progress, nothing deployed yet.
 
 ## What is in the repo today
 
-Only the CI skeleton. Every push and pull request runs five jobs:
+Only the CI skeleton. Every pull request and every push to main runs five jobs:
 
 | Job | What fails it |
 |---|---|
@@ -23,11 +23,11 @@ The readiness gate is not yet run against a live URL, because nothing is deploye
 ```
 python ci/check_pins.py
 python ci/check_dashes.py
-python ci/readiness.py --offline <fixture dir>
+python ci/readiness.py --live
 python -m pytest -q
 ```
 
-The three scripts in `ci/` use the Python standard library only.
+`readiness.py --live` reads `ci/readiness.json` and fails until a demo URL exists. The three scripts in `ci/` use the Python standard library only.
 
 ## Open-source tooling
 
