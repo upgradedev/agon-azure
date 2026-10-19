@@ -110,6 +110,7 @@ def test_defensive_events_meet_the_carrier_in_the_fixed_frame() -> None:
     conversion, or using an x-only flip, breaks this on almost every defensive event.
     """
     checked = 0
+    total = 0
     for seed in SEEDS:
         result = _match(seed)
         home = result.meta["home"]
@@ -119,15 +120,15 @@ def test_defensive_events_meet_the_carrier_in_the_fixed_frame() -> None:
                 continue
             chain = ev.possession_chain_id
             if ev.type in DEFENSIVE:
+                total += 1
                 attacker = last_attack.get(chain)
-                if attacker is None:
-                    continue
+                assert attacker is not None, ("defensive event with no carrier in its chain", seed, ev)
                 assert attacker.team != ev.team, (seed, ev)
                 assert to_fixed_frame(ev, home)[:2] == _carrier_spot(attacker, home), (seed, attacker, ev)
                 checked += 1
             else:
                 last_attack[chain] = ev
-    assert checked > 200, checked
+    assert checked == total > 200, (checked, total)
 
 
 def test_interception_restarts_where_the_pass_ended() -> None:

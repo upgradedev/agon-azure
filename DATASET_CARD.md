@@ -42,7 +42,7 @@ Stored coordinates use the **acting team's attacking frame**. The match meta rec
   defending team. They are stored in that team's frame, which is the 180 degree rotation of the
   ball carrier's frame in the same possession chain.
 - Restart points (the possession_change and set_piece that open a chain) are stored in the frame
-  of the team that gains the ball.
+  of the team that takes the restart (on a free kick, the fouled team keeps the ball).
 
 To get one pitch picture, call `agon.synth.schema.to_fixed_frame(event, home_id)`. It returns
 `(x, y, end_x, end_y)` in the frame `home_attacks_high_x_both_periods`:
@@ -61,7 +61,9 @@ Worked example, home club `C1`, away club `C2`:
 | `C1` pass from | (300, 200) | (300, 200) |
 
 The carrier and the presser land on the same spot only after conversion. `tests/test_synth_frame.py`
-pins this example and checks it on every pressure, tackle and foul of generated seeds 11 to 15.
+pins this example. It also checks all 1341 pressure, tackle and foul events of generated seeds 11
+to 15 (match index 0) against the carrier's spot, with none skipped, and every interception
+restart against the end of the intercepted pass.
 
 Known quirk: a `sub` event is stored at `(525, 0)`, a fixed marker on the `y_dm = 0` touchline of the
 substituting team's frame. In the fixed frame the two clubs' substitutions therefore appear on
