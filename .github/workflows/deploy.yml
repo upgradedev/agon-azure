@@ -490,6 +490,7 @@ jobs:
       STORAGE_ACCOUNT: ${{ needs.deploy.outputs.storage_account }}
       TEAMS_GROUP_ID: ${{ vars.AGON_TEAMS_GROUP_ID }}
       TEAMS_CHANNEL_ID: ${{ vars.AGON_TEAMS_CHANNEL_ID }}
+      TEAMS_NEWSROOM_CHANNEL_ID: ${{ vars.AGON_TEAMS_NEWSROOM_CHANNEL_ID }}
       OFFICER_EMAIL: ${{ vars.AGON_OFFICER_EMAIL }}
       CI_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
     steps:
@@ -553,11 +554,11 @@ jobs:
       - name: What-if flows.bicep (read only)
         if: steps.gate.outputs.ready == 'true'
         run: |
-          az deployment group what-if             --resource-group "$RESOURCE_GROUP"             --name "$FLOWS_DEPLOYMENT_NAME"             --template-file infra/flows.bicep             --parameters location="$LOCATION" storageAccountName="$STORAGE_ACCOUNT"                          teamsGroupId="$TEAMS_GROUP_ID" teamsChannelId="$TEAMS_CHANNEL_ID"                          ciClientId="$CI_CLIENT_ID" outlookConnected="${{ steps.outlook.outputs.connected }}"                          officerEmail="$OFFICER_EMAIL"
+          az deployment group what-if             --resource-group "$RESOURCE_GROUP"             --name "$FLOWS_DEPLOYMENT_NAME"             --template-file infra/flows.bicep             --parameters location="$LOCATION" storageAccountName="$STORAGE_ACCOUNT"                          teamsGroupId="$TEAMS_GROUP_ID" teamsChannelId="$TEAMS_CHANNEL_ID"                          ciClientId="$CI_CLIENT_ID" outlookConnected="${{ steps.outlook.outputs.connected }}"                          officerEmail="$OFFICER_EMAIL" teamsNewsroomChannelId="$TEAMS_NEWSROOM_CHANNEL_ID"
       - name: Deploy flows.bicep (incremental only, never complete)
         if: steps.gate.outputs.ready == 'true'
         run: |
-          az deployment group create             --resource-group "$RESOURCE_GROUP"             --name "$FLOWS_DEPLOYMENT_NAME"             --template-file infra/flows.bicep             --parameters location="$LOCATION" storageAccountName="$STORAGE_ACCOUNT"                          teamsGroupId="$TEAMS_GROUP_ID" teamsChannelId="$TEAMS_CHANNEL_ID"                          ciClientId="$CI_CLIENT_ID" outlookConnected="${{ steps.outlook.outputs.connected }}"                          officerEmail="$OFFICER_EMAIL"             --mode Incremental --query "properties.outputs" --output json
+          az deployment group create             --resource-group "$RESOURCE_GROUP"             --name "$FLOWS_DEPLOYMENT_NAME"             --template-file infra/flows.bicep             --parameters location="$LOCATION" storageAccountName="$STORAGE_ACCOUNT"                          teamsGroupId="$TEAMS_GROUP_ID" teamsChannelId="$TEAMS_CHANNEL_ID"                          ciClientId="$CI_CLIENT_ID" outlookConnected="${{ steps.outlook.outputs.connected }}"                          officerEmail="$OFFICER_EMAIL" teamsNewsroomChannelId="$TEAMS_NEWSROOM_CHANNEL_ID"             --mode Incremental --query "properties.outputs" --output json
 
   # Spec 3.2 rows 2, 9, 11 and 16: build the one job image, push it to the registry
   # as <registry>/agon:<commit sha>, then deploy infra/apps.bicep (deployment
@@ -625,7 +626,7 @@ jobs:
       # stdout, a file or a parameter; the worker authenticates with an Entra token.
       - name: Read the approval flow trigger URLs (base path and api-version only, never the SAS)
         run: |
-          for name in la-agon-teams-approval la-agon-outlook-approval; do
+          for name in la-agon-teams-approval la-agon-outlook-approval la-agon-teams-post; do
             id="$(az resource show --resource-group "$RESOURCE_GROUP" --resource-type Microsoft.Logic/workflows --name "$name" --query id --output tsv 2>/dev/null || true)"
             if [ -z "$id" ]; then
               echo "$name is not deployed; its URL stays empty"
@@ -670,8 +671,9 @@ jobs:
               "staticSiteHostname": env.get("STATIC_SITE_HOSTNAME", ""),
               "teamsFlowUrl": flow_url("la-agon-teams-approval"),
               "outlookFlowUrl": flow_url("la-agon-outlook-approval"),
+              "teamsPostUrl": flow_url("la-agon-teams-post"),
           }
-          for key in ("teamsFlowUrl", "outlookFlowUrl"):
+          for key in ("teamsFlowUrl", "outlookFlowUrl", "teamsPostUrl"):
               if "sig=" in values[key].lower():
                   sys.exit(f"{key} carries a SAS signature; refusing to pass it on")
           body = {
@@ -684,7 +686,7 @@ jobs:
           with open(env["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
               fh.write(f"### apps parameters\n\n- ai job: {env.get('AI_RESULT')}\n")
               fh.write(f"- AI parameters present: {all(values[k] for k in ('foundryProjectEndpoint', 'translatorCustomEndpoint', 'speechEndpoint', 'speechResourceId'))}; deployments: {names}\n")
-              fh.write(f"- Teams flow URL: {'set' if values['teamsFlowUrl'] else 'empty (no card)'}; Outlook flow URL: {'set' if values['outlookFlowUrl'] else 'empty (no email)'}\n")
+              fh.write(f"- Teams flow URL: {'set' if values['teamsFlowUrl'] else 'empty (no card)'}; Outlook flow URL: {'set' if values['outlookFlowUrl'] else 'empty (no email)'}; Teams post URL: {'set' if values['teamsPostUrl'] else 'empty (no newsroom post)'}\n")
           PY
       - name: What-if apps.bicep (read only)
         run: |

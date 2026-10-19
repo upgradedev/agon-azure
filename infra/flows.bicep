@@ -46,6 +46,9 @@ param teamsChannelId string
 @minLength(1)
 param ciClientId string
 
+@description('Standard channel id of the internal Newsroom channel in the same team. The post flow (half-time brief, newsroom notification) deploys only when it is set.')
+param teamsNewsroomChannelId string = ''
+
 @description('True once the agon-outlook connection reads Connected; the Outlook flow is skipped until then.')
 param outlookConnected bool = false
 
@@ -75,6 +78,10 @@ resource logicIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01
 
 resource fleetIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' existing = {
   name: 'id-fleet'
+}
+
+resource publisherIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' existing = {
+  name: 'id-publisher'
 }
 
 // Created and authorised for gate T on 2026-10-19. Referenced, never redeclared:
@@ -125,6 +132,25 @@ var accessControl = {
           ])
         })
       }
+    }
+  }
+}
+
+// The post flow also admits the Publisher, which sends the newsroom notification of
+// an approved bundle (destination newsroom_teams) after it publishes.
+var postAccessControl = {
+  triggers: {
+    openAuthenticationPolicies: {
+      policies: union(accessControl.triggers.openAuthenticationPolicies.policies, {
+        publisher: union(callers, {
+          claims: concat(callers.claims, [
+            {
+              name: 'appid'
+              value: publisherIdentity.properties.clientId
+            }
+          ])
+        })
+      })
     }
   }
 }
@@ -879,6 +905,256 @@ resource teamsFlow 'Microsoft.Logic/workflows@2019-05-01' = {
   }
 }
 
+// la-agon-teams-post: post one informational card to the internal Newsroom channel.
+// No approval and no wait: it carries the half-time brief (fleet, during play) and
+// the newsroom notification of a published report (Publisher). With
+// reply_to_message_id it replies in that message's thread, which is how an erratum
+// notice reaches the thread of the report it corrects. It answers with the posted
+// message id, so a caller can thread later replies under it.
+resource postFlow 'Microsoft.Logic/workflows@2019-05-01' = if (!empty(teamsNewsroomChannelId)) {
+  name: 'la-agon-teams-post'
+  location: location
+  tags: tags
+  properties: {
+    state: 'Enabled'
+    accessControl: postAccessControl
+    parameters: {
+      '$connections': {
+        value: {
+          teams: {
+            connectionId: teamsConnection.id
+            connectionName: teamsConnection.name
+            id: subscriptionResourceId('Microsoft.Web/locations/managedApis', location, 'teams')
+          }
+        }
+      }
+    }
+    definition: {
+      '$schema': 'https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#'
+      contentVersion: '1.0.0.0'
+      parameters: {
+        '$connections': {
+          type: 'Object'
+          defaultValue: {}
+        }
+      }
+      triggers: {
+        manual: {
+          type: 'Request'
+          kind: 'Http'
+          inputs: {
+            schema: {
+              type: 'object'
+              required: [
+                'kind'
+                'title'
+              ]
+              properties: {
+                kind: {
+                  type: 'string'
+                }
+                title: {
+                  type: 'string'
+                }
+                subtitle: {
+                  type: 'string'
+                }
+                facts: {
+                  type: 'array'
+                }
+                lines: {
+                  type: 'array'
+                }
+                link_url: {
+                  type: 'string'
+                }
+                link_title: {
+                  type: 'string'
+                }
+                reply_to_message_id: {
+                  type: 'string'
+                }
+              }
+            }
+          }
+        }
+      }
+      actions: {
+        Fact_rows: {
+          type: 'Select'
+          runAfter: {}
+          inputs: {
+            from: '@coalesce(triggerBody()?[\'facts\'], json(\'[]\'))'
+            select: {
+              title: '@{item()?[\'title\']}'
+              value: '@{item()?[\'value\']}'
+            }
+          }
+        }
+        Line_blocks: {
+          type: 'Select'
+          runAfter: {
+            Fact_rows: [
+              'Succeeded'
+            ]
+          }
+          inputs: {
+            from: '@coalesce(triggerBody()?[\'lines\'], json(\'[]\'))'
+            select: {
+              type: 'TextBlock'
+              wrap: true
+              text: '@{item()}'
+            }
+          }
+        }
+        Card: {
+          type: 'Compose'
+          runAfter: {
+            Line_blocks: [
+              'Succeeded'
+            ]
+          }
+          inputs: {
+            type: 'AdaptiveCard'
+            '$schema': 'http://adaptivecards.io/schemas/adaptive-card.json'
+            version: '1.4'
+            body: [
+              {
+                type: 'TextBlock'
+                size: 'Medium'
+                weight: 'Bolder'
+                wrap: true
+                text: '@{triggerBody()?[\'title\']}'
+              }
+              {
+                type: 'TextBlock'
+                wrap: true
+                isSubtle: true
+                text: '@{coalesce(triggerBody()?[\'subtitle\'], \'\')}'
+              }
+              {
+                type: 'FactSet'
+                facts: '@body(\'Fact_rows\')'
+              }
+              {
+                type: 'Container'
+                items: '@if(empty(body(\'Line_blocks\')), createArray(json(\'{"type":"TextBlock","wrap":true,"isSubtle":true,"text":"No further notes."}\')), body(\'Line_blocks\'))'
+              }
+              {
+                type: 'TextBlock'
+                wrap: true
+                isSubtle: true
+                size: 'Small'
+                text: 'Synthetic match. Numbers computed by code from the event log; internal channel, not published.'
+              }
+            ]
+            actions: '@if(empty(coalesce(triggerBody()?[\'link_url\'], \'\')), json(\'[]\'), createArray(json(concat(\'{"type":"Action.OpenUrl","title":\', string(coalesce(triggerBody()?[\'link_title\'], \'Open\')), \',"url":\', string(triggerBody()?[\'link_url\']), \'}\'))))'
+          }
+        }
+        Is_reply: {
+          type: 'If'
+          runAfter: {
+            Card: [
+              'Succeeded'
+            ]
+          }
+          expression: {
+            and: [
+              {
+                not: {
+                  equals: [
+                    '@coalesce(triggerBody()?[\'reply_to_message_id\'], \'\')'
+                    ''
+                  ]
+                }
+              }
+            ]
+          }
+          actions: {
+            Reply_card: {
+              type: 'ApiConnection'
+              runAfter: {}
+              inputs: {
+                host: {
+                  connection: {
+                    name: '@parameters(\'$connections\')[\'teams\'][\'connectionId\']'
+                  }
+                }
+                method: 'post'
+                path: teamsPath('replyWithAdaptivecard')
+                body: {
+                  recipient: {
+                    groupId: teamsGroupId
+                    channelId: teamsNewsroomChannelId
+                  }
+                  parentMessageId: '@triggerBody()?[\'reply_to_message_id\']'
+                  messageBody: '@{string(outputs(\'Card\'))}'
+                }
+              }
+            }
+            Reply_response: {
+              type: 'Response'
+              kind: 'Http'
+              runAfter: {
+                Reply_card: [
+                  'Succeeded'
+                ]
+              }
+              inputs: {
+                statusCode: 200
+                body: {
+                  message_id: '@body(\'Reply_card\')?[\'id\']'
+                  thread_of: '@triggerBody()?[\'reply_to_message_id\']'
+                }
+              }
+            }
+          }
+          else: {
+            actions: {
+              Post_card: {
+                type: 'ApiConnection'
+                runAfter: {}
+                inputs: {
+                  host: {
+                    connection: {
+                      name: '@parameters(\'$connections\')[\'teams\'][\'connectionId\']'
+                    }
+                  }
+                  method: 'post'
+                  path: teamsPath('adaptivecard')
+                  body: {
+                    recipient: {
+                      groupId: teamsGroupId
+                      channelId: teamsNewsroomChannelId
+                    }
+                    messageBody: '@{string(outputs(\'Card\'))}'
+                  }
+                }
+              }
+              Post_response: {
+                type: 'Response'
+                kind: 'Http'
+                runAfter: {
+                  Post_card: [
+                    'Succeeded'
+                  ]
+                }
+                inputs: {
+                  statusCode: 200
+                  body: {
+                    message_id: '@body(\'Post_card\')?[\'id\']'
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+      outputs: {}
+    }
+  }
+}
+
 resource outlookFlow 'Microsoft.Logic/workflows@2019-05-01' = if (outlookConnected) {
   name: 'la-agon-outlook-approval'
   location: location
@@ -1039,3 +1315,4 @@ resource outlookFlow 'Microsoft.Logic/workflows@2019-05-01' = if (outlookConnect
 
 output teamsFlowName string = teamsFlow.name
 output outlookFlowName string = outlookConnected ? 'la-agon-outlook-approval' : ''
+output postFlowName string = !empty(teamsNewsroomChannelId) ? 'la-agon-teams-post' : ''

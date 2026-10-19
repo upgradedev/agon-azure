@@ -81,6 +81,9 @@ param teamsFlowUrl string = ''
 @description('Trigger base URL of la-agon-outlook-approval with api-version only. Empty: no approval email.')
 param outlookFlowUrl string = ''
 
+@description('Trigger base URL of la-agon-teams-post with api-version only (listCallbackUrl basePath; never the SAS). Empty: no Newsroom post (half-time brief, newsroom notification).')
+param teamsPostUrl string = ''
+
 @description('Extra tags. app=agon is always applied and cannot be overridden.')
 param extraTags object = {}
 
@@ -335,6 +338,10 @@ resource fleetJob 'Microsoft.App/jobs@2025-01-01' = if (fleetEnabled) {
               value: teamsFlowUrl
             }
             {
+              name: 'AGON_TEAMS_POST_URL'
+              value: teamsPostUrl
+            }
+            {
               name: 'AGON_OUTLOOK_FLOW_URL'
               value: outlookFlowUrl
             }
@@ -459,6 +466,10 @@ resource publisherJobs 'Microsoft.App/jobs@2025-01-01' = [for (publisher, i) in 
             {
               name: 'AZURE_CLIENT_ID'
               value: publisherIdentities[i].properties.clientId
+            }
+            {
+              name: 'AGON_TEAMS_POST_URL'
+              value: publisher.target == 'feed' ? teamsPostUrl : ''
             }
           ]
           resources: {

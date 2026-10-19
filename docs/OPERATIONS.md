@@ -199,6 +199,10 @@ Owner steps, each once:
 2. After the first `flows` run creates the `agon-outlook` connection: rg-agon-swc, API connection `agon-outlook`, Edit API connection, Authorize (sign in with the officer's mailbox), Save. Then set `AGON_OFFICER_EMAIL`. The next deploy adds the Outlook flow. The workflow creates the connection only if it is missing and never redeploys it, so the consent survives.
 3. The rbac deploy (step 3 above) grants `id-logicapp` Sender on the two decision queues. Without it, a decision fails at the queue write and the run history shows 403.
 
+### The Newsroom post flow: `la-agon-teams-post`
+
+An informational card to the internal Newsroom channel of team "agon": no approval, no wait. It carries the half-time brief (from the fleet, during play) and the newsroom notification of a published report (destination `newsroom_teams`, from the feed Publisher); with `reply_to_message_id` it replies in that message's thread, which is how a correction reaches the thread of the report it corrects. It answers with the posted `message_id`. Its trigger admits Entra tokens from `id-fleet`, `id-publisher` and the CI identity only. It deploys only when the repository variable `AGON_TEAMS_NEWSROOM_CHANNEL_ID` is set; the apps job passes its trigger base URL (api-version only, never the SAS) to the fleet and feed Publisher jobs as `AGON_TEAMS_POST_URL`.
+
 ### The fleet worker: `job-agon-fleet` (spec 3.2 row 2, 3.4 steps 2 to 6)
 
 The `apps` job deploys `job-agon-fleet` beside the intake job, after `ai` and `flows`, as id-fleet. It runs `python -m agon.fleet.worker --ensure-agents --idle-exit 60` when KEDA sees a message on `runs` or `decisions`.

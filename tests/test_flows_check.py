@@ -38,6 +38,7 @@ MUTATIONS = [
     ("data: '@body(\\'Post_card_and_wait\\')?[\\'data\\']'", "data: '@triggerBody()'", "no longer forwards data"),
     ("Options: 'Approve and confirm flagged sentences, Approve, Request changes'", "Options: 'Approve, Reject'", "the Outlook flow offers"),
     ("    accessControl: accessControl\n", "", "Entra caller policy"),
+    ("    accessControl: postAccessControl\n", "", "Entra caller policy"),
     ("param teamsGroupId string\n", "param teamsGroupId string = '00000000-1111-2222-3333-444444444444'\n", "a GUID literal is committed"),
     ("param teamsChannelId string\n", "param teamsChannelId string = '19:abcdef0123@thread.tacv2'\n", "a Teams thread id is committed"),
     ("resource teamsConnection 'Microsoft.Web/connections@2016-06-01' existing = {", "resource teamsConnection 'Microsoft.Web/connections@2016-06-01' = {", "declares the agon-teams connection"),
