@@ -20,6 +20,7 @@ from agon.agents.fakes import FakeModel, FakeTranslator  # noqa: E402
 from agon.fleet import stores  # noqa: E402
 from agon.fleet.checkpoints import GuardedCheckpointStorage, file_storage  # noqa: E402
 from agon.fleet.contracts import (  # noqa: E402
+    AWAITING_DECISION,
     CHANGES_REQUESTED,
     EXECUTOR_IDS,
     PUBLISH_ALREADY_REQUESTED,
@@ -168,3 +169,13 @@ def test_an_unknown_match_is_refused_at_ingest(tmp_path: Path) -> None:
     bad = RunInput(run_id="run-x", match_ref={"source": "synth", "seed": -5, "match_index": 0})
     _, _, handoff = _start(tmp_path, run_in=bad)
     assert [o["status"] for o in handoff["outcomes"]] == [REFUSED_AT_INGEST]
+
+
+def test_a_redelivered_run_message_ends_at_ingest_without_a_second_nonce(tmp_path: Path) -> None:
+    """Spec 3.5: the runs queue delivers at least once; the graph re-entered after the pause redoes nothing."""
+    deps, _, handoff = _start(tmp_path)
+    _, _, again = _start(tmp_path)
+    assert again["state"] == "ended"
+    assert [o["status"] for o in again["outcomes"]] == [AWAITING_DECISION]
+    assert handoff["checkpoint_id"] in again["outcomes"][0]["detail"]
+    assert deps.store.keys(verifier.NONCES) == [handoff["card"]["nonce"]]
