@@ -1,8 +1,21 @@
-# The React console (console/): install from the lock, type-check, unit tests,
-# build and prerender, the static web checks on the built site, a rehearsal of
-# the deploy stamp and of the live readiness gate on the exact bytes that would
-# ship, then Playwright in Chromium (every screen at 375 and 1280 px, light and
-# dark, axe, keyboard path, fail on any CSP violation or console error).
+# The React console (console/), which the deploy workflow ships as the live
+# site: install from the lock, type-check, unit tests, build and prerender, the
+# static web checks on the built site, a rehearsal of the deploy stamp and of
+# the live readiness gate on the exact bytes that would ship, the page tests of
+# tests/test_web_runs.py and tests/test_readiness_config.py on that stamped
+# copy (AGON_SITE_DIR), then Playwright in Chromium (every screen at 375 and
+# 1280 px, light and dark, axe, keyboard path, fail on any CSP violation or
+# console error).
+#
+# Recorded-run rehearsal: the same build once more with a recorded pipeline run
+# listed first. tests/recorded_kit.py seals, approves (Teams card) and
+# publishes a synthetic bundle with the real seal, verifier and Publisher;
+# python -m agon.webrecord exports it into a copy of web/runs and rewrites a
+# copy of ci/readiness.json, exactly as the build session will for the first
+# real run; then the prerender, the stamp, ci/web_check.py and the offline
+# live gate (with the rewritten config) run on that build, and the Playwright
+# project "recorded" walks the judge path on it. So the site and the gate are
+# proven green after a recorded run is committed, not only before.
 #
 # Nothing installs on a developer machine: every dependency installs here.
 # Dependencies are exact pins in console/package.json; npm resolves them, and
@@ -121,6 +134,38 @@ jobs:
           python scripts/readiness_offline.py "$site" "$RUNNER_TEMP/readiness" ../README.md
           python ../ci/readiness.py --offline "$RUNNER_TEMP/readiness" --set-host agon.example --add-marker "demo=$GITHUB_SHA"
 
+      - name: Install the pinned test runner (requirements/dev.txt, exact pins)
+        working-directory: ${{ github.workspace }}
+        run: python -m pip install --disable-pip-version-check -r requirements/dev.txt
+
+      - name: Page tests on the stamped copy (a missing page fails, never skips)
+        working-directory: ${{ github.workspace }}
+        env:
+          AGON_SITE_DIR: ${{ runner.temp }}/site
+        run: python -m pytest -q -rs -p no:cacheprovider tests/test_web_runs.py tests/test_readiness_config.py
+
+      - name: Rehearse a recorded run listed first (export, build, stamp, checks, live gate offline)
+        env:
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: |
+          feed="$RUNNER_TEMP/recorded-feed"
+          runs="$RUNNER_TEMP/runs-recorded"
+          config="$RUNNER_TEMP/readiness-recorded.json"
+          rm -rf "$feed" "$runs" "$RUNNER_TEMP/readiness-recorded" dist-recorded
+          cp -r ../web/runs "$runs"
+          cp ../ci/readiness.json "$config"
+          sha="$(python ../tests/recorded_kit.py "$feed")"
+          python -m agon.webrecord --local "$feed" --bundle "$sha"             --commit 0123456789abcdef0123456789abcdef01234567 --approver-role approver --channel teams             --out "$runs" --readiness "$config"
+          python -m agon.webrun --check "$runs"
+          npx --no-install vite build --outDir dist-recorded --emptyOutDir
+          npm run build:ssr
+          node scripts/prerender.mjs --site dist-recorded --runs "$runs"
+          python -m agon.webdata --seeds "$PUBLISHED_SEEDS" --out dist-recorded/data
+          python ../ci/stamp_web.py dist-recorded --sha "$GITHUB_SHA" --data-dir dist-recorded/data --seeds "$PUBLISHED_SEEDS"
+          python ../ci/web_check.py dist-recorded
+          python scripts/readiness_offline.py dist-recorded "$RUNNER_TEMP/readiness-recorded" ../README.md
+          python ../ci/readiness.py --offline "$RUNNER_TEMP/readiness-recorded" --config "$config" --set-host agon.example --add-marker "demo=$GITHUB_SHA"
+
       - name: Stamp the built site as the deploy would (data, season files, commit) for the end-to-end tests
         env:
           PYTHONPATH: ${{ github.workspace }}/src
@@ -131,7 +176,7 @@ jobs:
       - name: Install Chromium for Playwright (here only)
         run: npx --no-install playwright install --with-deps chromium
 
-      - name: End-to-end tests (Chromium, axe, CSP violations, keyboard path, screenshots)
+      - name: End-to-end tests (Chromium, axe, CSP violations, keyboard path, screenshots; both projects)
         run: npx --no-install playwright test
 
       - name: Upload the screenshots

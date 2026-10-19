@@ -47,6 +47,73 @@ PAGE_LABEL_MARKERS = (
     ("recap", 'id="recap-label">Not approved. ' + DESIGN_PREVIEW_LABEL),
 )
 
+# The edition label the recap shows, the same rule as editionLabel in console/src/lib/runs.ts:
+# "approved" only on a pipeline run whose approval names its own bundle hash.
+APPROVED_LABEL_PREFIX = (
+    "AI-drafted. Numbers and names checked by code. Headline report and flagged sentences "
+    "approved by the club media office at "
+)
+_SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_UTC = re.compile(r"^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2})")
+
+
+def edition_label(run: dict) -> str:
+    """The recap's edition label for one run, word for word as the console renders it."""
+    approval = run.get("approval") if isinstance(run.get("approval"), dict) else {}
+    bundle = run.get("bundle") if isinstance(run.get("bundle"), dict) else {}
+    sha = bundle.get("sha256")
+    approved = (
+        run.get("provenance") == "pipeline"
+        and approval.get("status") == "approved"
+        and isinstance(sha, str)
+        and bool(_SHA256.match(sha))
+        and approval.get("approved_bundle_sha256") == sha
+    )
+    if approved:
+        moment = str(approval.get("approved_at"))
+        m = _UTC.match(moment)
+        when = f"{m.group(4)}:{m.group(5)} UTC on {m.group(1)}-{m.group(2)}-{m.group(3)}" if m else moment
+        return f"{APPROVED_LABEL_PREFIX}{when}."
+    if run.get("provenance") == "design_preview":
+        return f"Not approved. {DESIGN_PREVIEW_LABEL} No AI wrote these editions and no media officer has approved them."
+    if approval.get("status") == "approved":
+        return "AI-drafted. Numbers and names checked by code. Not approved: the approval on file does not name this bundle hash."
+    if approval.get("status") == "changes_requested":
+        return "AI-drafted. Numbers and names checked by code. The club media office asked for changes, so this edition is not approved."
+    return "AI-drafted. Numbers and names checked by code. Not yet approved by the club media office."
+
+
+def page_label_markers(run: dict) -> tuple[tuple[str, str], ...]:
+    """Where the page states which run it shows, anchored to each screen's label element.
+
+    A design preview needs exactly PAGE_LABEL_MARKERS. A pipeline run needs its own run label on
+    the Wall and the approval card and its edition label on the recap, each in full.
+    """
+    if run.get("provenance") == "design_preview":
+        return PAGE_LABEL_MARKERS
+    label = str(run.get("label", ""))
+    return (
+        ("Newsroom Wall", 'id="wall-label">' + label),
+        ("approval card", 'id="approve-label">' + label),
+        ("recap", 'id="recap-label">' + edition_label(run)),
+    )
+
+
+def default_run(web_dir: Path) -> tuple[str, dict] | None:
+    """(file name, run) of the run the page shows by default: the first in runs/index.json."""
+    index_path = web_dir / RUNS_DIR / "index.json"
+    if not index_path.is_file():
+        return None
+    index = json.loads(index_path.read_text(encoding="utf-8"))
+    rows = index.get("runs") if isinstance(index, dict) else None
+    if not isinstance(rows, list) or not rows or not isinstance(rows[0], dict):
+        return None
+    name = str(rows[0].get("file", ""))
+    path = web_dir / RUNS_DIR / name
+    if "/" in name or not path.is_file():
+        return None
+    return name, json.loads(path.read_text(encoding="utf-8"))
+
 # Characters and their escaped spellings. Built with chr() on purpose so this
 # file itself contains no dash characters, even after an editor round trip.
 DASH_CHARS = {chr(0x2014): "em dash", chr(0x2013): "en dash", chr(0x2015): "horizontal bar"}
@@ -554,16 +621,13 @@ def scan(web_dir: Path) -> tuple[int, list[Violation]]:
         if required not in names:
             out.append(Violation("missing-file", required, 0, "required web file is missing"))
 
-    previews: list[str] = []
     for path in files:
         rel = path.relative_to(web_dir).as_posix()
         text = path.read_text(encoding="utf-8")
         out.extend(check_dashes(rel, text))
         if _is_run_file(rel):
-            found, preview = check_run_label(rel, text)
+            found, _ = check_run_label(rel, text)
             out.extend(found)
-            if preview:
-                previews.append(rel)
         suffix = path.suffix.lower()
         if suffix == ".html":
             out.extend(check_html(rel, text, require_commit=(rel == "index.html")))
@@ -573,15 +637,20 @@ def scan(web_dir: Path) -> tuple[int, list[Violation]]:
             out.extend(check_css(rel, text))
         elif rel == CONFIG_NAME:
             out.extend(check_config(rel, text))
-    # The readiness gate reads index.html without running scripts, so the label
-    # must be in the page itself whenever a design preview run ships.
+    # The readiness gate reads index.html without running scripts, so the page itself must say
+    # which run it shows by default (the first in runs/index.json), in place on each screen: the
+    # exact design preview label for the hand-written sample, the run's own label and its edition
+    # label for a recorded pipeline run.
     index = web_dir / "index.html"
-    if previews and index.is_file():
+    shown = default_run(web_dir)
+    if shown is not None and index.is_file():
+        name, run = shown
         page = index.read_text(encoding="utf-8")
-        for screen, marker in PAGE_LABEL_MARKERS:
+        what = "a design preview" if run.get("provenance") == "design_preview" else "the recorded run shown by default"
+        for screen, marker in page_label_markers(run):
             if marker not in page:
                 out.append(Violation("run-label-page", "index.html", 1,
-                                     f"{', '.join(previews)} is a design preview, so the {screen} must state "
+                                     f"runs/{name} is {what}, so the {screen} must state "
                                      f"the label in place: {marker!r}"))
     return len(files), out
 

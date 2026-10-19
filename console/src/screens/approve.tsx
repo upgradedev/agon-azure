@@ -22,6 +22,7 @@ import {
   STANDIN_HEADER,
   approveAttempt,
   attestation,
+  decidedMessage,
   matchLine,
   notDeployedMessage,
   sentenceById,
@@ -101,6 +102,12 @@ export function Approve({ active, loaded, error, blownSeed, onDecided }: Props) 
     if (!run) {
       return;
     }
+    const decided = decidedMessage(run);
+    if (decided) {
+      setResult({ tone: "info", text: decided });
+      onDecided();
+      return;
+    }
     const attempt = approveAttempt(run, ticked, chosenLabels);
     setMissing(attempt.missing);
     setResult({ tone: attempt.ok ? "info" : "warning", text: attempt.message });
@@ -115,7 +122,7 @@ export function Approve({ active, loaded, error, blownSeed, onDecided }: Props) 
     if (!run) {
       return;
     }
-    setResult({ tone: "info", text: notDeployedMessage("changes", run) });
+    setResult({ tone: "info", text: decidedMessage(run) ?? notDeployedMessage("changes", run) });
     onDecided();
   }
 

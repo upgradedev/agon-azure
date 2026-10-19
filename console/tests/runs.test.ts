@@ -19,6 +19,7 @@ import {
   attestation,
   bundleCheck,
   compareApproved,
+  decidedMessage,
   editionLabel,
   isApproved,
   lastStep,
@@ -27,12 +28,14 @@ import {
   validateIndex,
   validateRun,
   wallItems,
+  runForBlow,
   why,
+  withheldPayloads,
 } from "../src/lib/runs";
 import { chipsFor } from "../src/lib/destinations";
-import { loadRunsData } from "../src/lib/loader";
+import { loadRunsData, type FetchText } from "../src/lib/loader";
 import type { BundleManifest, Destination, Run } from "../src/lib/types";
-import { CASES, WEB, diskFetch, readJson } from "./helpers";
+import { CASES, RECORDED, WEB, afterFetch, diskFetch, diskFetchAt, readJson } from "./helpers";
 
 type Op = { path: (string | number)[]; delete?: boolean; value?: unknown; from?: (string | number)[] };
 type RunCase = { case: string; valid: boolean; problem?: string; ops?: Op[]; replace?: unknown };
@@ -241,7 +244,7 @@ describe("wall, why and the bundle check", () => {
 
   it("lists the cited events, claims, gates and author for a sentence", async () => {
     const data = await loadRunsData(diskFetch);
-    const loaded = data.runs[data.defaultRunId];
+    const loaded = data.runs["sample-s1"];
     const en = loaded.editions.en;
     const w = why(loaded.run, en.meta, en.data.sentences[4], 4);
     expect(w.confirm).toBe(true);
@@ -270,5 +273,120 @@ describe("wall, why and the bundle check", () => {
     const bad = bundleCheck(run, manifest, flipped);
     expect(bad.ok).toBe(false);
     expect(bad.rows.find((r) => r.name === "edition-el.json")?.status).toBe("mismatch");
+  });
+});
+
+/* The export of tests/recorded_kit.py by agon.webrecord, committed under
+   tests/fixtures/recorded-run and held byte for byte by tests/test_webrecord.py:
+   what the site shows once a real recorded run is the default. */
+describe("the recorded run written by agon.webrecord", () => {
+  const runsDir = join(RECORDED, "runs");
+  const row = readJson<{ runs: { run_id: string; file: string; provenance: string }[] }>(join(runsDir, "index.json")).runs[0];
+  const recorded = (): Run => readJson<Run>(join(runsDir, row.file));
+
+  it("passes the browser's index and run rules", () => {
+    expect(validateIndex(readJson(join(runsDir, "index.json")))).toEqual([]);
+    expect(row.provenance).toBe("pipeline");
+    expect(validateRun(recorded())).toEqual([]);
+  });
+
+  it("carries the approved label because its approval names its own bundle hash", () => {
+    const run = recorded();
+    expect(run.label).toBe("Recorded run, 2026-10-21, commit 0123456");
+    expect(isApproved(run)).toBe(true);
+    expect(editionLabel(run)).toBe(
+      "AI-drafted. Numbers and names checked by code. Headline report and flagged sentences approved by the club media office at 18:05 UTC on 2026-10-21.",
+    );
+    const other = clone(run);
+    other.approval.approved_bundle_sha256 = "0".repeat(64);
+    expect(isApproved(other)).toBe(false);
+  });
+
+  it("tells the visitor the decision was already taken, and on which channel", () => {
+    expect(decidedMessage(recorded())).toBe(
+      "This report was already approved on Microsoft Teams by the approver at 18:05 UTC on 2026-10-21 and published, " +
+        "for bundle afc16bdd87a7. This stand-in card sends nothing more.",
+    );
+    expect(decidedMessage(sampleRun())).toBeNull();
+  });
+
+  it("recomputes the bundle hash and every published file, and reports the unticked payloads as withheld", () => {
+    const run = recorded();
+    const dir = join(runsDir, run.bundle.dir);
+    const manifestBytes = readFileSync(join(dir, "manifest.json"));
+    const manifest = JSON.parse(manifestBytes.toString("utf8")) as BundleManifest;
+    const withheld = withheldPayloads(run);
+    expect([...withheld].sort()).toEqual(["destination-journalist_email.json", "destination-youtube.json"]);
+    const files: Record<string, { sha256: string; bytes: number }> = {};
+    for (const name of Object.keys(manifest.artifacts)) {
+      if (withheld.has(name)) {
+        continue;
+      }
+      const bytes = readFileSync(join(dir, name));
+      files[name] = { sha256: createHash("sha256").update(bytes).digest("hex"), bytes: bytes.length };
+    }
+    const computed = { manifest: createHash("sha256").update(manifestBytes).digest("hex"), files };
+    expect(computed.manifest).toBe(run.bundle.sha256);
+    const good = bundleCheck(run, manifest, computed);
+    expect(good.ok).toBe(true);
+    expect(good.rows.filter((r) => r.status === "withheld").map((r) => r.name).sort()).toEqual([...withheld].sort());
+    expect(good.rows.filter((r) => r.status === "match").length).toBe(Object.keys(files).length);
+    expect(compareApproved(run, computed.manifest).kind).toBe("equal");
+    /* A ticked payload that went missing is an error, never withheld. */
+    const missing = clone(computed);
+    delete missing.files["destination-club_site.json"];
+    const gone = bundleCheck(run, manifest, missing);
+    expect(gone.ok).toBe(false);
+    expect(gone.rows.find((r) => r.name === "destination-club_site.json")?.status).toBe("error");
+  });
+
+  it("drives the destination chips from the run, in the statuses the Publisher left", () => {
+    const run = recorded();
+    expect(validateDestinations(run.destinations, true, String(run.state))).toEqual([]);
+    expect(Object.fromEntries((run.destinations as Destination[]).map((d) => [d.id, d.status]))).toEqual({
+      club_site: "delivered",
+      feeds: "delivered",
+      instagram: "preview_not_posted",
+      youtube: "not_selected",
+      newsroom_teams: "preview_not_posted",
+      journalist_email: "not_selected",
+    });
+    expect(chipsFor(run).fromRun).toBe(true);
+  });
+
+  it("explains a translated sentence by its English id, s2-el by s2", async () => {
+    const data = await loadRunsData(diskFetchAt(RECORDED));
+    expect(data.defaultRunId).toBe(row.run_id);
+    const loaded = data.runs[data.defaultRunId];
+    const el = loaded.editions.el;
+    const w = why(loaded.run, el.meta, el.data.sentences[1], 1);
+    expect(w.sentenceId).toBe("s2-el");
+    expect(w.type).toBe("Discipline or referee");
+    expect(w.scope).toContain("Gate-cleared only");
+    const en = loaded.editions.en;
+    const headline = why(loaded.run, en.meta, en.data.sentences[1], 1);
+    expect(headline.confirm).toBe(true);
+    expect(headline.scope).toContain("Confirm row");
+  });
+});
+
+describe("Blow full time", () => {
+  it("opens the hand-written sample while no recorded run is listed", async () => {
+    const committed = readJson<{ format: string; runs: { provenance: string }[] }>(join(WEB, "runs", "index.json"));
+    const onlySample: FetchText = async (url) =>
+      url === "runs/index.json"
+        ? { ok: true, status: 200, text: JSON.stringify({ ...committed, runs: committed.runs.filter((r) => r.provenance === "design_preview") }) }
+        : diskFetch(url);
+    const data = await loadRunsData(onlySample);
+    expect(runForBlow(data, 1)?.run.run_id).toBe("sample-s1");
+    expect(runForBlow(data, 3)?.run.run_id).toBe("sample-s1");
+  });
+
+  it("opens the recorded run once one is listed, for its seed and for any other seed", async () => {
+    const data = await loadRunsData(afterFetch);
+    expect(data.defaultRunId).toBe("run-afc16bdd87a7");
+    expect(runForBlow(data, 1)?.run.run_id).toBe("run-afc16bdd87a7");
+    expect(runForBlow(data, 3)?.run.run_id).toBe("run-afc16bdd87a7");
+    expect(Object.keys(data.runs)).toContain("sample-s1");
   });
 });

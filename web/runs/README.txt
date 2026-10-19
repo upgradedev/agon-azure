@@ -8,8 +8,13 @@ how the work was handed on, the state of the bundle, what each gate decided,
 which sentences a person must confirm, and the sealed bundle of editions that
 came out. The pages read it as static files; nothing here calls a backend.
 
-Today the folder holds ONE run, sample-s1. Design preview: sample run written
-by hand, not produced by the pipeline. Its desk lines and sentences were
+The site shows the run at the top of index.json by default. Until a
+recorded run is exported (below), that is the one hand-written run,
+sample-s1; once one is, the recorded run takes the top row and sample-s1
+stays listed below it as the fallback.
+
+sample-s1: Design preview: sample run written by hand, not produced by the
+pipeline. Its desk lines and sentences were
 written by hand; no agent ran. What is computed rather than written:
 the names, minutes, counts and event ids come from synthetic seed 1; the gate
 verdicts come from the real deterministic gates (agon.governance.factgate and
@@ -29,6 +34,27 @@ Check the folder the way the deploy step does:
 
     PYTHONPATH=src python -m agon.webrun --check web/runs
 
+Recorded runs (provenance "pipeline")
+-------------------------------------
+A recorded run is exported from a bundle the pipeline sealed, the club media
+office approved and the Publisher published to the public feed container,
+by agon.webrecord (see its docstring for every check it makes):
+
+    PYTHONPATH=src python -m agon.webrecord \
+        --feed-base-url https://<storage account>.blob.core.windows.net/feed/ \
+        --bundle <bundle sha256> --commit <40-character commit sha> \
+        --approver-role approver --channel teams \
+        --out web/runs --readiness ci/readiness.json
+
+It re-hashes the published manifest and every published artifact, writes
+<run_id>.json (label "Recorded run, <UTC date of the approval>, commit <the
+short 7-hex commit>") and <run_id>/ with the manifest and the published artifacts byte for
+byte, puts the run at the top of index.json, and with --readiness rewrites the
+three anchored label markers of the live gate's demo target to that run's
+labels (ci/web_check.py page_label_markers) and adds the demo-recorded
+targets. Commit web/runs and ci/readiness.json together. A recorded run is
+never overwritten; the export refuses a run id that is already listed.
+
 Layout
 ------
     runs/index.json          the list of runs
@@ -36,6 +62,17 @@ Layout
     runs/<run_id>/           the sealed bundle of that run
         manifest.json        canonical agon.bundle/1 manifest (agon.governance.seal)
         edition-<id>.json    one file per edition, listed in the manifest
+                             (a pipeline run names them report-<id>.json, as the
+                             fleet's seal step does)
+        card.json, destination-<id>.json, ...
+                             a pipeline run's other published artifacts, each
+                             listed in the manifest
+
+A pipeline run's folder holds every artifact the manifest lists except the
+payload of a destination the officer did not tick: the Publisher never
+publishes it, so the run lists that destination as "not_selected" and the
+checker and Verify report its payload as withheld by design, still named by
+its sha256 in the manifest. Any other missing file fails.
 
 Every file is UTF-8 JSON in canonical form (sorted keys, no spaces) with LF
 line endings. A CR byte changes the hash, so the checker refuses one.
@@ -73,12 +110,15 @@ index.json
                          | skipped, "detail": plain words, "evidence": the
                          gate's own output, which may hold ids}]
     editions           [{"edition", "language", "name",
-                         "file": "edition-<edition>.json"}]
+                         "file": "edition-<edition>.json"}]; a pipeline run
+                       may name the file "report-<edition>.json" instead
     sentence_types     {sentence id: match_stat | injury_medical |
                         disciplinary_referee | quote_attribution |
                         transfer_contract | neutral_colour}, for the English
                         headline report; edition sentence n has the type of
-                        English sentence n
+                        English sentence n (a pipeline edition names its
+                        sentences after the English ids, s1-el for s1, and
+                        takes the type of that id)
     sentence_gates     {sentence id: {gate: verdict}} for every sentence
     confirm_rows       [{"row_id", "sentence_id", "type", "label"}], one per
                        injury, referee, quote and transfer sentence; label
@@ -149,9 +189,9 @@ the bundle hash: the manifest lists the OFFERED destinations with each
 payload's sha256, and the approval record (keyed by approval id, naming the
 bundle hash) stores the approved subset. agon.webrun.validate_run checks the
 key when it is present (agon.publish.webview.destination_problems). The
-sample run does not carry it yet: web/agon-runs.js refuses any key outside
-the list above, and the React console (lane D4) that reads this key replaces
-that page.
+sample run does not carry it. The live site is the React console
+(console/), which reads this key; the retired hand-written page
+(web/agon-runs.js) refuses it and no longer ships.
 
 <run_id>/edition-<id>.json
 --------------------------

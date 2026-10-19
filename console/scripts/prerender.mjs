@@ -16,6 +16,11 @@
      stamps exactly one and fails on leftovers);
   5. delete dist-ssr, which must never ship.
 
+  Options, for the console workflow's recorded-run rehearsal only (the deploy
+  runs it without any): --site DIR renders into another unrendered client
+  build instead of dist, and --runs DIR copies that runs folder instead of
+  web/runs (web/runs plus an exported recorded run, listed first).
+
   Dependency-free Node: fs, path and url only.
 */
 import { cpSync, existsSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -25,8 +30,31 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const here = dirname(fileURLToPath(import.meta.url));
 const consoleDir = resolve(here, "..");
 const repo = resolve(consoleDir, "..");
-const dist = join(consoleDir, "dist");
 const ssrDir = join(consoleDir, "dist-ssr");
+
+function option(name) {
+  const at = process.argv.indexOf(name);
+  if (at === -1) {
+    return null;
+  }
+  const value = process.argv[at + 1];
+  if (!value || value.startsWith("--")) {
+    console.error(`prerender: FAIL: ${name} needs a directory`);
+    process.exit(1);
+  }
+  return resolve(value);
+}
+
+const known = new Set(["--site", "--runs"]);
+for (const arg of process.argv.slice(2)) {
+  if (arg.startsWith("--") && !known.has(arg)) {
+    console.error(`prerender: FAIL: unknown option ${arg}`);
+    process.exit(1);
+  }
+}
+const dist = option("--site") ?? join(consoleDir, "dist");
+const runsSource = option("--runs") ?? join(repo, "web", "runs");
+const siteName = relative(consoleDir, dist) || ".";
 const PLACEHOLDER = ["__AGON", "COMMIT__"].join("_");
 const SLOT = "<!--app-html-->";
 const TEXT = new Set([".html", ".js", ".css", ".json", ".svg", ".txt", ".xml", ".webmanifest"]);
@@ -50,17 +78,19 @@ function walk(dir) {
 }
 
 if (!existsSync(join(dist, "index.html"))) {
-  fail("dist/index.html is missing; run the client build first");
+  fail(`${siteName}/index.html is missing; run the client build first`);
 }
 const entry = join(ssrDir, "entry-server.js");
 if (!existsSync(entry)) {
   fail("dist-ssr/entry-server.js is missing; run the server build first");
 }
 
-for (const folder of ["runs", "data-fixture"]) {
-  const from = join(repo, "web", folder);
+for (const [folder, from] of [
+  ["runs", runsSource],
+  ["data-fixture", join(repo, "web", "data-fixture")],
+]) {
   if (!existsSync(from)) {
-    fail(`web/${folder} is missing`);
+    fail(`${relative(repo, from) || from} is missing`);
   }
   rmSync(join(dist, folder), { recursive: true, force: true });
   cpSync(from, join(dist, folder), { recursive: true });
@@ -84,7 +114,7 @@ if (!result.ok) {
 const indexPath = join(dist, "index.html");
 const template = readFileSync(indexPath, "utf8");
 if (template.split(SLOT).length !== 2) {
-  fail(`dist/index.html must hold the slot ${SLOT} exactly once`);
+  fail(`${siteName}/index.html must hold the slot ${SLOT} exactly once`);
 }
 const page = template.replace(SLOT, result.html);
 
@@ -113,4 +143,4 @@ for (const path of walk(dist)) {
 }
 
 rmSync(ssrDir, { recursive: true, force: true });
-console.log(`prerender: wrote dist/index.html (${page.length} characters), copied web/runs and web/data-fixture`);
+console.log(`prerender: wrote ${siteName}/index.html (${page.length} characters), copied ${relative(repo, runsSource) || runsSource} and web/data-fixture`);

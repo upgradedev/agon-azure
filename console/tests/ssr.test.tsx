@@ -4,40 +4,62 @@
 
   - every readiness marker of the demo target in ci/readiness.json, verbatim,
     including the run labels anchored to their screens' ids;
+  - the labels of the run shown by default, anchored the same way, also once a
+    recorded run is listed first (ci/web_check.py page_label_markers);
   - the stand-in card header and the not-deployed sentence, verbatim;
   - no style attribute, no inline script, no <style> (the CSP would block
     them); no duplicate id; every aria and label reference resolves; and the
     commit placeholder never appears in the app markup.
+
+  Every check runs twice: on web/runs as committed, and on web/runs as it reads
+  after the exporter has put the recorded-run fixture first (helpers.afterFetch).
 */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import { prerender } from "../src/entry-server";
-import { DESIGN_PREVIEW_LABEL, NOT_DEPLOYED_SENTENCE, STANDIN_HEADER } from "../src/lib/runs";
+import { loadRunsData, type FetchText } from "../src/lib/loader";
+import { NOT_DEPLOYED_SENTENCE, STANDIN_HEADER, editionLabel } from "../src/lib/runs";
 import { PREVIEW_ONLY_SENTENCE } from "../src/lib/destinations";
-import { REPO, diskFetch } from "./helpers";
+import { REPO, afterFetch, diskFetch } from "./helpers";
 
-let html = "";
+const SOURCES: [string, FetchText, boolean][] = [
+  ["as committed", diskFetch, true],
+  ["with the recorded run listed first", afterFetch, false],
+];
 
-beforeAll(async () => {
-  const result = await prerender(diskFetch);
-  expect(result.ok, result.message).toBe(true);
-  html = result.html;
-});
+describe.each(SOURCES)("prerendered markup, %s", (_name, fetchText, committed) => {
+  let html = "";
+  let labels: string[] = [];
 
-describe("prerendered markup", () => {
-  it("carries every demo marker from ci/readiness.json", () => {
+  beforeAll(async () => {
+    const result = await prerender(fetchText);
+    expect(result.ok, result.message).toBe(true);
+    html = result.html;
+    const data = await loadRunsData(fetchText);
+    const run = data.runs[data.defaultRunId].run;
+    labels = [`id="wall-label">${run.label}`, `id="approve-label">${run.label}`, `id="recap-label">${editionLabel(run)}`];
+  });
+
+  it("states the labels of the run it shows by default on every screen that shows it", () => {
+    for (const label of labels) {
+      expect(html, label).toContain(label);
+    }
+  });
+
+  it("carries every demo marker from ci/readiness.json while that file names the run shown", () => {
     const config = JSON.parse(readFileSync(join(REPO, "ci", "readiness.json"), "utf8")) as {
       targets: { name: string; markers: string[] }[];
     };
     const demo = config.targets.find((t) => t.name === "demo");
     expect(demo).toBeDefined();
-    for (const marker of demo?.markers ?? []) {
+    const anchored = (demo?.markers ?? []).filter((m) => /^id="(wall|approve|recap)-label">/.test(m));
+    expect(anchored.length).toBe(3);
+    /* The committed config names the committed default run; the rehearsal rewrites it with
+       python -m agon.webrecord --readiness, so here only the other markers must hold. */
+    for (const marker of (demo?.markers ?? []).filter((m) => committed || !anchored.includes(m))) {
       expect(html, marker).toContain(marker);
     }
-    expect(html).toContain(`id="wall-label">${DESIGN_PREVIEW_LABEL}`);
-    expect(html).toContain(`id="approve-label">${DESIGN_PREVIEW_LABEL}`);
-    expect(html).toContain(`id="recap-label">Not approved. ${DESIGN_PREVIEW_LABEL}`);
   });
 
   it("states the stand-in card header, the not-deployed sentence and the preview-only sentence", () => {

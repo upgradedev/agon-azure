@@ -9,10 +9,12 @@ unchanged ci/readiness.json, over the exact bytes that would ship:
 
     python ci/readiness.py --offline <out> --set-host agon.example --add-marker demo=<sha>
 
-Mapped: the five targets of ci/readiness.json (the page, data/manifest.json, the
-sample run, its sealed manifest and the README) and every .js file of the site,
-so the gate's own asset crawl finds each script it follows. A URL with no entry
-answers status 0 and fails, so nothing is skipped silently.
+Mapped: the page, data/manifest.json, every file under runs/ (the sample run and
+its sealed manifest, and a recorded run and its bundle once one is listed, which
+the demo-recorded targets fetch), the README, and every .js file of the site, so
+the gate's own asset crawl finds each script it follows. A URL with no entry
+answers status 0 and fails, so nothing is skipped silently: a target the config
+names that the build lacks fails the gate here as it would live.
 
 Stdlib only. Usage: python scripts/readiness_offline.py <site_dir> <out_dir> <readme>
 """
@@ -36,12 +38,13 @@ def main(argv: list[str]) -> int:
         f"{HOST}/": {"status": 200, "body_file": str(site / "index.html")},
         README_URL: {"status": 200, "body_file": str(readme)},
     }
-    for rel in ("data/manifest.json", "runs/sample-s1.json", "runs/sample-s1/manifest.json"):
-        path = site / rel
-        if not path.is_file():
+    for rel in ("data/manifest.json", "runs/index.json"):
+        if not (site / rel).is_file():
             print(f"readiness_offline: FAIL: {rel} is missing from {site}")
             return 1
-        index[f"{HOST}/{rel}"] = {"status": 200, "body_file": str(path)}
+    served = [site / "data" / "manifest.json", *sorted(p for p in (site / "runs").rglob("*") if p.is_file())]
+    for path in served:
+        index[f"{HOST}/{path.relative_to(site).as_posix()}"] = {"status": 200, "body_file": str(path)}
     scripts = sorted(p for p in site.rglob("*.js") if p.is_file())
     if not scripts:
         print("readiness_offline: FAIL: the site holds no script; the asset crawl would prove nothing")

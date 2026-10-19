@@ -8,6 +8,7 @@ import { ScreenHeader, View } from "../components/screen";
 import { GLOSSARY, GLOSSARY_ORDER } from "../lib/glossary";
 import { REPO_URL } from "../lib/commit";
 import { DESIGN_PREVIEW_LABEL } from "../lib/runs";
+import type { RunsData } from "../lib/types";
 
 const LIBRARIES = [
   "React and React DOM",
@@ -20,7 +21,9 @@ const LIBRARIES = [
   "Vitest, Playwright and axe-core in CI",
 ];
 
-export function About({ active }: { active: boolean }) {
+export function About({ active, runs }: { active: boolean; runs: RunsData | null }) {
+  const shown = runs ? runs.runs[runs.defaultRunId]?.run ?? null : null;
+  const recorded = shown !== null && shown.provenance === "pipeline";
   return (
     <View view="about" active={active}>
       <ScreenHeader
@@ -50,11 +53,20 @@ export function About({ active }: { active: boolean }) {
               This is a static site. The Match Centre replays synthetic matches from the generator's event files, with fictional names from each
               seed's names file, and Verify recomputes every published hash in your browser.
             </p>
-            <p>
-              The Newsroom Wall, the stand-in approval card and the recap show one run, labelled on every screen: {DESIGN_PREVIEW_LABEL} Its gate
-              verdicts and its bundle hash come from the real checks and the real seal over those hand-written sentences. No agent runs here,
-              nothing is published and no account is needed.
-            </p>
+            {recorded && shown ? (
+              <p>
+                The Newsroom Wall, the stand-in approval card and the recap open on a recorded run, labelled on every screen: {shown.label}.
+                It was exported from the bundle the pipeline sealed and the club media office approved, and Verify recomputes its hash and every
+                file the Publisher published. The hand-written sample stays listed after it, labelled: {DESIGN_PREVIEW_LABEL} No agent runs on
+                this site, this site publishes nothing and no account is needed.
+              </p>
+            ) : (
+              <p>
+                The Newsroom Wall, the stand-in approval card and the recap show one run, labelled on every screen: {DESIGN_PREVIEW_LABEL} Its gate
+                verdicts and its bundle hash come from the real checks and the real seal over those hand-written sentences. No agent runs here,
+                nothing is published and no account is needed.
+              </p>
+            )}
           </CardBody>
         </Card>
 

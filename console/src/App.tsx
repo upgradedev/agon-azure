@@ -22,6 +22,7 @@ import { About } from "./screens/about";
 import { NotFound } from "./screens/not-found";
 import { navigate, useRoute } from "./hooks/stores";
 import { VIEW_TITLES, hrefFor, parseHash } from "./lib/router";
+import { runForBlow } from "./lib/runs";
 import type { InitialData, LoadedRun } from "./lib/types";
 
 function pickRun(initial: InitialData, param: string): { loaded: LoadedRun | null; error: string | null } {
@@ -76,7 +77,7 @@ export function App({ initial }: { initial: InitialData }) {
     setBlownSeed(seed);
     setProgress((p) => ({ ...p, blown: true }));
     setReplayRequest((n) => n + 1);
-    const target = runs ? Object.values(runs.runs).find((r) => r.run.seed === seed)?.run.run_id ?? runs.defaultRunId : "";
+    const target = runs ? runForBlow(runs, seed)?.run.run_id ?? runs.defaultRunId : "";
     navigate(hrefFor("newsroom", target));
   }
 
@@ -111,7 +112,7 @@ export function App({ initial }: { initial: InitialData }) {
         <Verify active={route.view === "verify"} />
         <DataLab active={route.view === "data-lab"} />
         <HowItWorks active={route.view === "how-it-works"} />
-        <About active={route.view === "about"} />
+        <About active={route.view === "about"} runs={runs} />
         <NotFound active={route.view === "not-found"} />
       </Shell>
     </TooltipProvider>

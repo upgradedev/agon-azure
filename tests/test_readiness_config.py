@@ -5,17 +5,23 @@ rules; this one proves the config's markers are the right ones. Every marker
 must occur in the bytes the deploy step actually writes, and the gate must fail
 when a marker's subject is missing, checked through readiness.check_target with
 a fake fetcher (no network).
+
+The page the demo target fetches is the built console (tests/sitekit.py): the
+console workflow builds it and runs these tests on it with AGON_SITE_DIR.
 """
 
 from __future__ import annotations
 
+import json
 from functools import lru_cache
 from pathlib import Path
 
 import pytest
 
 import readiness
+import web_check
 from agon.webdata import build_web_data, manifest_bytes
+from sitekit import served_page
 
 PUBLISHED_SEEDS = (1, 2, 3)  # pinned with PUBLISHED_SEEDS in .github/workflows/deploy.yml
 
@@ -74,16 +80,58 @@ def test_shipped_world_files_pass_the_live_gate_rules(seed: int) -> None:
 
 # ---------------------------------------------------------------- demo-run and the design preview label
 
-RUNS_INDEX = Path(__file__).resolve().parent.parent / "web" / "runs" / "index.json"
+ROOT = Path(__file__).resolve().parent.parent
+RUNS_INDEX = ROOT / "web" / "runs" / "index.json"
+LABEL = "Design preview: sample run written by hand, not produced by the pipeline."
+LABEL_PREFIXES = ('id="wall-label">', 'id="approve-label">', 'id="recap-label">')
 
 
-def test_demo_run_target_names_the_run_in_the_runs_index() -> None:
-    import json
+def _rows() -> list[dict]:
+    return json.loads(RUNS_INDEX.read_text(encoding="utf-8"))["runs"]
 
+
+def _demo_target() -> readiness.Target:
+    target = _targets()["demo"]
+    return readiness.Target(target.name, "https://agon.example/", list(target.markers), scan_assets=False)
+
+
+def test_demo_label_markers_are_the_labels_of_the_run_the_page_shows_by_default() -> None:
+    """The anchored markers are exactly what ci/web_check.py requires on the page for the first run in
+    web/runs/index.json: the design preview label today, the recorded run's labels once it is first."""
+    shown = web_check.default_run(RUNS_INDEX.parent.parent)
+    assert shown is not None and shown[1]["run_id"] == _rows()[0]["run_id"]
+    expected = [marker for _, marker in web_check.page_label_markers(shown[1])]
+    labels = [m for m in _targets()["demo"].markers if m.startswith(LABEL_PREFIXES)]
+    assert labels == expected
+    if shown[1]["provenance"] == "design_preview":
+        assert labels == [marker for _, marker in web_check.PAGE_LABEL_MARKERS]
+        assert "demo-recorded" not in _targets() and "demo-recorded-bundle" not in _targets()
+
+
+def test_demo_recorded_targets_follow_a_recorded_run_shown_by_default() -> None:
+    first = _rows()[0]
+    if first["provenance"] != "pipeline":
+        pytest.skip("no recorded run is the default yet; the demo-run and demo-bundle targets cover the design preview")
+    run = json.loads((RUNS_INDEX.parent / first["file"]).read_text(encoding="utf-8"))
+    recorded, bundle = _targets()["demo-recorded"], _targets()["demo-recorded-bundle"]
+    assert recorded.url == f"https://__AGON_SWA_HOSTNAME__/runs/{first['file']}"
+    sha = run["bundle"]["sha256"]
+    run_id = run["run_id"]
+    assert recorded.markers == [f'"run_id":"{run_id}"', '"provenance":"pipeline"', run["label"], f'"approved_bundle_sha256":"{sha}"']
+    body = (RUNS_INDEX.parent / first["file"]).read_text(encoding="utf-8")
+    assert all(marker in body for marker in recorded.markers)
+    assert bundle.url == f"https://__AGON_SWA_HOSTNAME__/runs/{run_id}/manifest.json"
+    manifest = (RUNS_INDEX.parent / run_id / "manifest.json").read_text(encoding="utf-8")
+    assert all(marker in manifest for marker in bundle.markers)
+
+
+def test_demo_run_target_names_the_design_preview_in_the_runs_index() -> None:
+    """The hand-written sample stays listed as the fallback, first or after a recorded run."""
     target = _targets()["demo-run"]
-    run_ids = [row["run_id"] for row in json.loads(RUNS_INDEX.read_text(encoding="utf-8"))["runs"]]
-    assert target.url == f"https://__AGON_SWA_HOSTNAME__/runs/{run_ids[0]}.json"
-    assert f'"run_id":"{run_ids[0]}"' in target.markers
+    previews = [row["run_id"] for row in _rows() if row["provenance"] == "design_preview"]
+    assert previews == ["sample-s1"]
+    assert target.url == f"https://__AGON_SWA_HOSTNAME__/runs/{previews[0]}.json"
+    assert f'"run_id":"{previews[0]}"' in target.markers
 
 
 def test_demo_run_target_passes_on_the_shipped_run_and_fails_without_the_label() -> None:
@@ -92,33 +140,41 @@ def test_demo_run_target_passes_on_the_shipped_run_and_fails_without_the_label()
     body = (RUNS_INDEX.parent / "sample-s1.json").read_text(encoding="utf-8")
     rules = readiness.build_rules()
     assert all(f.ok for f in readiness.check_target(target, _fetcher(target.url, body), rules))
-    unlabelled = body.replace("Design preview: sample run written by hand, not produced by the pipeline.", "Sample run.")
+    unlabelled = body.replace(LABEL, "Sample run.")
     failed = [f.check for f in readiness.check_target(target, _fetcher(target.url, unlabelled), rules) if not f.ok]
     assert any("Design preview" in check for check in failed), failed
 
 
-def test_demo_target_fails_on_a_page_without_the_label() -> None:
-    target = _targets()["demo"]
-    target = readiness.Target(target.name, "https://agon.example/", list(target.markers), scan_assets=False)
-    page = (RUNS_INDEX.parent.parent / "index.html").read_text(encoding="utf-8")
+def test_demo_target_passes_on_the_served_page() -> None:
     rules = readiness.build_rules()
-    assert all(f.ok for f in readiness.check_target(target, _fetcher(target.url, page), rules))
-    stripped = page.replace("Design preview: sample run written by hand, not produced by the pipeline.", "Sample run.")
+    target = _demo_target()
+    results = readiness.check_target(target, _fetcher(target.url, served_page()), rules)
+    assert all(f.ok for f in results), [f for f in results if not f.ok]
+
+
+def test_demo_target_fails_on_a_page_without_the_label() -> None:
+    target = _demo_target()
+    page = served_page()
+    stripped = page
+    for marker in [m for m in target.markers if m.startswith(LABEL_PREFIXES)]:
+        prefix = next(p for p in LABEL_PREFIXES if marker.startswith(p))
+        stripped = stripped.replace(marker, prefix + "Sample run.")
+    assert stripped != page
+    rules = readiness.build_rules()
     failed = [f.check for f in readiness.check_target(target, _fetcher(target.url, stripped), rules) if not f.ok]
-    assert any("Design preview" in check for check in failed), failed
+    assert len(failed) == 3, failed
 
 
 @pytest.mark.parametrize("element", ["wall-label", "approve-label", "recap-label"])
 def test_demo_target_fails_when_one_screen_loses_its_label(element: str) -> None:
     """Strip only one copy of the label; the other copies stay on the page and must not save it."""
-    label = "Design preview: sample run written by hand, not produced by the pipeline."
-    target = _targets()["demo"]
-    target = readiness.Target(target.name, "https://agon.example/", list(target.markers), scan_assets=False)
-    page = (RUNS_INDEX.parent.parent / "index.html").read_text(encoding="utf-8")
+    target = _demo_target()
+    page = served_page()
     start = page.index(f'id="{element}">')
     end = page.index("</p>", start)
     stripped = page[:start] + f'id="{element}">Sample run.' + page[end:]
-    assert label in stripped
+    others = [m for m in target.markers if m.startswith(LABEL_PREFIXES) and not m.startswith(f'id="{element}">')]
+    assert len(others) == 2 and all(m in stripped for m in others)
     rules = readiness.build_rules()
     failed = [f.check for f in readiness.check_target(target, _fetcher(target.url, stripped), rules) if not f.ok]
     assert failed and all(element in check for check in failed), failed
@@ -131,5 +187,4 @@ def test_demo_bundle_target_passes_on_the_sealed_manifest_and_fails_on_the_fallb
     body = (RUNS_INDEX.parent / "sample-s1" / "manifest.json").read_text(encoding="utf-8")
     rules = readiness.build_rules()
     assert all(f.ok for f in readiness.check_target(target, _fetcher(target.url, body), rules))
-    fallback = (RUNS_INDEX.parent.parent / "index.html").read_text(encoding="utf-8")
-    assert not all(f.ok for f in readiness.check_target(target, _fetcher(target.url, fallback), rules))
+    assert not all(f.ok for f in readiness.check_target(target, _fetcher(target.url, served_page()), rules))

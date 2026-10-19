@@ -45,6 +45,7 @@ import {
   type Timeline,
 } from "../lib/core";
 import { browserFetchText, loadMatch, resolveManifest, type ResolvedManifest } from "../lib/loader";
+import { runForBlow } from "../lib/runs";
 import { GLOSSARY, GLOSSARY_ORDER } from "../lib/glossary";
 import { cn } from "../lib/cn";
 import { useReducedMotion } from "../hooks/stores";
@@ -355,14 +356,15 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
   }
 
   const seeds = resolved ? [...resolved.manifest.files].sort((a, b) => a.seed - b.seed).map((f) => f.seed) : [];
-  const runForSeed = runs && seed !== null ? Object.values(runs.runs).find((r) => r.run.seed === seed) ?? null : null;
+  const blowRun = runs ? runForBlow(runs, seed) : null;
   const defaultRun = runs ? runs.runs[runs.defaultRunId] ?? null : null;
 
   let blowHint = "Starts the newsroom run you follow on the next screens. Live agents are not connected, so it opens the recorded run, labelled on every screen.";
-  if (seed !== null && runForSeed) {
+  if (seed !== null && blowRun && blowRun.run.seed === seed) {
     blowHint = `Opens the newsroom run for seed ${seed}. Live agents are not connected, so this is the recorded run, labelled on every screen.`;
-  } else if (seed !== null && defaultRun) {
-    blowHint = `There is no run for seed ${seed} yet, so the newsroom shows the hand-written sample for seed ${defaultRun.run.seed} and says so on every screen.`;
+  } else if (seed !== null && blowRun) {
+    const which = blowRun.run.provenance === "design_preview" ? "the hand-written sample" : "the recorded run";
+    blowHint = `There is no run for seed ${seed} yet, so the newsroom shows ${which} for seed ${blowRun.run.seed} and says so on every screen.`;
   }
 
   let playReason = "";

@@ -1,5 +1,12 @@
 # Static checks for the web shell. Separate from the main CI workflow so the
 # front-end lane can change it without touching platform files.
+#
+# The site that ships is the React console: the console workflow runs
+# ci/web_check.py on its build and on the stamped copy, and the deploy runs it
+# on the exact bytes it uploads. The retired hand-written page in web/ is the
+# checker's fixture now; tests/test_web_check.py scans a copy of it with the
+# design preview as its only run (tests/sitekit.py), so a recorded run listed
+# first in web/runs, which the hand-written page cannot state, never fails here.
 name: web-check
 
 on:
@@ -22,9 +29,6 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-
-      - name: Web shell checks (stdlib only)
-        run: python ci/web_check.py web
 
       - name: Contrast table recomputed from tokens
         run: python ci/web_check.py web --print-contrast

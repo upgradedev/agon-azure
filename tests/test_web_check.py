@@ -11,11 +11,12 @@ Dash characters are built with chr() so this file contains none.
 from __future__ import annotations
 
 import importlib.util
-import shutil
 import sys
 from pathlib import Path
 
 import pytest
+
+from sitekit import vanilla_fixture
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
@@ -36,9 +37,11 @@ EN = chr(0x2013)
 
 
 def _copy_web(tmp_path: Path) -> Path:
-    target = tmp_path / "web"
-    shutil.copytree(WEB, target)
-    return target
+    """The retired hand-written page, with the design preview as its only run (tests/sitekit.py).
+
+    web/ no longer ships (the deploy uploads the built console), so it is the checker's fixture;
+    the console workflow and the deploy run the checker on the built site itself."""
+    return vanilla_fixture(tmp_path / "web")
 
 
 def _mutate(web: Path, name: str, old: str, new: str) -> None:
@@ -53,14 +56,14 @@ def _rules(web: Path) -> set[str]:
     return {v.rule for v in violations}
 
 
-def test_real_shell_passes():
-    count, violations = web_check.scan(WEB)
+def test_real_shell_passes(tmp_path):
+    count, violations = web_check.scan(_copy_web(tmp_path))
     assert count >= 6
     assert violations == [], "\n".join(str(v) for v in violations)
 
 
 def test_main_exit_codes(tmp_path, capsys):
-    assert web_check.main([str(WEB)]) == 0
+    assert web_check.main([str(_copy_web(tmp_path / "pass"))]) == 0
     out = capsys.readouterr().out
     assert "scanned" in out and "PASS" in out
 
