@@ -24,18 +24,30 @@ The templates are `infra/main.bicep` (deployed by CI) and `infra/rbac.bicep` (de
 
 A push to `main` that touches `infra/`, `web/`, `src/agon/synth/` or the deploy scripts runs `.github/workflows/deploy.yml`. To deploy without a change, open Actions, pick "deploy" and use "Run workflow" on `main`.
 
-1. **what-if** compiles `infra/main.bicep` and asks Azure what would change. It also runs on every pull request that touches those paths, so a reviewer sees the change before merge. It changes nothing.
+1. **what-if** (main only) compiles `infra/main.bicep` and asks Azure what would change, just before the deploy, and prints the diff in the job log. It changes nothing. It does not run on pull requests; see "Pull requests get no Azure token" below.
 2. **deploy** (main only, environment `azure`) runs `az deployment group create` in incremental mode under the deployment name `agon-main`, and publishes the outputs in the job summary.
 3. **web** generates the recorded synthetic matches for the published seeds 1, 2 and 3 into `web/data/` with `python -m agon.synth.manifest`, stamps the full commit sha into `index.html`, re-hashes every data file against `web/data/manifest.json` (`ci/stamp_web.py`), re-runs `ci/web_check.py` on the exact tree that ships, fetches the Static Web Apps deployment token at run time with `az staticwebapp secrets list`, and uploads `web/`. The token is masked in the log and is never stored as a repository secret.
 4. **readiness** waits (at most 20 tries, 15 seconds apart) until the site serves the new commit, then runs `python ci/readiness.py --live` exactly once against the deployed hostname, with the commit sha as a required body marker. It fails on any status other than 200, on a host change, on a missing marker and on any forbidden string. The wait never passes or fails anything; the single gate run decides.
 
-Two deploys never overlap: every run on `main` shares one concurrency group and a running deploy is never cancelled. A pull request's what-if has its own group, so it can never cancel a queued deploy.
+Two deploys never overlap: every run shares one concurrency group and a running deploy is never cancelled.
 
-`ci.yml` also compiles and lints both templates on every push and pull request (job `bicep`) with Bicep CLI v0.44.1, the same version the deploy uses. Every error and every warning fails the job, after a negative control proves that a known warning is caught. A warning that is genuinely harmless gets a `#disable-next-line` with a reason beside it; the check is never widened.
+`ci.yml` also compiles and lints both templates on every push and pull request (job `bicep`, no Azure login) with Bicep CLI v0.44.1, the same version the deploy uses. Every error and every warning fails the job, after a negative control proves that a known warning is caught. A warning that is genuinely harmless gets a `#disable-next-line` with a reason beside it; the check is never widened.
+
+### Pull requests get no Azure token
+
+Decided 2026-10-19 after review, option (a): the Azure what-if runs only on `main`, and no workflow that a pull request can trigger may request an OIDC token.
+
+Why: a `pull_request` workflow runs the YAML of the pull request's own branch, before anyone reviews it. The only Azure identity this repo has is the app `agon-azure-ci`, which holds Contributor on `rg-agon-swc`. A branch that edits `deploy.yml`, or adds a new workflow, could log in with that app and create, change or delete anything in the group, or read the Static Web Apps deployment token.
+
+What a pull request gets instead: `ci.yml` compiles and lints both templates with no login (job `bicep`), and job `oidc` (`ci/check_oidc.py`) fails if any pull request triggered workflow grants `id-token: write` or `write-all`. That check is an accident guard only, because a branch can edit it in its own diff. The Azure what-if diff appears in the `main` run's log, in the job before the deploy. It informs; it does not stop the deploy unless the `azure` environment has a required reviewer.
+
+**The boundary is on the Entra side, and it is pending owner action.** The bootstrap created a federated credential for the subject `repo:upgradedev/agon-azure:pull_request` on `agon-azure-ci`. Nothing in this repository uses it any more, but while it exists any branch of this repository can still obtain a Contributor token on `rg-agon-swc` through a workflow it adds itself. Step 4 below removes it. Until step 4 is done and checked, treat every open pull request as able to act with Contributor on the group.
+
+To bring pull request what-if back later, use option (b): a separate Entra app that holds only Reader on the group plus `Microsoft.Resources/deployments/whatIf/action` through a custom role, with the `pull_request` subject pointed at that app and its own client id variable. Never point the `pull_request` subject at `agon-azure-ci` again.
 
 ### One-time steps on the owner side
 
-The CI identity holds Contributor on `rg-agon-swc` and nothing else. Three things need more than that and are done once by the owner-side session, which holds Owner.
+The CI identity holds Contributor on `rg-agon-swc` and nothing else. Four things need more than that and are done once by the owner-side session, which holds Owner.
 
 **1. Register the resource providers (before the first CI deploy).** Registration is a subscription-level action that Contributor on one group cannot perform. If a provider is not registered, the first deploy fails with `MissingSubscriptionRegistration`. Check each one:
 
@@ -87,6 +99,24 @@ az deployment group create --resource-group $rg --name agon-rbac --template-file
 
 Run `what-if` with the same arguments first if anything in `rbac.bicep` changed since the last run. Grants that go beyond the spec 7.1 table are marked "BEYOND THE SPEC 7.1 TABLE" in the templates, each with the reason.
 
+**4. Remove the `pull_request` federated credential from `agon-azure-ci` (pending, do it before any pull request is opened).** First prove that nothing in the repository still needs it. Every workflow that grants `id-token: write` must have no `pull_request` trigger:
+
+```bash
+grep -l "id-token: write" .github/workflows/*.yml | xargs -r grep -lE '^  pull_request|^on:.*pull_request'
+python ci/check_oidc.py
+```
+
+The `grep` reads trigger lines only (comments that mention pull requests do not count) and must print nothing; the check must end with `problems: 0`. Then list the credentials, note the name of the one whose subject ends in `:pull_request`, and delete that one only:
+
+```bash
+app="$(gh variable get AZURE_CLIENT_ID --repo upgradedev/agon-azure)"
+az ad app federated-credential list --id "$app" --query "[].{name:name, subject:subject}" --output table
+az ad app federated-credential delete --id "$app" --federated-credential-id <name of the pull_request credential>
+az ad app federated-credential list --id "$app" --query "[].subject" --output tsv
+```
+
+The last command must print exactly two subjects, `repo:upgradedev/agon-azure:ref:refs/heads/main` and `repo:upgradedev/agon-azure:environment:azure`. Deleting this credential does not affect the deploy, the scheduled readiness check or any resource: they use the other two subjects. If a flag name differs in your az version, check `az ad app federated-credential delete --help`. Record the date and the printed subjects in `STATE.md`.
+
 ### Never
 
 * Never deploy with `--mode Complete`. The resource group also holds the gate T spike (`agon-teams`, `la-agon-gate-t`, `la-agon-decision-stub`), and complete mode deletes every resource the template does not name.
@@ -99,7 +129,8 @@ Run `what-if` with the same arguments first if anything in `rbac.bicep` changed 
 | CI can | CI cannot |
 |---|---|
 | Compile and lint both templates, with no login | Write Azure RBAC role assignments (`Microsoft.Authorization/roleAssignments/write`), so `infra/rbac.bicep` is owner-side |
-| Run what-if, and create or update any resource inside `rg-agon-swc` | Register resource providers, which is a subscription-level action |
+| Run what-if on `main`, and create or update any resource inside `rg-agon-swc` | Register resource providers, which is a subscription-level action |
+| Compile and lint the templates on a pull request, with no login | Log in to Azure from a pull request: no workflow requests a token on `pull_request` (enforced by `ci/check_oidc.py`), and once step 4 is done Entra refuses that subject |
 | Create the Cosmos DB data-plane role assignments, because they are `Microsoft.DocumentDB` resources (`infra/modules/cosmos-access.bicep`) | Read or write blobs, queues or Cosmos items: it holds no data role, storage shared keys are disabled and Cosmos keys are disabled |
 | Read the Static Web Apps deployment token at run time and upload the site | Touch the budget, any other resource group, or anything outside the subscription |
 | Run the live readiness gate against the deployed hostname | Prove that each identity is denied what spec 7.1 says it must not hold: that needs the deny tests, which run as each identity and are not built yet |
@@ -129,6 +160,9 @@ Judges may open the public URL at any time until 2026-11-11 07:59 UTC. Until the
 * The readiness gate keeps checking the live URL: on every deploy (with the commit sha as a marker) and twice a day from `.github/workflows/readiness.yml` (05:17 and 17:17 UTC, read only, no commit marker because the deployed commit is not always the head of `main`). That workflow stops checking by itself after 2026-11-11 07:59 UTC; disable it then.
 
 ## Known gaps
+
+* Until owner step 4 is done, the `pull_request` federated subject still maps to the Contributor app, so a branch could add a workflow that logs in with it. Status: pending owner action, opened 2026-10-19.
+* Pull requests show no Azure what-if diff. The diff appears only in the `main` run, just before the deploy job.
 
 * App Insights availability tests on the root and `feed.json` (spec 9.4) are not built yet; the scheduled readiness workflow covers the root and the data manifest meanwhile.
 * Application Insights still accepts telemetry with its connection string (local authentication is on). Keyless telemetry needs a Monitoring Metrics Publisher grant per app identity in `infra/rbac.bicep`; decide when the apps exist.

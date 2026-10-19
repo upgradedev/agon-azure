@@ -1,7 +1,7 @@
 # Deploy Agon to Azure and prove the public URL serves the commit (spec 9.1, 9.2, 11.2 S8).
 #
-# what-if    every run, including pull requests: compiles main.bicep and asks Azure
-#            what would change. Read only.
+# what-if    main only, before every deploy: compiles main.bicep and asks Azure what
+#            would change. It is not run on pull requests (see below).
 # deploy     main only, environment azure: incremental deployment of main.bicep.
 # web        main only: generates the recorded synthetic data for the published
 #            seeds, stamps the commit, fetches the Static Web Apps token at run time
@@ -11,6 +11,15 @@
 #
 # The CI identity holds Contributor on the resource group only. It cannot write
 # role assignments, so infra/rbac.bicep is NOT deployed here (docs/OPERATIONS.md).
+#
+# No job here runs on pull_request. A pull request workflow runs the diff of its
+# own branch before anyone reviews it, and the only Azure identity this repo has
+# holds Contributor on the group. So pull requests get compile and lint only (the
+# bicep job in ci.yml, no login), and the Azure what-if diff is read on main just
+# before the deploy. The pull_request federated subject must also be removed on
+# the owner side, because a branch could add its own workflow that uses it
+# (docs/OPERATIONS.md, step 4). Do not add pull_request back without a separate
+# Reader plus whatIf identity.
 # Actions are pinned by full commit sha; the comment names the version and how the
 # sha was read.
 
@@ -27,25 +36,15 @@ on:
       - "ci/readiness.py"
       - "ci/readiness.json"
       - "ci/stamp_web.py"
-  pull_request:
-    paths:
-      - "infra/**"
-      - "web/**"
-      - "src/agon/synth/**"
-      - ".github/workflows/deploy.yml"
-      - "ci/readiness.py"
-      - "ci/readiness.json"
-      - "ci/stamp_web.py"
   workflow_dispatch:
 
 permissions:
   contents: read
 
-# Every main deploy shares one group and never cancels a running one, so two
-# deploys never overlap. Pull request what-ifs get their own group per PR, so a
-# PR can never cancel a queued main deploy.
+# Every run shares one group and never cancels a running one, so two deploys
+# never overlap.
 concurrency:
-  group: ${{ github.event_name == 'pull_request' && format('deploy-pr-{0}', github.event.pull_request.number) || 'deploy-azure-main' }}
+  group: deploy-azure-main
   cancel-in-progress: false
 
 env:
@@ -60,8 +59,9 @@ env:
 
 jobs:
   what-if:
-    # A pull request from a fork gets no OIDC token, so the job would only fail.
-    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    # Only main has a federated subject, so a manual run from any other branch
+    # would only fail at login.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -91,7 +91,7 @@ jobs:
 
   deploy:
     needs: what-if
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: azure
