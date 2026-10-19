@@ -690,7 +690,14 @@ async def prepare_approval(deps: FleetDeps, sealed: SealedDraft) -> ApprovalRequ
 async def decide(
     deps: FleetDeps, request: ApprovalRequest, envelope: DecisionEnvelope, sealed_manifest_json: str | None
 ) -> RunOutcome | PublishRequest:
-    """The response handler's body: re-check the sealed bytes, then delegate to the one verifier."""
+    """The response handler's body: re-check the sealed bytes, then delegate to the one verifier.
+
+    Who calls `verify` first is still open (lanes C2 and A3). Spec 3.4 step 5 has the api verify a
+    decision before it enqueues it; then this call meets "already_consumed" and
+    `_recover_publish_request` rebuilds the publish request from the approval record, so the
+    worker needs only read on approvals and nonces. The kill-and-resume CLI path, where the worker
+    verifies first and writes the approval, runs against the file store only.
+    """
 
     def refused(code: str, detail: str) -> RunOutcome:
         return RunOutcome(run_id=request.run_id, status=DECISION_REFUSED, bundle_sha256=request.bundle_sha256, code=code, detail=detail)
