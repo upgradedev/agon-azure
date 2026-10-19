@@ -119,3 +119,14 @@ test("the served page carries the strict CSP and every readiness marker", async 
   expect(body).toContain("Newsroom Wall");
   expect(body).toContain("Match Centre");
 });
+
+test("the Data Lab shows the season table and the self-measured bands, each file hashed in the browser", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/#/data-lab");
+  await appReady(page);
+  await expect(page.getByText(/Every season file below matched its sha256 in season\/manifest\.json/)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByRole("heading", { name: /Final table/ })).toBeVisible();
+  await expect(page.getByRole("table")).toBeVisible();
+  await expect(page.getByText(/bands pass on seeds/)).toBeVisible();
+  await expect(page.getByText("self-measured", { exact: true })).toBeVisible();
+});

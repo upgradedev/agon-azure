@@ -121,10 +121,12 @@ jobs:
           python scripts/readiness_offline.py "$site" "$RUNNER_TEMP/readiness" ../README.md
           python ../ci/readiness.py --offline "$RUNNER_TEMP/readiness" --set-host agon.example --add-marker "demo=$GITHUB_SHA"
 
-      - name: Published seeds for the end-to-end tests
+      - name: Stamp the built site as the deploy would (data, season files, commit) for the end-to-end tests
         env:
           PYTHONPATH: ${{ github.workspace }}/src
-        run: python -m agon.webdata --seeds "$PUBLISHED_SEEDS" --out dist/data
+        run: |
+          python -m agon.webdata --seeds "$PUBLISHED_SEEDS" --out dist/data
+          python ../ci/stamp_web.py dist --sha "$GITHUB_SHA" --data-dir dist/data --seeds "$PUBLISHED_SEEDS"
 
       - name: Install Chromium for Playwright (here only)
         run: npx --no-install playwright install --with-deps chromium

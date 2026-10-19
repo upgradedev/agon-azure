@@ -29,6 +29,9 @@ async function settled(page: Page, view: string): Promise<void> {
   if (view === "home") {
     await expect(page.locator('[data-view="home"] section[data-state="ready"]')).toBeVisible({ timeout: 20_000 });
   }
+  if (view === "data-lab") {
+    await expect(page.locator('[data-view="data-lab"] [data-state="ready"]')).toBeVisible({ timeout: 30_000 });
+  }
   if (view === "verify") {
     await expect(page.locator('[data-view="verify"] section[data-state="done"]').first()).toBeVisible({ timeout: 30_000 });
   }
