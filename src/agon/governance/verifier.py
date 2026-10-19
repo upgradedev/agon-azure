@@ -6,8 +6,9 @@ A channel adapter translates its payload into an `ApprovalDecision` and calls `v
 1. The decision is well formed (known decision and channel, 64-hex hash, aware timestamps).
 2. The nonce exists and has not been consumed.
 3. The decision's bundle hash equals the hash the nonce was issued for.
-4. The sealed manifest for that hash is in the store, its bytes still hash to it, and every gate
-   verdict in it is "pass" (a refused bundle has no Approve button, server side too).
+4. The sealed manifest for that hash is in the store, its bytes still hash to it, it carries a
+   verdict from every gate in `seal.REQUIRED_GATES`, and every verdict is "pass" (a refused or
+   unchecked bundle has no Approve button, server side too).
 5. The nonce has not expired, judged by the injected `now`, never by the payload's own time.
 6. The channel is allowed for the nonce's target (the console stand-in can never approve `feed`).
 7. The approver holds the role the nonce requires.
@@ -208,7 +209,7 @@ def verify(decision: ApprovalDecision, store: Store, now: datetime) -> VerifyRes
         return _refuse("bundle_not_sealed", "no sealed manifest for this hash", decision)
     check = seal_mod.verify_manifest(bundle_doc.body["manifest"].encode("utf-8"), expected_sha256=decision.bundle_sha256)
     if not check.ok or check.manifest is None:
-        return _refuse("sealed_hash_mismatch", "; ".join(check.reasons), decision)
+        return _refuse(check.refusal_code(decision.bundle_sha256), "; ".join(check.reasons), decision)
     if not seal_mod.gates_all_pass(check.manifest):
         return _refuse("bundle_refused_by_gate", "a gate refused this bundle", decision)
 

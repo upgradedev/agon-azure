@@ -11,8 +11,10 @@ from agon.governance import seal as S
 from agon.synth.manifest import build_bundle
 
 GREEK_LINE = "Γκολ στο 71ο λεπτό."
-# Pinned once: if canonical form, key order, escaping or the schema drifts, this hash changes.
-GOLDEN_BUNDLE_SHA256 = "122dc3c31b5ba639afc9ea61b12de5da5a76687536cc751b7900dd4e4960181e"
+# Pinned: if canonical form, key order, escaping or the schema drifts, this hash changes.
+# Re-pinned once when the golden input gained the factgate_lang verdict (REQUIRED_GATES); the
+# canonical form did not change. Previous value 122dc3c3...0181e over {factgate, rights}.
+GOLDEN_BUNDLE_SHA256 = "a88925cec247652ae5fefce35b44f67b569e28011713204ceb7cb46ab1c56076"
 
 
 def _golden():
@@ -23,7 +25,7 @@ def _golden():
         event_log_hash="b" * 64,
         charter_hash="c" * 64,
         artifacts=[S.Artifact("report-el.txt", GREEK_LINE.encode("utf-8"), "text/plain", "edition", "el")],
-        gate_verdicts={"factgate": "pass", "rights": "pass"},
+        gate_verdicts={"factgate": "pass", "factgate_lang": "pass", "rights": "pass"},
         author_tags={"s1-el": "model"},
         attested=["report-el.txt"],
         gate_cleared=[],
@@ -89,7 +91,7 @@ def test_seal_refuses_inconsistent_inputs():
         event_log_hash="b" * 64,
         charter_hash=None,
         artifacts=[S.Artifact("a.txt", b"x", "text/plain", "edition", "en")],
-        gate_verdicts={"factgate": "pass"},
+        gate_verdicts={"factgate": "pass", "factgate_lang": "pass", "rights": "pass"},
         author_tags={"s1": "model"},
         attested=["a.txt"],
         gate_cleared=[],
@@ -104,6 +106,8 @@ def test_seal_refuses_inconsistent_inputs():
         dict(artifacts=[S.Artifact("a.txt", b"x", "t", "edition"), S.Artifact("a.txt", b"y", "t", "edition")]),
         dict(seed_hash="A" * 64),
         dict(gate_verdicts={}),
+        dict(gate_verdicts={"anything": "pass"}),  # the reviewer's probe: no required gate at all
+        dict(gate_verdicts={"factgate": "pass", "factgate_lang": "pass"}),  # rights never ran
         dict(attested=["nope.txt"]),
     ]
     for override in bad_cases:
@@ -111,11 +115,55 @@ def test_seal_refuses_inconsistent_inputs():
             S.seal(**{**base, **override})
 
 
+# The required gate set, written out as a literal so that a change to seal.REQUIRED_GATES has to be
+# made here too, on purpose. Never derive this from the constant under test.
+PINNED_REQUIRED_GATES = ("factgate", "factgate_lang", "rights")
+ALL_PASS = {"factgate": "pass", "factgate_lang": "pass", "rights": "pass"}
+
+
+def test_required_gate_set_is_pinned():
+    assert S.REQUIRED_GATES == PINNED_REQUIRED_GATES
+    assert set(govkit.PASS_VERDICTS) == set(PINNED_REQUIRED_GATES)
+
+
 def test_gates_all_pass():
-    assert S.gates_all_pass({"gate_verdicts": {"a": "pass"}})
-    assert not S.gates_all_pass({"gate_verdicts": {"a": "pass", "rights": "refused"}})
+    assert S.gates_all_pass({"gate_verdicts": dict(ALL_PASS)})
+    assert S.gates_all_pass({"gate_verdicts": {**ALL_PASS, "charter_check": "pass"}})  # superset is fine
+    assert not S.gates_all_pass({"gate_verdicts": {"a": "pass"}})  # no required gate listed
+    assert not S.gates_all_pass({"gate_verdicts": {"anything": "pass"}})
+    for gate in PINNED_REQUIRED_GATES:
+        missing = {k: v for k, v in ALL_PASS.items() if k != gate}
+        assert not S.gates_all_pass({"gate_verdicts": missing}), gate
+    assert not S.gates_all_pass({"gate_verdicts": {**ALL_PASS, "rights": "refused"}})
+    assert not S.gates_all_pass({"gate_verdicts": {**ALL_PASS, "charter_check": "refused"}})
     assert not S.gates_all_pass({"gate_verdicts": {}})
     assert not S.gates_all_pass({})
+
+
+def test_seal_refuses_a_bundle_missing_any_required_gate():
+    for gate in PINNED_REQUIRED_GATES:
+        verdicts = {k: v for k, v in ALL_PASS.items() if k != gate}
+        with pytest.raises(S.SealError, match=gate):
+            govkit.make_bundle(verdicts=verdicts)
+    with pytest.raises(S.SealError, match="rights"):
+        govkit.make_bundle(verdicts={"anything": "pass"})
+
+
+def test_seal_still_seals_a_refused_bundle_so_the_card_can_show_the_reason():
+    sealed, _ = govkit.make_bundle(verdicts={**ALL_PASS, "rights": "refused"})
+    assert S.manifest_shape_problems(sealed.manifest) == []
+    assert not S.gates_all_pass(sealed.manifest)
+
+
+def test_shape_validator_and_verify_manifest_refuse_a_missing_required_gate():
+    sealed, files = govkit.make_bundle()
+    d = json.loads(sealed.manifest_bytes)
+    del d["gate_verdicts"]["rights"]
+    problems = S.manifest_shape_problems(d)
+    assert any("rights" in p for p in problems), problems
+    data = S.canonical_utf8(d)
+    check = S.verify_manifest(data, files, expected_sha256=S.sha256_hex(data))
+    assert not check.ok and check.refusal_code(S.sha256_hex(data)) == "required_gate_missing"
 
 
 def test_seal_output_always_passes_the_shared_shape_validator():

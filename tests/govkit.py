@@ -136,6 +136,41 @@ def make_bundle(
     return sealed, files
 
 
+def hand_built(mutate, **bundle_kwargs: Any) -> tuple[bytes, str, dict[str, bytes]]:
+    """A canonical manifest built by hand, not by seal(), so it can hold what seal() refuses.
+
+    `mutate(manifest, files)` edits a deep copy in place and returns the files to publish.
+    Returns (manifest bytes, their sha256, files).
+    """
+    import copy
+
+    from agon.governance.seal import canonical_utf8, sha256_hex
+
+    sealed, files = make_bundle(**bundle_kwargs)
+    manifest = copy.deepcopy(sealed.manifest)
+    files = mutate(manifest, dict(files))
+    data = canonical_utf8(manifest)
+    return data, sha256_hex(data), files
+
+
+def drop_gate(gate: str):
+    def mutate(manifest: dict[str, Any], files: dict[str, bytes]) -> dict[str, bytes]:
+        del manifest["gate_verdicts"][gate]
+        return files
+
+    mutate.__name__ = f"drop_{gate}"
+    return mutate
+
+
+def plant_nonce(store: InMemoryStore, bundle_sha256: str, *, key: str = "planted", target: str = "feed", role: str = "approver") -> str:
+    """A nonce document written straight into the store, skipping issue_nonce() and its checks."""
+    store.create(verifier.NONCES, key, {
+        "bundle_sha256": bundle_sha256, "purpose": "fulltime", "target": target, "role": role,
+        "issued_at": 0, "expires_at": 4_102_444_800, "confirm_rows": [], "status": "pending",
+    })
+    return key
+
+
 @dataclass
 class Env:
     store: InMemoryStore

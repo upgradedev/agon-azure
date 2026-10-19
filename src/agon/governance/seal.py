@@ -26,6 +26,11 @@ from agon.governance.claims import AUTHOR_TAGS
 MANIFEST_SCHEMA = "agon.bundle/1"
 BUNDLE_KINDS: tuple[str, ...] = ("charter", "fulltime", "erratum")
 GATE_PASS = "pass"
+# Every bundle carries a verdict from each of these gates, whatever it reads. A bundle that never
+# ran one of them cannot be sealed, cannot get a nonce, cannot be approved and cannot be published.
+# Pinned as a literal in tests/governance/test_seal.py. `charter_check` and `easy_read` join this
+# tuple when those gates exist; adding a name here is the only way a new gate becomes mandatory.
+REQUIRED_GATES: tuple[str, ...] = ("factgate", "factgate_lang", "rights")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _ARTIFACT_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 
@@ -125,6 +130,9 @@ def seal(
         raise SealError("only an erratum names a parent bundle")
     if not gate_verdicts:
         raise SealError("a bundle must carry gate verdicts")
+    missing_gates = missing_required_gates(gate_verdicts)
+    if missing_gates:
+        raise SealError(f"a bundle must carry a verdict from every required gate; missing {missing_gates}")
     entries: dict[str, Any] = {}
     for art in artifacts:
         if not _ARTIFACT_NAME.match(art.name):
@@ -236,6 +244,10 @@ def manifest_shape_problems(manifest: Any) -> list[str]:
     verdicts = manifest["gate_verdicts"]
     if not isinstance(verdicts, dict) or not verdicts or not all(isinstance(k, str) and isinstance(v, str) for k, v in verdicts.items()):
         problems.append("gate_verdicts must be a non-empty map of strings")
+    else:
+        missing_gates = missing_required_gates(verdicts)
+        if missing_gates:
+            problems.append(f"gate_verdicts lacks required gates {missing_gates}")
     tags = manifest["author_tags"]
     if not isinstance(tags, dict) or not all(t in AUTHOR_TAGS for t in tags.values()):
         problems.append("author_tags must map sentence ids to model, template or officer")
@@ -259,9 +271,22 @@ def manifest_shape_problems(manifest: Any) -> list[str]:
     return problems
 
 
+def missing_required_gates(verdicts: Any) -> list[str]:
+    """The required gates with no verdict in `verdicts`, sorted. Everything when it is not a map."""
+    if not isinstance(verdicts, Mapping):
+        return sorted(REQUIRED_GATES)
+    return sorted(set(REQUIRED_GATES) - set(verdicts))
+
+
 def gates_all_pass(manifest: Mapping[str, Any]) -> bool:
+    """True only when every required gate is listed and every listed verdict is "pass"."""
     verdicts = manifest.get("gate_verdicts")
-    return isinstance(verdicts, dict) and bool(verdicts) and all(v == GATE_PASS for v in verdicts.values())
+    return (
+        isinstance(verdicts, dict)
+        and bool(verdicts)
+        and not missing_required_gates(verdicts)
+        and all(v == GATE_PASS for v in verdicts.values())
+    )
 
 
 @dataclass(frozen=True)
@@ -270,6 +295,14 @@ class ManifestCheck:
     bundle_sha256: str
     manifest: dict[str, Any] | None
     reasons: tuple[str, ...]
+
+    def refusal_code(self, expected_sha256: str | None) -> str:
+        """One truthful code for a failed check, shared by the verifier and the publisher."""
+        if expected_sha256 is not None and self.bundle_sha256 != expected_sha256:
+            return "sealed_hash_mismatch"
+        if isinstance(self.manifest, dict) and missing_required_gates(self.manifest.get("gate_verdicts")):
+            return "required_gate_missing"
+        return "manifest_invalid"
 
 
 def verify_manifest(

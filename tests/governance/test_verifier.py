@@ -137,17 +137,14 @@ def test_unticked_confirm_rows_are_named_and_do_not_consume():
 
 
 def test_a_refused_bundle_cannot_get_a_nonce_or_an_approval():
-    refused_verdicts = {"factgate": "pass", "rights": "refused"}
+    refused_verdicts = {**govkit.PASS_VERDICTS, "rights": "refused"}
     env = govkit.make_env()
     bad, _ = govkit.make_bundle(verdicts=refused_verdicts)
     verifier.register_sealed_bundle(env.store, bad.manifest_bytes)
     with pytest.raises(verifier.IssueError):
         verifier.issue_nonce(env.store, bad.bundle_sha256, target="feed", now=govkit.T0)
     # Even a nonce planted straight into the store is refused by verify().
-    env.store.create(NONCES, "planted", {
-        "bundle_sha256": bad.bundle_sha256, "purpose": "fulltime", "target": "feed", "role": "approver",
-        "issued_at": 0, "expires_at": 4_102_444_800, "confirm_rows": [], "status": "pending",
-    })
+    govkit.plant_nonce(env.store, bad.bundle_sha256)
     planted = dataclasses.replace(_decision(env), bundle_sha256=bad.bundle_sha256, nonce="planted")
     assert verify(planted, env.store, govkit.later(1)).code == "bundle_refused_by_gate"
 
@@ -167,3 +164,40 @@ def test_nonce_issue_rejects_unknown_target_and_unsealed_bundle():
         verifier.issue_nonce(env.store, env.bundle.bundle_sha256, target="public", now=govkit.T0)
     with pytest.raises(verifier.IssueError):
         verifier.issue_nonce(env.store, "f" * 64, target="feed", now=govkit.T0)
+
+
+def test_a_bundle_missing_the_rights_verdict_gets_no_nonce_and_no_approval():
+    """Reviewer probe: verdicts that never name the Rights Guard must not reach an Approve button."""
+    env = govkit.make_env()
+    data, sha, _ = govkit.hand_built(govkit.drop_gate("rights"))
+    verifier.register_sealed_bundle(env.store, data)
+    with pytest.raises(verifier.IssueError, match="rights"):
+        verifier.issue_nonce(env.store, sha, target="feed", now=govkit.T0)
+    nonce = govkit.plant_nonce(env.store, sha)
+    planted = dataclasses.replace(_decision(env), bundle_sha256=sha, nonce=nonce)
+    result = verify(planted, env.store, govkit.later(1))
+    assert result.code == "required_gate_missing" and "rights" in result.detail
+    assert env.store.read(NONCES, nonce).body["status"] == "pending"
+    teams_try = teams.handle(
+        {"responder": {"userPrincipalName": govkit.OFFICER}, "data": {"decision": "approve", "bundle_sha256": sha, "nonce": nonce}},
+        env.store,
+        govkit.later(2),
+    )
+    assert teams_try.code == "required_gate_missing"
+
+
+def test_a_bundle_with_only_an_unknown_passing_gate_gets_no_nonce():
+    """Reviewer probe verbatim: verdicts={"anything": "pass"}."""
+    env = govkit.make_env()
+
+    def only_anything(manifest, files):
+        manifest["gate_verdicts"] = {"anything": "pass"}
+        return files
+
+    data, sha, _ = govkit.hand_built(only_anything)
+    verifier.register_sealed_bundle(env.store, data)
+    with pytest.raises(verifier.IssueError):
+        verifier.issue_nonce(env.store, sha, target="feed", now=govkit.T0)
+    nonce = govkit.plant_nonce(env.store, sha)
+    planted = dataclasses.replace(_decision(env), bundle_sha256=sha, nonce=nonce)
+    assert verify(planted, env.store, govkit.later(1)).code == "required_gate_missing"

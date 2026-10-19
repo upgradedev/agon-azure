@@ -98,7 +98,7 @@ def test_overwrite_of_different_bytes_is_refused_and_identical_bytes_resume():
 
 def test_gate_refused_bundle_is_never_published_even_with_a_planted_approval():
     store = InMemoryStore()
-    bad, files = govkit.make_bundle(verdicts={"factgate": "pass", "rights": "refused"})
+    bad, files = govkit.make_bundle(verdicts={**govkit.PASS_VERDICTS, "rights": "refused"})
     verifier.register_sealed_bundle(store, bad.manifest_bytes)
     store.create(verifier.APPROVALS, "planted", {"decision": "approve", "bundle_sha256": bad.bundle_sha256, "target": "feed"})
     result = P.Publisher(store, P.InMemorySink(), "feed").publish(
@@ -142,11 +142,7 @@ def test_erratum_of_an_unpublished_parent_is_refused():
 
 def _hand_built(mutate):
     """A canonical manifest built by hand (not by seal()), approved by a planted record."""
-    sealed, files = govkit.make_bundle()
-    manifest = copy.deepcopy(sealed.manifest)
-    files = mutate(manifest, dict(files))
-    data = S.canonical_utf8(manifest)
-    sha = S.sha256_hex(data)
+    data, sha, files = govkit.hand_built(mutate)
     store = InMemoryStore()
     verifier.register_sealed_bundle(store, data)
     store.create(verifier.APPROVALS, "planted", {"decision": "approve", "bundle_sha256": sha, "target": "feed"})
@@ -181,3 +177,15 @@ def test_hand_built_malformed_manifests_are_refused_with_nothing_written():
             pass
         else:
             raise AssertionError(f"{mutate.__name__}: a nonce was issued for a malformed manifest")
+
+
+def test_a_bundle_missing_the_rights_verdict_is_never_published_even_with_a_planted_approval():
+    """Reviewer probe: a bundle that never ran the Rights Guard must not reach the public feed."""
+    store, data, sha, files = _hand_built(govkit.drop_gate("rights"))
+    sink = P.InMemorySink()
+    result = P.Publisher(store, sink, "feed").publish(
+        bundle_sha256=sha, approval_id="planted", manifest_bytes=data, artifacts=files, now=govkit.T0
+    )
+    assert result.code == "required_gate_missing" and "rights" in result.detail
+    assert sink.blobs == {}
+    assert store.keys(P.PUBLISHED) == []

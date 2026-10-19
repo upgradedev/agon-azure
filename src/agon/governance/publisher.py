@@ -6,7 +6,7 @@ Rules, in order. The first is the seal check, and it is never skipped:
    (`seal.verify_manifest`). It must equal the hash the approval names. Anything else is refused.
 2. The approval is read back from the store, where only `verifier.verify` writes it; an in-memory
    verdict object is never trusted. It must be an "approve" for this hash and this target.
-3. Every gate verdict in the manifest is "pass".
+3. Every gate in `seal.REQUIRED_GATES` has a verdict in the manifest, and every verdict is "pass".
 4. A bundle is published once. A second publish of the same bundle is refused, not repeated.
 5. Writes are create-only. A path that already holds different bytes is refused, never
    overwritten. Identical bytes at the same content-addressed path count as already written, so a
@@ -98,7 +98,8 @@ class Publisher:
     ) -> PublishResult:
         check = seal_mod.verify_manifest(manifest_bytes, artifacts, expected_sha256=bundle_sha256)
         if not check.ok or check.manifest is None:
-            return _refuse("seal_mismatch", "; ".join(check.reasons))
+            code = check.refusal_code(bundle_sha256)
+            return _refuse("required_gate_missing" if code == "required_gate_missing" else "seal_mismatch", "; ".join(check.reasons))
         manifest = check.manifest
 
         approval_doc = self.store.read(APPROVALS, approval_id)
