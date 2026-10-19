@@ -18,6 +18,7 @@ from agon.agents.ports import ModelPort, SpeechPort, TranslatorPort
 from agon.fleet.interpret_port import InterpretPort
 from agon.fleet.sources import MatchSource
 from agon.fleet.stores import ArtifactStore, PublishQueue, RunLedger
+from agon.governance.destinations import DESTINATION_IDS
 from agon.governance.store import Store
 
 
@@ -45,6 +46,8 @@ class FleetDeps:
     desk_editor_enabled: bool = True
     model_timeout_seconds: float = 90.0
     trace: Callable[[str, str], None] = no_trace
+    # The publish destinations every sealed bundle offers; the officer ticks a subset on the card.
+    offered_destinations: tuple[str, ...] = DESTINATION_IDS
     ledger: RunLedger = field(init=False)
 
     def __post_init__(self) -> None:

@@ -5,6 +5,13 @@ edition and each audio file) with its sha256 and byte length, the gate verdicts,
 of every sentence, the attested scope, and for an erratum the parent bundle hash. The bundle hash
 is sha256 over the canonical manifest bytes; the manifest never contains its own hash.
 
+Destinations (`agon.governance.destinations`): a bundle may OFFER publish destinations. Each
+offered destination's rendered payload is sealed as an artifact `destination-<id>.json` with role
+"destination", and the optional `destinations` table names it with its label and sha256. The key
+is absent when nothing is offered, so a manifest sealed before destinations existed keeps its
+exact bytes and hash. The officer's ticked subset is never in the manifest: it is chosen after the
+seal and lives in the approval record.
+
 Canonical form: sorted keys, no whitespace, UTF-8 (Greek text stays Greek, not \\u escapes),
 integers only (no floats, no NaN). `verify_manifest` refuses bytes that are not in canonical form,
 so one bundle has exactly one byte representation and one hash. The visitor's browser recomputes
@@ -21,6 +28,7 @@ import re
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
+from agon.governance import destinations as dest_mod
 from agon.governance.claims import AUTHOR_TAGS
 
 MANIFEST_SCHEMA = "agon.bundle/1"
@@ -119,8 +127,14 @@ def seal(
     gate_cleared: Iterable[str],
     parent_bundle_sha256: str | None = None,
     deployment_ids: Mapping[str, str] | None = None,
+    destinations: Mapping[str, bytes] | None = None,
 ) -> SealedBundle:
-    """Build the canonical manifest and its bundle hash. Pure function of its inputs."""
+    """Build the canonical manifest and its bundle hash. Pure function of its inputs.
+
+    `destinations` maps each OFFERED destination id to its rendered payload bytes (a UTF-8 JSON
+    object with schema "agon.destination/1" naming that id). Payloads are sealed here, as
+    artifacts; a caller never passes a role "destination" artifact itself.
+    """
     if kind not in BUNDLE_KINDS:
         raise SealError(f"unknown bundle kind {kind!r}")
     for label, value in (("seed_hash", seed_hash), ("event_log_hash", event_log_hash)):
@@ -145,6 +159,8 @@ def seal(
             raise SealError(f"artifact name {art.name!r} is reserved for the bundle manifest")
         if art.name in entries:
             raise SealError(f"duplicate artifact {art.name!r}")
+        if art.role == dest_mod.ROLE:
+            raise SealError(f"artifact {art.name!r}: destination payloads are sealed through destinations=, not as artifacts")
         entry: dict[str, Any] = {
             "bytes": len(art.data),
             "media_type": art.media_type,
@@ -156,6 +172,19 @@ def seal(
         entries[art.name] = entry
     if not entries:
         raise SealError("a bundle must contain at least one artifact")
+    offered: dict[str, Any] = {}
+    for dest_id, data in sorted((destinations or {}).items()):
+        if dest_id not in dest_mod.LABELS:
+            raise SealError(f"unknown destination {dest_id!r}")
+        problem = destination_payload_problem(dest_id, data)
+        if problem:
+            raise SealError(problem)
+        name = dest_mod.artifact_name(dest_id)
+        if name in entries:
+            raise SealError(f"artifact name {name!r} is reserved for the {dest_id} payload")
+        sha = sha256_hex(bytes(data))
+        entries[name] = {"bytes": len(data), "media_type": dest_mod.PAYLOAD_MEDIA_TYPE, "role": dest_mod.ROLE, "sha256": sha}
+        offered[dest_id] = {"artifact": name, "label": dest_mod.LABELS[dest_id], "sha256": sha}
     bad_tags = {sid: tag for sid, tag in author_tags.items() if tag not in AUTHOR_TAGS}
     if bad_tags:
         raise SealError(f"unknown author tags {bad_tags}")
@@ -180,6 +209,8 @@ def seal(
         "parent_bundle_sha256": parent_bundle_sha256,
         "deployment_ids": dict(deployment_ids or {}),
     }
+    if offered:
+        manifest["destinations"] = offered
     problems = manifest_shape_problems(manifest)
     if problems:
         raise SealError("; ".join(problems))
@@ -191,7 +222,68 @@ MANIFEST_KEYS = frozenset({
     "schema", "kind", "match_id", "seed_sha256", "event_log_sha256", "charter_sha256", "artifacts",
     "gate_verdicts", "author_tags", "attested_scope", "parent_bundle_sha256", "deployment_ids",
 })
+# Present only when the bundle offers at least one destination (see the module docstring).
+OPTIONAL_MANIFEST_KEYS = frozenset({"destinations"})
 ARTIFACT_KEYS = frozenset({"bytes", "media_type", "role", "sha256"})
+DESTINATION_ENTRY_KEYS = frozenset({"artifact", "label", "sha256"})
+
+
+def destination_payload_problem(dest_id: str, data: Any) -> str | None:
+    """Why `data` is not a payload for `dest_id`, or None. Checks the envelope, not the content."""
+    if not isinstance(data, (bytes, bytearray)):
+        return f"{dest_id} payload must be bytes"
+    try:
+        payload = json.loads(bytes(data).decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return f"{dest_id} payload is not UTF-8 JSON"
+    if not isinstance(payload, dict) or payload.get("schema") != dest_mod.PAYLOAD_SCHEMA:
+        return f"{dest_id} payload must be a JSON object with schema {dest_mod.PAYLOAD_SCHEMA}"
+    if payload.get("destination") != dest_id:
+        return f"{dest_id} payload names destination {payload.get('destination')!r}"
+    return None
+
+
+def _destination_problems(manifest: dict[str, Any], artifacts: dict[str, Any]) -> list[str]:
+    problems: list[str] = []
+    payload_names = {n for n, e in artifacts.items() if isinstance(e, dict) and e.get("role") == dest_mod.ROLE}
+    if "destinations" not in manifest:
+        if payload_names:
+            problems.append(f"destination payloads {sorted(payload_names)} with no destinations table")
+        return problems
+    table = manifest["destinations"]
+    if not isinstance(table, dict) or not table:
+        return ["destinations must be a non-empty map; omit the key when nothing is offered"]
+    referenced: set[str] = set()
+    for dest_id, entry in table.items():
+        if dest_id not in dest_mod.LABELS:
+            problems.append(f"unknown destination {dest_id!r}")
+            continue
+        if not isinstance(entry, dict) or set(entry) != DESTINATION_ENTRY_KEYS:
+            problems.append(f"destination {dest_id} entry must hold exactly artifact, label and sha256")
+            continue
+        if entry["label"] != dest_mod.LABELS[dest_id]:
+            problems.append(f"destination {dest_id} label must be {dest_mod.LABELS[dest_id]!r}")
+        name = dest_mod.artifact_name(dest_id)
+        if entry["artifact"] != name:
+            problems.append(f"destination {dest_id} payload must be the artifact {name}")
+            continue
+        art = artifacts.get(name)
+        if not isinstance(art, dict) or art.get("role") != dest_mod.ROLE or art.get("media_type") != dest_mod.PAYLOAD_MEDIA_TYPE:
+            problems.append(f"destination {dest_id} payload {name} is not a sealed destination artifact")
+            continue
+        if not is_sha256_hex(entry["sha256"]) or entry["sha256"] != art.get("sha256"):
+            problems.append(f"destination {dest_id} sha256 differs from its payload artifact")
+        referenced.add(name)
+    orphans = payload_names - referenced
+    if orphans:
+        problems.append(f"destination payloads {sorted(orphans)} are not offered in the destinations table")
+    return problems
+
+
+def offered_destinations(manifest: Mapping[str, Any]) -> tuple[str, ...]:
+    """The destination ids a sealed manifest offers, in registry order. Empty when none."""
+    table = manifest.get("destinations")
+    return dest_mod.in_order(table) if isinstance(table, dict) else ()
 
 
 def manifest_shape_problems(manifest: Any) -> list[str]:
@@ -205,8 +297,9 @@ def manifest_shape_problems(manifest: Any) -> list[str]:
         return ["manifest is not a JSON object"]
     problems: list[str] = []
     keys = set(manifest)
-    if keys != MANIFEST_KEYS:
-        problems.append(f"manifest keys differ: missing {sorted(MANIFEST_KEYS - keys)}, unexpected {sorted(keys - MANIFEST_KEYS)}")
+    unexpected = keys - MANIFEST_KEYS - OPTIONAL_MANIFEST_KEYS
+    if not MANIFEST_KEYS <= keys or unexpected:
+        problems.append(f"manifest keys differ: missing {sorted(MANIFEST_KEYS - keys)}, unexpected {sorted(unexpected)}")
         return problems
     if manifest["schema"] != MANIFEST_SCHEMA:
         problems.append(f"unknown manifest schema {manifest['schema']!r}")
@@ -276,6 +369,7 @@ def manifest_shape_problems(manifest: Any) -> list[str]:
     deployment = manifest["deployment_ids"]
     if not isinstance(deployment, dict) or not all(isinstance(v, str) for v in deployment.values()):
         problems.append("deployment_ids must be a map of strings")
+    problems.extend(_destination_problems(manifest, artifacts))
     return problems
 
 
@@ -354,4 +448,9 @@ def verify_manifest(
                 reasons.append(f"artifact {name} sha256 does not match its bytes")
             elif entry.get("bytes") != len(data):
                 reasons.append(f"artifact {name} length does not match its bytes")
+        for dest_id in offered_destinations(manifest):
+            data = artifacts.get(dest_mod.artifact_name(dest_id))
+            problem = None if data is None else destination_payload_problem(dest_id, data)
+            if problem:
+                reasons.append(problem)
     return ManifestCheck(not reasons, actual, manifest, tuple(reasons))

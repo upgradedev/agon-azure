@@ -260,3 +260,33 @@ def test_a_failed_delete_is_reported_and_the_redelivery_is_safe():
 
 def test_routes_bind_each_queue_to_its_named_channel():
     assert intake.ROUTES == {"decisions-teams": teams, "decisions-outlook": outlook}
+
+
+# ----------------------------------------------------------------- destinations through the queue routes
+
+
+def test_a_teams_message_carries_the_ticked_destinations_into_the_approval_record():
+    env = govkit.make_env()
+    out = Outbox()
+    payload = govkit.teams_payload(env, destinations=("feeds", "youtube"))
+    outcome = intake.handle_message("decisions-teams", intake.encode_message(RUN, payload), env.store, NOW, out)
+    assert outcome.status == "verified"
+    record = env.store.read(APPROVALS, outcome.forwarded.approval_id).body
+    assert record["destinations"] == ["feeds", "youtube"] and record["channel"] == "teams"
+
+
+def test_a_teams_message_with_every_destination_off_is_refused_and_forwards_nothing():
+    env = govkit.make_env()
+    out = Outbox()
+    payload = govkit.teams_payload(env, destinations=())
+    outcome = intake.handle_message("decisions-teams", intake.encode_message(RUN, payload), env.store, NOW, out)
+    assert outcome.status == "refused" and outcome.code == "no_destination_selected"
+    assert out.sent == [] and env.store.read(NONCES, env.nonce).body["status"] == "pending"
+
+
+def test_an_outlook_message_approves_the_destinations_as_offered():
+    env = govkit.make_env(destinations=("club_site", "journalist_email"))
+    out = Outbox()
+    outcome = intake.handle_message("decisions-outlook", intake.encode_message(RUN, govkit.outlook_payload(env)), env.store, NOW, out)
+    record = env.store.read(APPROVALS, outcome.forwarded.approval_id).body
+    assert record["destinations"] == ["club_site", "journalist_email"] and record["destinations_as_offered"] is True

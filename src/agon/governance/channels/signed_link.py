@@ -12,7 +12,10 @@ injected secret provider (Key Vault in Azure), never from code or configuration.
 Single use is NOT a second mechanism here: the token carries the card's nonce, and `verify()`
 consumes that nonce once across every channel. A replayed link is refused by the verifier.
 The Confirm rows the officer ticks on the approve page are posted alongside the token; they are
-the officer's own attestation and need no signature.
+the officer's own attestation and need no signature. The destination ids the officer ticks on the
+same page are posted alongside the token in the same way, unsigned: the officer chooses them after
+the link was minted, and the verifier refuses any id the sealed bundle does not offer, and an
+approve with nothing ticked when something is offered. A "changes" token carries no destinations.
 """
 
 from __future__ import annotations
@@ -99,6 +102,7 @@ def parse(
     secrets: SecretProvider,
     received_at: datetime,
     confirmed_rows: Iterable[str] = (),
+    destinations: Iterable[str] = (),
 ) -> verifier.ApprovalDecision:
     if not isinstance(token, str) or len(token) > 2048:
         raise PayloadError("token missing or too long")
@@ -128,6 +132,9 @@ def parse(
     rows = list(confirmed_rows)
     if not all(isinstance(r, str) for r in rows):
         raise PayloadError("confirmed rows must be strings")
+    ticked = list(destinations)
+    if not all(isinstance(d, str) for d in ticked):
+        raise PayloadError("destinations must be strings")
     for key in ("a", "b", "d", "n"):
         if not isinstance(payload[key], str):
             raise PayloadError(f"token field {key} must be a string")
@@ -139,6 +146,7 @@ def parse(
         channel=CHANNEL,
         received_at=received_at,
         confirmed_rows=frozenset(rows),
+        destinations=frozenset(ticked) if payload["d"] == "approve" else frozenset(),
     )
 
 
@@ -149,9 +157,10 @@ def handle(
     *,
     secrets: SecretProvider,
     confirmed_rows: Iterable[str] = (),
+    destinations: Iterable[str] = (),
 ) -> verifier.VerifyResult:
     try:
-        decision = parse(token, secrets=secrets, received_at=now, confirmed_rows=confirmed_rows)
+        decision = parse(token, secrets=secrets, received_at=now, confirmed_rows=confirmed_rows, destinations=destinations)
     except PayloadError as exc:
         return refused_payload(CHANNEL, str(exc))
     return verifier.verify(decision, store, now)

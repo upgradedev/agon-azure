@@ -41,9 +41,17 @@ class CountingStore(InMemoryStore):
 
     def replace(self, container, key, body, if_match):
         if self.ignore_etag and container == verifier.NONCES:
-            current = InMemoryStore.read(self, container, key)
-            if_match = current.etag
-        doc = super().replace(container, key, body, if_match)
+            # Etag-blind: every write wins. Re-read and retry until the write lands, so a write is
+            # never lost to another thread's write between this read and the replace.
+            while True:
+                current = InMemoryStore.read(self, container, key)
+                try:
+                    doc = super().replace(container, key, body, current.etag)
+                    break
+                except PreconditionFailed:
+                    continue
+        else:
+            doc = super().replace(container, key, body, if_match)
         if container == verifier.NONCES:
             with self._count_lock:
                 self.consumed_writes += 1
@@ -52,7 +60,7 @@ class CountingStore(InMemoryStore):
 
 def _race(store: CountingStore):
     env = govkit.make_env(store=store)
-    pub = P.Publisher(store, P.InMemorySink(), "feed")
+    pub = govkit.publisher(store, P.InMemorySink(), "feed")
     payload = govkit.teams_payload(env)
     results, publishes, errors = [], [], []
     lock = threading.Lock()

@@ -25,8 +25,12 @@ from typing import Any
 
 from agon.governance.store import Conflict, Document, NotFound, PreconditionFailed, StoreError, _snapshot
 
-# Containers this adapter may address: the governance ones, all partitioned on /id.
-GOVERNANCE_CONTAINERS: frozenset[str] = frozenset({"bundles", "nonces", "approvals", "approvers", "runs"})
+# Containers this adapter may address: the governance ones, all partitioned on /id. `published`
+# (receipts) and `supersessions` (erratum links) are the Publisher's: it creates receipts
+# create-only and moves a supersession record from claimed to published by etag.
+GOVERNANCE_CONTAINERS: frozenset[str] = frozenset(
+    {"bundles", "nonces", "approvals", "approvers", "runs", "published", "supersessions"}
+)
 SYSTEM_FIELDS: frozenset[str] = frozenset({"id", "_rid", "_self", "_etag", "_attachments", "_ts"})
 # Cosmos refuses '/', '\\', '?' and '#' in an id; keep keys to a safe, printable set.
 _KEY = re.compile(r"^[A-Za-z0-9@._:+=-]{1,255}$")

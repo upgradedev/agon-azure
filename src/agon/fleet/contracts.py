@@ -201,6 +201,9 @@ class ApprovalRequest:
     expiry: str
     attested_scope: dict[str, list[str]]
     confirm_rows: list[str]
+    # The destinations the sealed manifest offers, each {"id", "label", "sha256"}: the chips the
+    # card renders as `dest:<id>` toggles. Empty for a bundle that offers none.
+    destinations: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
@@ -218,6 +221,10 @@ class DecisionEnvelope:
     channel: str
     received_at: str
     confirmed_rows: list[str] = field(default_factory=list)
+    # The destination ids the officer ticked; empty on "changes". `destinations_as_offered` is set
+    # only by a channel that cannot tick (Outlook), see verifier.AS_OFFERED_CHANNELS.
+    destinations: list[str] = field(default_factory=list)
+    destinations_as_offered: bool = False
 
 
 @dataclass

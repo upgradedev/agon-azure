@@ -64,6 +64,7 @@ def _envelope(request, decision: str = "approve", confirm: bool = True, **over) 
         "channel": "teams",
         "received_at": datetime.now(timezone.utc).isoformat(),
         "confirmed_rows": list(request.confirm_rows) if confirm else [],
+        "destinations": [d["id"] for d in request.destinations] if decision == "approve" else [],
     }
     fields.update(over)
     return DecisionEnvelope(**fields)
@@ -487,3 +488,58 @@ def test_a_reused_run_id_for_another_match_is_refused() -> None:
     other = RunInput("run-1", {"source": "synth", "seed": SEED, "match_index": 1})
     out = run(steps.ingest(deps, other))
     assert out.status == REFUSED_AT_INGEST and out.code == "run_id_reused"
+
+
+# ----------------------------------------------------------------- publish destinations (owner decision 2026-10-19)
+
+
+def test_the_sealed_bundle_offers_every_destination_and_the_card_lists_them() -> None:
+    from agon.governance import destinations as D
+
+    deps = _deps()
+    ref = run(run_to_request(deps, run_input()))
+    manifest = _manifest_ok(deps, ref.sealed)
+    assert list(manifest["destinations"]) == sorted(D.DESTINATION_IDS)
+    for dest_id, entry in manifest["destinations"].items():
+        payload = deps.artifacts.get(entry["sha256"])
+        assert payload is not None and json.loads(payload)["destination"] == dest_id
+        assert manifest["artifacts"][entry["artifact"]]["role"] == "destination"
+    assert [d["id"] for d in ref.request.destinations] == list(D.DESTINATION_IDS)
+    assert all(d["label"] == D.LABELS[d["id"]] for d in ref.request.destinations)
+    assert all(d["sha256"] == manifest["destinations"][d["id"]]["sha256"] for d in ref.request.destinations)
+    report = json.loads(deps.artifacts.get(manifest["artifacts"]["report-en.json"]["sha256"]))
+    club = json.loads(deps.artifacts.get(manifest["destinations"]["club_site"]["sha256"]))
+    assert club["edition"] == report and club["title"].endswith(": match report")
+
+
+def test_a_deployment_can_offer_a_subset_of_destinations() -> None:
+    deps = _deps()
+    deps.offered_destinations = ("club_site", "feeds")
+    ref = run(run_to_request(deps, run_input()))
+    assert sorted(json.loads(ref.sealed.manifest_json)["destinations"]) == ["club_site", "feeds"]
+    assert [d["id"] for d in ref.request.destinations] == ["club_site", "feeds"]
+
+
+def test_a_bundle_the_rights_guard_refused_offers_no_destination() -> None:
+    bait = seed_fixtures(SEED)["real_club_bait"]
+    deps = _deps(model=FakeModel(extra_sentences=[{"sentence_id": "sx", "text": bait["text"], "claims": []}]))
+    ref = run(run_to_request(deps, run_input()))
+    assert "destinations" not in json.loads(ref.sealed.manifest_json)
+
+
+def test_the_decision_records_the_ticked_subset_and_outlook_approves_as_offered() -> None:
+    deps, ref = _awaiting()
+    out = run(steps.decide(deps, ref.request, _envelope(ref.request, destinations=["youtube", "club_site"]), ref.sealed.manifest_json))
+    assert isinstance(out, PublishRequest)
+    assert deps.store.read(verifier.APPROVALS, out.approval_id).body["destinations"] == ["club_site", "youtube"]
+
+    deps2, ref2 = _awaiting()
+    nothing = run(steps.decide(deps2, ref2.request, _envelope(ref2.request, destinations=[]), ref2.sealed.manifest_json))
+    assert nothing.code == "no_destination_selected"
+    outside = run(steps.decide(deps2, ref2.request, _envelope(ref2.request, destinations=["tiktok"]), ref2.sealed.manifest_json))
+    assert outside.code == "destination_not_offered"
+    by_mail = _envelope(ref2.request, channel="outlook", destinations=[], destinations_as_offered=True)
+    approved = run(steps.decide(deps2, ref2.request, by_mail, ref2.sealed.manifest_json))
+    assert isinstance(approved, PublishRequest)
+    record = deps2.store.read(verifier.APPROVALS, approved.approval_id).body
+    assert record["destinations"] == [d["id"] for d in ref2.request.destinations] and record["destinations_as_offered"] is True

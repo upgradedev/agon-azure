@@ -87,6 +87,10 @@ RUN_KEYS = frozenset({
     "bundle", "state", "states", "desks", "handoffs", "gates", "editions", "sentence_types",
     "sentence_gates", "confirm_rows", "desk_editor_flags", "approval",
 })
+# Optional: present once a run reports its publish destinations (agon.publish.webview, documented
+# in web/runs/README.txt). The shipped sample does not carry it: web/agon-runs.js refuses any key
+# outside RUN_KEYS, and the console that reads it (lane D4) replaces that page.
+OPTIONAL_RUN_KEYS = frozenset({"destinations"})
 EDITION_KEYS = frozenset({"edition", "language", "name", "file"})
 # approved_bundle_sha256 names the exact bundle the media officer approved. It must equal bundle.sha256
 # on an approved run and be null otherwise, so "approved" can never float free of the hash Verify checks.
@@ -513,8 +517,8 @@ def validate_run(run: Any) -> list[str]:
     """
     if not isinstance(run, dict):
         return ["run must be a JSON object"]
-    if set(run) != RUN_KEYS:
-        missing, extra = sorted(RUN_KEYS - set(run)), sorted(set(run) - RUN_KEYS)
+    if not RUN_KEYS <= set(run) or set(run) - RUN_KEYS - OPTIONAL_RUN_KEYS:
+        missing, extra = sorted(RUN_KEYS - set(run)), sorted(set(run) - RUN_KEYS - OPTIONAL_RUN_KEYS)
         return [f"run keys differ: missing {', '.join(missing) or 'none'}; unexpected {', '.join(extra) or 'none'}"]
     problems: list[str] = []
     if run["format"] != RUN_FORMAT:
@@ -670,6 +674,11 @@ def validate_run(run: Any) -> list[str]:
             problems.append("an approved run must name the approved bundle: approved_bundle_sha256 must equal bundle.sha256")
         if not approved and approval["approved_bundle_sha256"] is not None:
             problems.append("a run that is not approved has no approved_bundle_sha256")
+    if "destinations" in run:
+        from agon.publish.webview import destination_problems
+
+        is_approved = isinstance(approval, dict) and approval.get("status") == "approved"
+        problems.extend(destination_problems(run["destinations"], approved=is_approved, state=state))
     return problems
 
 

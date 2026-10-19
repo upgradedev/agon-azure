@@ -14,11 +14,21 @@ A channel adapter translates its payload into an `ApprovalDecision` and calls `v
 7. The nonce's stored role equals `TARGET_ROLE[target]`, and the approver holds that role. The
    role is derived from the target; a nonce that names any other role is refused.
 8. An approval ticks every Confirm row the card carried.
-9. Consume-once: compare-and-set on the nonce document's etag. Exactly one decision wins.
+9. Destinations (`agon.governance.destinations`): an approval names only destinations the sealed
+   manifest offers, and ticks at least one when any is offered. A channel that cannot tick
+   (Outlook) approves the destinations as offered, and only that channel may. A "changes"
+   decision carries no destinations (refused as malformed in step 1 if it does).
+10. Consume-once: compare-and-set on the nonce document's etag. Exactly one decision wins. The
+   approval record, keyed by approval id and naming the bundle hash, stores the approved subset;
+   the Publisher and every destination adapter publish to nothing else.
 
-Every refusal before step 9 leaves the nonce unconsumed, so a malformed or forged decision cannot
+Every refusal before step 10 leaves the nonce unconsumed, so a malformed or forged decision cannot
 burn a nonce. A valid "changes" decision consumes the nonce too, so Teams "changes" followed by an
 Outlook "approve" on the same card is refused.
+
+A bundle sealed with no `destinations` table offers nothing: an approve then carries no
+destination and publishes the sealed bundle only, as before destinations existed (the Teams card
+says "No destination choice on this bundle" for exactly this case).
 """
 
 from __future__ import annotations
@@ -50,6 +60,9 @@ SANDBOX_ROLE = "sandbox_approver"
 # read on trust from the nonce document: the console visitor holds sandbox_approver, so a feed
 # nonce that asked for that role would hand the anonymous identity the public feed.
 TARGET_ROLE: dict[str, str] = {"feed": APPROVER_ROLE, "sandbox": SANDBOX_ROLE}
+# Channels whose response cannot carry tick boxes. Their approve covers the destinations as
+# offered; every other channel must tick. Pinned in tests/governance/test_verifier.py.
+AS_OFFERED_CHANNELS: frozenset[str] = frozenset({"outlook"})
 NONCE_MAX_LEN = 128
 DEFAULT_TTL_SECONDS = 30 * 60
 
@@ -67,6 +80,10 @@ class ApprovalDecision:
     channel: str  # set by the adapter, never read from the payload
     received_at: datetime  # set by the adapter
     confirmed_rows: frozenset[str] = field(default_factory=frozenset)
+    # The destination ids the officer ticked. Empty on a "changes" decision.
+    destinations: frozenset[str] = field(default_factory=frozenset)
+    # True only from a channel in AS_OFFERED_CHANNELS: the approve covers every offered destination.
+    destinations_as_offered: bool = False
 
 
 @dataclass(frozen=True)
@@ -184,6 +201,14 @@ def _shape_problem(d: ApprovalDecision, now: datetime) -> str | None:
         return "approver missing"
     if not isinstance(d.confirmed_rows, frozenset):
         return "confirmed rows must be a frozenset"
+    if not isinstance(d.destinations, frozenset) or not all(isinstance(x, str) for x in d.destinations):
+        return "destinations must be a frozenset of ids"
+    if not isinstance(d.destinations_as_offered, bool):
+        return "destinations_as_offered must be a bool"
+    if d.decision != "approve" and (d.destinations or d.destinations_as_offered):
+        return "a changes decision carries no destinations"
+    if d.destinations_as_offered and d.destinations:
+        return "a decision either ticks destinations or approves them as offered, not both"
     try:
         _epoch(d.received_at)
         _epoch(now)
@@ -235,10 +260,23 @@ def verify(decision: ApprovalDecision, store: Store, now: datetime) -> VerifyRes
     if role_doc is None or required_role not in role_doc.body.get("roles", []):
         return _refuse("not_approver", f"{principal} does not hold the {required_role} role", decision)
 
+    approved_destinations: tuple[str, ...] = ()
     if decision.decision == "approve":
         missing = sorted(set(record.get("confirm_rows", [])) - set(decision.confirmed_rows))
         if missing:
             return _refuse("unconfirmed_rows", f"tick these rows before approving: {', '.join(missing)}", decision)
+        offered = seal_mod.offered_destinations(check.manifest)
+        if decision.destinations_as_offered:
+            if decision.channel not in AS_OFFERED_CHANNELS:
+                return _refuse("destinations_not_ticked", f"channel {decision.channel} must tick the destinations it approves", decision)
+            approved_destinations = offered
+        else:
+            outside = sorted(decision.destinations - set(offered))
+            if outside:
+                return _refuse("destination_not_offered", f"not offered by the sealed bundle: {', '.join(outside)}", decision)
+            if offered and not decision.destinations:
+                return _refuse("no_destination_selected", "tick at least one destination before approving", decision)
+            approved_destinations = tuple(d for d in offered if d in decision.destinations)
 
     approval_id = approval_id_for(decision.nonce)
     consumed = {
@@ -249,6 +287,8 @@ def verify(decision: ApprovalDecision, store: Store, now: datetime) -> VerifyRes
         "received_at": _iso(decision.received_at),
         "verified_at": _iso(now),
         "confirmed_rows": sorted(decision.confirmed_rows),
+        "destinations": list(approved_destinations),
+        "destinations_as_offered": decision.destinations_as_offered,
     }
     try:
         store.replace(NONCES, decision.nonce, {**record, "status": "consumed", "consumed": consumed}, if_match=nonce_doc.etag)

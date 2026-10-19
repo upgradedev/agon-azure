@@ -104,6 +104,55 @@ Rules the checker (agon.webrun.validate_run) and the browser
    approval can never float free of the hash Verify recomputes.
 3. Every injury, referee, quote and transfer sentence has a Confirm row.
 
+destinations (optional key)
+---------------------------
+Where the approved bytes went, one row per publish destination, all six in
+this order (agon.governance.destinations), built by
+agon.publish.webview.destinations_for_run from the sealed manifest, the
+approval record and the Publisher's receipt:
+
+    destinations  [{"id", "label", "status", "preview"}]
+
+    id       label (plain text, never a logo)
+    club_site         Club website (CMS feed)
+    feeds             RSS and JSON Feed
+    instagram         Instagram
+    youtube           YouTube
+    newsroom_teams    Internal newsroom (Teams)
+    journalist_email  Journalist email digest
+
+    status   "delivered"           approved, and the receipt shows the bytes
+                                   written (club_site, feeds); only on a
+                                   PUBLISHED run
+             "preview_not_posted"  approved and rendered, not posted or sent:
+                                   Instagram and YouTube always, with the note
+                                   "Preview: not posted; posting needs Meta and
+                                   Google app approval."; the newsroom and
+                                   journalist outbox until their send flow is
+                                   deployed, with the outbox note; the club
+                                   website and feeds between approval and the
+                                   publish, with the waiting note
+             "not_selected"        offered by the sealed bundle and not
+                                   approved; on a run that is not approved
+                                   (yet), every offered destination reads this
+             "not_offered"         the sealed bundle does not offer it
+    preview  null for not_offered, otherwise
+             {"kind": "written" | "outbox" | "preview",
+              "note": the note above, or null,
+              "title": str, "text": str (the exact Instagram caption, the exact
+              YouTube title and description, a plain excerpt otherwise),
+              "payload_sha256": the sealed payload hash in the manifest,
+              "path": the published path, or null}
+
+The officer ticks destinations AFTER the seal, so the ticked set is not in
+the bundle hash: the manifest lists the OFFERED destinations with each
+payload's sha256, and the approval record (keyed by approval id, naming the
+bundle hash) stores the approved subset. agon.webrun.validate_run checks the
+key when it is present (agon.publish.webview.destination_problems). The
+sample run does not carry it yet: web/agon-runs.js refuses any key outside
+the list above, and the React console (lane D4) that reads this key replaces
+that page.
+
 <run_id>/edition-<id>.json
 --------------------------
     {"edition": id, "language": "en" | "el" | "es" | "fr", "match_id": str,

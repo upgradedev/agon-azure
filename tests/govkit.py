@@ -13,10 +13,14 @@ from functools import lru_cache
 from typing import Any
 
 from agon.governance import verifier
+from agon.governance import destinations as dest_mod
 from agon.governance.claims import Claim, Sentence
+from agon.governance.publisher import Publisher
 from agon.governance.recompute import MatchFacts, Roster, display_minute, events_of_kind, score_after, stat_events
-from agon.governance.seal import Artifact, SealedBundle, event_log_sha256, seal, seed_sha256
+from agon.governance.seal import Artifact, SealedBundle, event_log_sha256, offered_destinations, seal, seed_sha256
 from agon.governance.store import InMemoryStore
+from agon.publish.adapters import default_adapters
+from agon.publish.render import ReportView, render_all
 from agon.synth.engine import GENERATOR_VERSION, simulate_match
 from agon.synth.world import build_world
 
@@ -107,6 +111,28 @@ def report_bytes(facts: MatchFacts, tag: str = "") -> dict[str, bytes]:
     }
 
 
+ALL_DESTINATIONS = dest_mod.DESTINATION_IDS
+DISCLOSURE = "AI-drafted from a synthetic match. Numbers and names checked by code."
+
+
+def report_view(facts: MatchFacts, match_id: str, *, parent: str | None = None, tag: str = "") -> ReportView:
+    """The renderers' input for the seeded match: one checked English sentence and the final score."""
+    final = score_after(facts, None)
+    sentence = sot_sentences(facts)["en"]
+    return ReportView(
+        match_id=match_id,
+        league=facts.roster.league_name,
+        home=facts.roster.clubs[facts.home_id],
+        away=facts.roster.clubs[facts.away_id],
+        home_goals=int(final["home"]),
+        away_goals=int(final["away"]),
+        sentences=(sentence.text + tag,),
+        edition={"schema": "agon.edition/1", "edition": "en", "match_id": match_id, "sentences": [sentence.to_dict()]},
+        disclosure=DISCLOSURE,
+        parent_bundle_sha256=parent,
+    )
+
+
 def make_bundle(
     *,
     kind: str = "fulltime",
@@ -114,9 +140,14 @@ def make_bundle(
     parent: str | None = None,
     tag: str = "",
     seed: int = MAIN_SEED,
+    destinations: tuple[str, ...] = ALL_DESTINATIONS,
 ) -> tuple[SealedBundle, dict[str, bytes]]:
+    """A sealed bundle offering `destinations` (all six by default; () offers none), and its files.
+
+    The files hold every listed artifact, the destination payloads included."""
     league, result, facts = match(seed)
     files = report_bytes(facts, tag)
+    payloads = render_all(report_view(facts, result.meta["match_id"], parent=parent, tag=tag), destinations) if destinations else {}
     media = {"report-en.txt": "text/plain", "report-el.txt": "text/plain", "audio-el.mp3": "audio/mpeg"}
     langs = {"report-en.txt": "en", "report-el.txt": "el", "audio-el.mp3": "el"}
     roles = {"report-en.txt": "edition", "report-el.txt": "edition", "audio-el.mp3": "audio"}
@@ -132,8 +163,21 @@ def make_bundle(
         attested=["report-en.txt"],
         gate_cleared=["report-el.txt", "audio-el.mp3"],
         parent_bundle_sha256=parent,
+        destinations=payloads,
     )
+    for dest_id, data in payloads.items():
+        files[dest_mod.artifact_name(dest_id)] = data
     return sealed, files
+
+
+def offered(env_or_bundle: Any) -> list[str]:
+    bundle = getattr(env_or_bundle, "bundle", env_or_bundle)
+    return list(offered_destinations(bundle.manifest))
+
+
+def publisher(store: Any, sink: Any, target: str, base_url: str = "") -> Publisher:
+    """The governed Publisher with one adapter per destination, as the job builds it."""
+    return Publisher(store, sink, target, default_adapters(base_url))
 
 
 def hand_built(mutate, **bundle_kwargs: Any) -> tuple[bytes, str, dict[str, bytes]]:
@@ -209,10 +253,21 @@ def later(seconds: int) -> datetime:
 # ----------------------------------------------------------------- channel payloads
 
 
-def teams_payload(env: Env, decision: str = "approve", upn: str = OFFICER, confirmed: tuple[str, ...] = ()) -> dict[str, Any]:
+def teams_payload(
+    env: Env,
+    decision: str = "approve",
+    upn: str = OFFICER,
+    confirmed: tuple[str, ...] = (),
+    destinations: tuple[str, ...] | None = None,
+) -> dict[str, Any]:
+    """The card response. `destinations` is the ticked set; None ticks every offered toggle, as the
+    card pre-ticks them. Unticked offered toggles read "false", as the card sends them."""
     data: dict[str, Any] = {"decision": decision, "bundle_sha256": env.bundle.bundle_sha256, "nonce": env.nonce}
     for row in confirmed:
         data[f"confirm:{row}"] = "true"
+    ticked = offered(env) if destinations is None else list(destinations)
+    for dest_id in sorted(set(offered(env)) | set(ticked)):
+        data[f"dest:{dest_id}"] = "true" if dest_id in ticked else "false"
     return {"responder": {"userPrincipalName": upn, "objectId": "00000000-0000-0000-0000-000000000001"}, "data": data}
 
 
@@ -225,8 +280,17 @@ def outlook_payload(env: Env, option: str = "Approve", email: str = OFFICER, con
     }
 
 
-def console_body(env: Env, decision: str = "approve", confirmed: tuple[str, ...] = ()) -> dict[str, Any]:
-    return {"bundle_sha256": env.bundle.bundle_sha256, "nonce": env.nonce, "decision": decision, "confirmed_rows": list(confirmed)}
+def console_body(
+    env: Env, decision: str = "approve", confirmed: tuple[str, ...] = (), destinations: tuple[str, ...] | None = None
+) -> dict[str, Any]:
+    ticked = offered(env) if destinations is None else list(destinations)
+    return {
+        "bundle_sha256": env.bundle.bundle_sha256,
+        "nonce": env.nonce,
+        "decision": decision,
+        "confirmed_rows": list(confirmed),
+        "destinations": ticked,
+    }
 
 
 class TestSecrets:

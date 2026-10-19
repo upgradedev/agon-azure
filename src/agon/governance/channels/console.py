@@ -6,7 +6,11 @@ API from the session, never read from the request body. Nonces for the public `f
 this channel in the verifier, so the stand-in can only ever approve a `sandbox` publish.
 
 Request body: {"bundle_sha256": "<64 hex>", "nonce": "<nonce>", "decision": "approve" | "changes",
-"confirmed_rows": ["s3", ...]}.
+"confirmed_rows": ["s3", ...], "destinations": ["club_site", ...]}.
+
+`destinations` lists the destination chips the visitor ticked (optional, default none). The
+verifier refuses any id the sealed bundle does not offer and an approve with nothing ticked when
+something is offered. A "changes" decision carries no destinations; ticked chips are dropped here.
 """
 
 from __future__ import annotations
@@ -23,7 +27,7 @@ CHANNEL = "console"
 def parse(body: Any, *, principal: str, received_at: datetime) -> verifier.ApprovalDecision:
     if not isinstance(body, dict):
         raise PayloadError("body must be an object")
-    extra = set(body) - {"bundle_sha256", "nonce", "decision", "confirmed_rows"}
+    extra = set(body) - {"bundle_sha256", "nonce", "decision", "confirmed_rows", "destinations"}
     if extra:
         raise PayloadError(f"unexpected body fields {sorted(extra)}")
     decision = require_str(body, "decision", "body")
@@ -32,6 +36,9 @@ def parse(body: Any, *, principal: str, received_at: datetime) -> verifier.Appro
     rows = body.get("confirmed_rows", [])
     if not isinstance(rows, list) or not all(isinstance(r, str) for r in rows):
         raise PayloadError("body.confirmed_rows must be a list of strings")
+    ticked = body.get("destinations", [])
+    if not isinstance(ticked, list) or not all(isinstance(d, str) for d in ticked):
+        raise PayloadError("body.destinations must be a list of strings")
     if not isinstance(principal, str) or not principal.strip():
         raise PayloadError("no console session principal")
     return verifier.ApprovalDecision(
@@ -42,6 +49,7 @@ def parse(body: Any, *, principal: str, received_at: datetime) -> verifier.Appro
         channel=CHANNEL,
         received_at=received_at,
         confirmed_rows=frozenset(rows),
+        destinations=frozenset(ticked) if decision == "approve" else frozenset(),
     )
 
 
