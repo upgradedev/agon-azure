@@ -171,9 +171,17 @@ def _confirm_rows(request: ApprovalRequest, report_en: Mapping[str, Any] | None,
     return rows
 
 
-def _destinations(manifest: Mapping[str, Any]) -> list[dict[str, str]]:
-    """The destinations the sealed manifest offers, if it names any (lane C6); [] means feed only."""
-    offered = manifest.get("destinations")
+def _destinations(request: ApprovalRequest, manifest: Mapping[str, Any]) -> list[dict[str, str]]:
+    """The destinations this bundle offers, as the card's {id, label} toggles; [] means feed only.
+
+    Lane C6 seals the offered destinations into the manifest and adds them to the ApprovalRequest;
+    the officer ticks a subset on the card and the verifier refuses anything outside the offer. The
+    request's list wins; otherwise the manifest's `destinations` (a list of ids or {id, label}, or
+    a table keyed by id) is read. Neither present: no toggles, and the flow says feed only.
+    """
+    offered: Any = getattr(request, "destinations", None) or manifest.get("destinations")
+    if isinstance(offered, Mapping):
+        offered = [{"id": key, **(value if isinstance(value, Mapping) else {})} for key, value in sorted(offered.items())]
     if not isinstance(offered, list):
         return []
     out = []
@@ -181,7 +189,7 @@ def _destinations(manifest: Mapping[str, Any]) -> list[dict[str, str]]:
         if isinstance(item, str):
             out.append({"id": item, "label": item.replace("_", " ").capitalize()})
         elif isinstance(item, Mapping) and isinstance(item.get("id"), str):
-            out.append({"id": item["id"], "label": str(item.get("label") or item["id"])})
+            out.append({"id": item["id"], "label": str(item.get("label") or item["id"].replace("_", " ").capitalize())})
     return out
 
 
@@ -217,7 +225,7 @@ def teams_payload(request: ApprovalRequest, inputs: CardInputs, match_ref: Mappi
             "attested": attested,
             "gate_cleared": _gate_cleared_text(inputs.manifest),
             "confirm_rows": _confirm_rows(request, inputs.report_en, limit),
-            "destinations": _destinations(inputs.manifest),
+            "destinations": _destinations(request, inputs.manifest),
             "published_url": published_url(context, request.target, request.bundle_sha256),
         }
         if context.site_url.startswith("https://"):

@@ -252,3 +252,24 @@ def test_the_poster_refuses_a_sas_url_at_construction():
 
 def test_url_fingerprint_hides_the_path():
     assert "abc123" not in card.url_fingerprint(FLOW_URL)
+
+
+def test_offered_destinations_become_card_toggles_in_every_shape(sealed_run):
+    """Lane C6 offers destinations on the request or in the manifest; the card renders {id, label}."""
+    import dataclasses
+
+    _, ri, ref, inputs = sealed_run
+    as_list = {**inputs.manifest, "destinations": ["club_site", {"id": "feeds", "label": "RSS and JSON Feed"}]}
+    as_table = {**inputs.manifest, "destinations": {"feeds": {"artifact": "destination-feeds.json"}, "club_site": {}}}
+    for manifest, expected in (
+        (as_list, [{"id": "club_site", "label": "Club site"}, {"id": "feeds", "label": "RSS and JSON Feed"}]),
+        (as_table, [{"id": "club_site", "label": "Club site"}, {"id": "feeds", "label": "Feeds"}]),
+    ):
+        payload = card.teams_payload(ref.request, card.CardInputs(manifest, inputs.record, inputs.report_en), ri.match_ref, CONTEXT)
+        assert payload["destinations"] == expected
+
+    @dataclasses.dataclass
+    class WithDestinations:
+        destinations: list
+
+    assert card._destinations(WithDestinations([{"id": "youtube", "label": "YouTube"}]), as_list) == [{"id": "youtube", "label": "YouTube"}]
