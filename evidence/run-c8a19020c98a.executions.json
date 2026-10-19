@@ -1,0 +1,42 @@
+{
+  "schema": "agon.run-executions/1",
+  "run_id": "drill-20261019T211859Z-39326468664",
+  "recorded_run": "run-c8a19020c98a",
+  "bundle_sha256": "c8a19020c98a8de7dab58475bc0b2466129d3de771e30fd8ec519ab2716382dd",
+  "source_command": "az containerapp job execution list -g rg-agon-swc -n <job> --query \"[].{name:name, status:properties.status, start:properties.startTime, end:properties.endTime}\"",
+  "captured_at": "2026-10-20",
+  "executions": [
+    {
+      "job": "job-agon-fleet",
+      "execution": "job-agon-fleet-rvh66",
+      "status": "Succeeded",
+      "start": "2026-10-19T21:19:06+00:00",
+      "end": "2026-10-19T21:21:36+00:00",
+      "role": "fleet: ran W-fulltime to the approval pause, posted the card, process ended"
+    },
+    {
+      "job": "job-agon-intake",
+      "execution": "job-agon-intake-669v2",
+      "status": "Succeeded",
+      "start": "2026-10-19T21:24:36+00:00",
+      "end": "2026-10-19T21:25:27+00:00",
+      "role": "intake: verified the officer's Teams decision (one verifier, consume once)"
+    },
+    {
+      "job": "job-agon-fleet",
+      "execution": "job-agon-fleet-qwtgb",
+      "status": "Succeeded",
+      "start": "2026-10-19T21:25:06+00:00",
+      "end": "2026-10-19T21:26:37+00:00",
+      "role": "fleet: a new process resumed the workflow from the durable checkpoint"
+    },
+    {
+      "job": "job-agon-publisher",
+      "execution": "job-agon-publisher-fw22b",
+      "status": "Succeeded",
+      "start": "2026-10-19T21:25:36+00:00",
+      "end": "2026-10-19T21:26:22+00:00",
+      "role": "publisher: recomputed the hash, published create-only to the feed"
+    }
+  ]
+}
