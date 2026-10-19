@@ -7,7 +7,12 @@ What it checks, and where:
   instruction markers, the strict club and field-name screen from `agon.synth.blocklist`, and
   the league, broadcaster and player lists in `rights_lists`.
 * Prose (every sentence of every edition): the same real and field names as whole-word phrases,
-  Greek-script club stems, and the instruction markers.
+  Greek-script club stems, and a NARROWER set of instruction markers: multi-word phrases matched
+  on word boundaries, a few symbol sequences, role prefixes ("System:") at the start of a line or
+  sentence, and "new instructions:" with its colon. Single words such as "instructions",
+  "disregard" or Greek "οδηγίες" are name-field markers only, because ordinary match reporting
+  uses them ("The coach gave clear instructions at half time"), and Greek "αγνόησε" is both the
+  imperative "ignore" and the past tense "ignored".
 * People: a `name` claim whose value is not on the fictional roster is refused. This is checked on
   name fields and claims only. It is NOT named-entity recognition over prose; a person written
   into prose with no claim is caught only if they are on a block list.
@@ -37,14 +42,38 @@ NAME_MAX_TOKENS = 5
 _APOSTROPHES = {"'", chr(0x2019)}
 _NAME_PUNCT = {" ", "-", "."} | _APOSTROPHES
 
-# Instruction markers, folded (lower case, accents dropped). Checked in name fields and prose.
-INJECTION_MARKERS: tuple[str, ...] = (
+# Name-field markers, folded (lower case, accents dropped), matched as substrings. Broad on
+# purpose: no invented league, club or player name contains any of these.
+NAME_MARKERS: tuple[str, ...] = (
     "ignore previous", "ignore all", "ignore the above", "disregard", "system prompt",
     "you are now", "new instructions", "instructions", "assistant:", "system:", "developer:",
     "publish now", "approve this", "approve the bundle", "jailbreak", "do anything now",
     "<script", "{{", "}}", "[inst]", "<|", "|>",
     "αγνοησε",  # Greek: "ignore" (imperative)
     "οδηγιεσ",  # Greek: "instructions"
+)
+
+# Prose phrases, written naturally and folded at load, matched as whole-word token sequences.
+# Each one needs an instruction-shaped qualifier ("previous", "the above", "all prior"), so a
+# sentence reporting that a player ignored his coach's instructions is not refused.
+PROSE_PHRASES: tuple[str, ...] = (
+    "ignore previous", "ignore all previous", "ignore all prior", "ignore prior instructions",
+    "ignore the above", "ignore the previous instructions", "ignore your instructions",
+    "disregard previous", "disregard all previous", "disregard all prior", "disregard the above",
+    "disregard your instructions", "system prompt", "jailbreak", "do anything now",
+    "approve the bundle", "publish the bundle",
+    "ignora las instrucciones anteriores", "ignora todas las instrucciones anteriores",
+    "ignorad las instrucciones", "olvida las instrucciones anteriores",
+    "ignore les instructions précédentes", "ignorez les instructions",
+    "ignorez toutes les instructions", "oublie les instructions précédentes",
+    "αγνόησε τις προηγούμενες οδηγίες", "αγνοήστε τις οδηγίες", "αγνοήστε τις προηγούμενες οδηγίες",
+)
+PROSE_SYMBOLS: tuple[str, ...] = ("<script", "{{", "}}", "[inst]", "<|", "|>")
+# Applied to the folded text. Role prefixes count only where a line or a sentence starts, so
+# "their pressing system: high and relentless" is not a role prefix.
+PROSE_PATTERNS: tuple[str, ...] = (
+    r"(?:^|[\n\r]|[.!?;]\s)\s*(?:system|assistant|developer)\s*:",
+    r"(?:^|\W)(?:new instructions|nuevas instrucciones|nouvelles instructions|νεεσ οδηγιεσ)\s*:",
 )
 
 _TOKEN = re.compile(r"[^\W_]+")
@@ -102,7 +131,10 @@ class RightsLists:
     greek_stems: tuple[str, ...]
     prose_ambiguous: frozenset[str]
     use_synth_screen: bool = True
-    markers: tuple[str, ...] = field(default=INJECTION_MARKERS)
+    name_markers: tuple[str, ...] = field(default=NAME_MARKERS)
+    prose_phrases: tuple[tuple[str, ...], ...] = ()
+    prose_symbols: tuple[str, ...] = ()
+    prose_patterns: tuple[re.Pattern[str], ...] = ()
 
 
 def default_lists() -> RightsLists:
@@ -117,7 +149,15 @@ def default_lists() -> RightsLists:
         phrases=tuple(p for p in phrases if p.tokens),
         greek_stems=tuple(fold(s) for s in rights_lists.GREEK_STEMS),
         prose_ambiguous=rights_lists.PROSE_AMBIGUOUS,
+        prose_phrases=tuple(marker_tokens(m) for m in PROSE_PHRASES),
+        prose_symbols=PROSE_SYMBOLS,
+        prose_patterns=tuple(re.compile(p) for p in PROSE_PATTERNS),
     )
+
+
+def marker_tokens(text: str) -> tuple[str, ...]:
+    """A marker phrase as folded word tokens, the same way screened prose is tokenised."""
+    return tuple(_TOKEN.findall(fold(text)))
 
 
 DEFAULT_LISTS = default_lists()
@@ -176,9 +216,22 @@ def _greek_hits(toks: list[_Tok], lists: RightsLists) -> list[str]:
     return found
 
 
-def _marker_hits(text: str, lists: RightsLists) -> list[str]:
+def _name_marker_hits(text: str, lists: RightsLists) -> list[str]:
     folded = fold(text)
-    return [m for m in lists.markers if m in folded]
+    return [m for m in lists.name_markers if m in folded]
+
+
+def _prose_marker_hits(text: str, toks: list[_Tok], lists: RightsLists) -> list[str]:
+    folded = fold(text)
+    words = [t.folded for t in toks]
+    hits: list[str] = []
+    for phrase in lists.prose_phrases:
+        n = len(phrase)
+        if n and any(tuple(words[i : i + n]) == phrase for i in range(len(words) - n + 1)):
+            hits.append(" ".join(phrase))
+    hits += [m for m in lists.prose_symbols if m in folded]
+    hits += [m.group(0).strip().lstrip(".!?;").strip() for pat in lists.prose_patterns for m in [pat.search(folded)] if m]
+    return hits
 
 
 def screen_name_field(value: str, where: str, lists: RightsLists = DEFAULT_LISTS) -> list[Refusal]:
@@ -192,7 +245,7 @@ def screen_name_field(value: str, where: str, lists: RightsLists = DEFAULT_LISTS
         refusals.append(Refusal("name_field_charset", where, f"characters not allowed in a name: {shown}"))
     if len(value) > NAME_MAX_LEN or len(value.split()) > NAME_MAX_TOKENS:
         refusals.append(Refusal("name_field_length", where, f"name longer than {NAME_MAX_LEN} characters or {NAME_MAX_TOKENS} words"))
-    for marker in _marker_hits(value, lists):
+    for marker in _name_marker_hits(value, lists):
         refusals.append(Refusal("injection_marker", where, f"instruction marker {marker!r} in a name field"))
     if lists.use_synth_screen:
         reason = synth_blocklist.blocked_reason(value)
@@ -213,7 +266,7 @@ def screen_prose(text: str, where: str, lists: RightsLists = DEFAULT_LISTS) -> l
         refusals.append(Refusal(phrase.category, where, f"blocked name {phrase.label!r} in prose"))
     for word in _greek_hits(toks, lists):
         refusals.append(Refusal("real_name_greek", where, f"blocked Greek-script name {word!r} in prose"))
-    for marker in _marker_hits(text, lists):
+    for marker in _prose_marker_hits(text, toks, lists):
         refusals.append(Refusal("injection_marker", where, f"instruction marker {marker!r} in prose"))
     return refusals
 
