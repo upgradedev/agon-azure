@@ -58,7 +58,7 @@ Why: a `pull_request` workflow runs the YAML of the pull request's own branch, b
 
 What a pull request gets instead: `ci.yml` compiles and lints both templates with no login (job `bicep`), and job `oidc` (`ci/check_oidc.py`) fails if any pull request triggered workflow grants `id-token: write` or `write-all`. That check is an accident guard only, because a branch can edit it in its own diff. The Azure what-if diff appears in the `main` run's log, in the job before the deploy. It informs; it does not stop the deploy unless the `azure` environment has a required reviewer.
 
-**The boundary is on the Entra side, and it is pending owner action.** The bootstrap created a federated credential for the subject `repo:upgradedev/agon-azure:pull_request` on `agon-azure-ci`. Nothing in this repository uses it any more, but while it exists any branch of this repository can still obtain a Contributor token on `rg-agon-swc` through a workflow it adds itself. Step 4 below removes it. Until step 4 is done and checked, treat every open pull request as able to act with Contributor on the group.
+**The boundary is on the Entra side.** The bootstrap created a federated credential for the `pull_request` subject on `agon-azure-ci`; it was deleted on 2026-10-19 (step 4). Read back on 2026-10-19 14:14 UTC with `az ad app federated-credential list --id <appId> --query "[].subject"`: only `repo:upgradedev@25751981/agon-azure@1425273524:ref:refs/heads/main` and `repo:upgradedev@25751981/agon-azure@1425273524:environment:azure`, and the `azure` environment accepts deployments from `main` only.
 
 To bring pull request what-if back later, use option (b): a separate Entra app that holds only Reader on the group plus `Microsoft.Resources/deployments/whatIf/action` through a custom role, with the `pull_request` subject pointed at that app and its own client id variable. Never point the `pull_request` subject at `agon-azure-ci` again.
 
@@ -155,7 +155,7 @@ az deployment group create --resource-group $rg --name agon-rbac --template-file
 
 Run `what-if` with the same arguments first if anything in `rbac.bicep` changed since the last run. Grants that go beyond the spec 7.1 table are marked "BEYOND THE SPEC 7.1 TABLE" (or "beyond spec 7.1") in the templates, each with the reason.
 
-**4. Remove the `pull_request` federated credential from `agon-azure-ci` (pending; do it as soon as possible, it is safe before or after this change merges because nothing uses that subject).** First prove that nothing in the repository still needs it. Every workflow that grants `id-token: write` must have no `pull_request` trigger:
+**4. Remove the `pull_request` federated credential from `agon-azure-ci` (done 2026-10-19; kept here so it can be re-checked).** First prove that nothing in the repository still needs it. Every workflow that grants `id-token: write` must have no `pull_request` trigger:
 
 ```bash
 grep -l "id-token: write" .github/workflows/*.yml | xargs -r grep -lE '^  pull_request|^on:.*pull_request'
@@ -171,7 +171,7 @@ az ad app federated-credential delete --id "$app" --federated-credential-id <nam
 az ad app federated-credential list --id "$app" --query "[].subject" --output tsv
 ```
 
-The last command must print exactly two subjects, `repo:upgradedev/agon-azure:ref:refs/heads/main` and `repo:upgradedev/agon-azure:environment:azure`. Deleting this credential does not affect the deploy, the scheduled readiness check or any resource: they use the other two subjects. If a flag name differs in your az version, check `az ad app federated-credential delete --help`. Record the date and the printed subjects in `STATE.md`.
+The last command must print exactly two subjects, in the immutable-ID form GitHub issues: `repo:upgradedev@25751981/agon-azure@1425273524:ref:refs/heads/main` and `repo:upgradedev@25751981/agon-azure@1425273524:environment:azure`. Deleting this credential does not affect the deploy, the scheduled readiness check or any resource: they use the other two subjects. If a flag name differs in your az version, check `az ad app federated-credential delete --help`. Record the date and the printed subjects in `STATE.md`.
 
 ### Never
 
