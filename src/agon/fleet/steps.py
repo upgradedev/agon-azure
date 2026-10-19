@@ -362,7 +362,12 @@ async def factgate(deps: FleetDeps, draft: Draft) -> tuple[Literal["retry", "che
 
 
 async def desk_editor(deps: FleetDeps, draft: Draft) -> Draft:
-    """A critic that may add flags and Confirm rows and can never clear either."""
+    """A critic that may add flags and can never clear one (spec section 4 row 7).
+
+    It never touches the Confirm rows or the attested scope: those come from the triage routing
+    table alone, so a model's output can never widen what the officer attests. Its flags reach the
+    officer on the card, beside the sentence they name.
+    """
     d = _copy(draft)
     if not deps.desk_editor_enabled:
         add_flag(d, "desk_editor_not_run", "Desk Editor is switched off in this deployment", "desk_editor")
@@ -378,14 +383,11 @@ async def desk_editor(deps: FleetDeps, draft: Draft) -> Draft:
         add_flag(d, "desk_editor_unavailable", f"Desk Editor unavailable: {exc}", "desk_editor")
         return d
     known = {s["sentence_id"] for s in d.sentences}
-    rows = set(d.confirm_rows)
     for f in flags:
         if f["sentence_id"] not in known:
             add_flag(d, "desk_editor_unknown_sentence", f"flag for unknown sentence {f['sentence_id']} ignored", "desk_editor")
             continue
         add_flag(d, f"desk_{f['code']}", f["detail"], "desk_editor", f["sentence_id"])
-        rows.add(f["sentence_id"])
-    d.confirm_rows = sorted(rows)
     return d
 
 

@@ -257,7 +257,35 @@ def test_desk_editor_may_add_flags_and_never_clear_one() -> None:
     codes = _codes(d)
     assert "factgate_template_line" in codes, "earlier flags survive the critic"
     assert "desk_unsupported_emphasis" in codes and "desk_editor_unknown_sentence" in codes
-    assert "s2" in d.confirm_rows
+    assert d.triage["s2"]["route"] == "factgate"
+    assert "s2" not in d.confirm_rows, "a desk flag is a flag, never a Confirm row"
+
+
+def test_desk_editor_flags_never_widen_the_confirm_rows_or_the_attested_scope() -> None:
+    """Spec 4 row 7: the critic adds flags only. Confirm rows come from the triage table alone.
+
+    The expected rows and scope come from a separate run with no desk flag, never from the
+    flagged run itself, so a critic that widened the scope would fail here.
+    """
+    baseline = run(run_to_request(_deps(), run_input()))
+    assert baseline.request is not None
+    detail = "the line overstates the result"
+    deps = _deps(model=FakeModel(desk_flags=[{"sentence_id": "s1", "code": "unsupported_emphasis", "detail": detail}]))
+    ref = run(run_to_request(deps, run_input()))
+    d = ref.sealed.draft
+    assert d.triage["s1"]["type"] == "match_stat" and d.triage["s1"]["route"] == "factgate"
+    flag = {"code": "desk_unsupported_emphasis", "detail": detail, "by": "desk_editor", "sentence_id": "s1"}
+    assert flag in d.flags
+    manifest = _manifest_ok(deps, ref.sealed)
+    card = json.loads(deps.artifacts.get(manifest["artifacts"]["card.json"]["sha256"]))
+    assert flag in card["flags"]
+    assert "s1" not in d.confirm_rows
+    assert d.confirm_rows == baseline.sealed.draft.confirm_rows == card["confirm_rows"]
+    assert manifest["attested_scope"] == json.loads(baseline.sealed.manifest_json)["attested_scope"]
+    assert ref.request is not None, "a flagged bundle still seals and gets its card"
+    assert ref.request.confirm_rows == baseline.request.confirm_rows
+    assert ref.request.attested_scope == baseline.request.attested_scope
+    assert deps.store.read(verifier.NONCES, ref.request.nonce) is not None
 
 
 def test_desk_editor_outage_and_switch_off_are_on_the_card() -> None:
