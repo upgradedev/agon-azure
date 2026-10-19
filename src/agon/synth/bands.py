@@ -2,6 +2,11 @@
 
 Usage (from the repository root):
     python -m agon.synth.bands --seeds 1001-1200 --bands bands.json
+    python -m agon.synth.bands --seeds 1001-1200 --json-out src/agon/synth/bands_heldout.json
+
+`--json-out` writes the same result as canonical JSON. The committed `bands_heldout.json` is that
+output for the held-out seeds; the Data Lab page shows it, and the determinism workflow regenerates
+it on ubuntu and windows and fails when it differs from the committed file.
 
 The bands in `bands.json` are ranges we chose as sanity checks for a synthetic generator. They are
 not measurements of, and not claims about, any real league. They were frozen and hashed into
@@ -36,6 +41,7 @@ from typing import Any, Iterable, Sequence
 
 from agon.synth.engine import GENERATOR_VERSION, simulate_match
 from agon.synth.manifest import parse_seeds
+from agon.synth.schema import canonical_bytes
 from agon.synth.world import build_world
 
 PACKAGE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -313,11 +319,49 @@ def report_lines(rows: Sequence[Row], seeds_text: str, bands_path: str, bands_sh
     return lines
 
 
+def report_record(rows: Sequence[Row], seeds_text: str, bands_sha: str, match_index: int) -> dict[str, Any]:
+    """The same M2 result as `report_lines`, as integer-and-string JSON for pages (no floats).
+
+    Bounds and observed values are the exact rationals rounded half up to 4 decimals, as strings;
+    an observation that needs tracking data is null with status NOT MEASURABLE.
+    """
+    if bands_sha != FROZEN_BANDS_SHA256:
+        raise BandsError("NOT THE FROZEN BANDS: not an M2 result")
+    command = f"python -m agon.synth.bands --seeds {seeds_text}"
+    if match_index != DEFAULT_MATCH_INDEX:
+        command += f" --match-index {match_index}"
+    return {
+        "metric": "M2",
+        "label": "self-measured",
+        "command": command,
+        "generator": GENERATOR_VERSION,
+        "seeds": seeds_text,
+        "match_index": match_index,
+        "bands_sha256": bands_sha,
+        "threshold": M2_PASS_THRESHOLD,
+        "passed": passed_count(rows),
+        "of": len(rows),
+        "rows": [
+            {
+                "id": r.band.id,
+                "statistic": r.band.statistic,
+                "unit": r.band.unit,
+                "lo": _fmt(r.band.lo),
+                "hi": _fmt(r.band.hi),
+                "observed": None if r.observed is None else _fmt(r.observed),
+                "status": r.status,
+            }
+            for r in rows
+        ],
+    }
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m agon.synth.bands", description=__doc__.splitlines()[0])
     parser.add_argument("--seeds", default=DEFAULT_SEEDS, help="e.g. 1001-1200")
     parser.add_argument("--bands", default=None, help="bands file; its bands.lock must sit next to it")
     parser.add_argument("--match-index", type=int, default=DEFAULT_MATCH_INDEX)
+    parser.add_argument("--json-out", default=None, help="also write the result as canonical JSON here (binary, LF)")
     args = parser.parse_args(argv)
 
     started = time.perf_counter()
@@ -338,6 +382,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     rows = evaluate(bands, observe(collect_stats(seeds, args.match_index)))
     sys.stdout.write("\n".join(report_lines(rows, args.seeds, path, sha, args.match_index)) + "\n")
     sys.stdout.flush()
+    if args.json_out:
+        parent = os.path.dirname(args.json_out)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        with open(args.json_out, "wb") as fh:
+            fh.write(canonical_bytes(report_record(rows, args.seeds, sha, args.match_index)) + b"\n")
     elapsed_ms = int((time.perf_counter() - started) * 1000)
     sys.stderr.write(f"wall time {elapsed_ms} ms total for {len(seeds)} seed(s)\n")
     return verdict_exit_code(passed_count(rows))
