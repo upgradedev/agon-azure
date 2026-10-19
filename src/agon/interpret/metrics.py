@@ -22,7 +22,7 @@ from agon.interpret.frame import (
 )
 from agon.interpret.model import load_model
 
-# PPDA zone, Opta-style: the opponent's passes in its own 60% of the pitch, against the pressing
+# PPDA zone: the opponent's passes in its own 60% of the pitch, against the pressing
 # side's defensive actions in the same area. In the opponent's frame that area is x_dm < 630; the
 # pressing side's own events are stored in ITS frame, where the same area is x_dm >= 420.
 PPDA_OPP_PASS_MAX_X_DM = 630
