@@ -1,7 +1,8 @@
 name: determinism
 
 # Metric M1: the seeded generator must produce byte-identical output on ubuntu and windows.
-# Each OS generates seeds 1,2,3, uploads hash.txt plus the NDJSON output, and a final job
+# Each OS generates seeds 1,2,3 (matches, fixtures manifest, storyline labels), uploads
+# hash.txt plus that output, and a final job
 # compares them. A mismatch prints both hash files and the first diverging event and fails.
 # The check is never relaxed; on divergence, fix the generator.
 
@@ -43,6 +44,12 @@ jobs:
         run: |
           python -m agon.synth.manifest --seeds "$SEEDS" --print-hash \
             --hash-out artifact/hash.txt --out artifact/out
+      # The fixtures manifest and the storyline labels sit under out/, so the compare job
+      # diffs them byte for byte across OS as well.
+      - name: Generate fixtures and storyline labels
+        run: |
+          python -m agon.synth.fixtures --seeds "$SEEDS" --print-hash --out artifact/out/fixtures.json
+          python -m agon.referee.storylines --seeds "$SEEDS" --print-hash --out artifact/out/labels.ndjson
       - uses: actions/upload-artifact@v4
         with:
           name: synth-${{ matrix.os }}

@@ -1,6 +1,7 @@
 """Each style knob must move its own metric in the stated direction (a knob without a reader is not a feature).
 
-This is a coarse v0 check on a few seeds, not metric M4 (`agon.synth.sensitivity`, not built yet).
+A coarse check on three seeds. Metric M4 itself is `agon.synth.sensitivity`, tested in
+test_synth_sensitivity.py with a disconnected-knob negative control.
 """
 
 from __future__ import annotations

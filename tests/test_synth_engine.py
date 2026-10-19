@@ -1,7 +1,8 @@
-"""Match engine v0: valid, internally consistent and within wide plausibility ranges.
+"""Match engine: valid, internally consistent and within wide plausibility ranges.
 
 The ranges here are sanity bounds from the task (goals 0 to 9, shots 5 to 40 per match), not the
-realism bands. Calibration against frozen bands is a later metric (M2) and must not widen these.
+realism bands. The bands (metric M2) live in agon.synth.bands and are tested in
+test_synth_bands.py; calibrating against them must never widen these ranges.
 """
 
 from __future__ import annotations
