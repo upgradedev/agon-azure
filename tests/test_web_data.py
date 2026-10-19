@@ -79,6 +79,16 @@ def test_fixture_is_reproducible_from_the_generator():
         assert data == (FIXTURE / name).read_bytes(), f"{name} differs from a fresh generator run"
 
 
+def test_fixture_is_a_prefix_of_the_synth_cli_events_file():
+    """The fixture is exactly the opening of what python -m agon.synth.manifest --out writes as events.ndjson."""
+    full = build_bundle(1).events_ndjson()
+    fixture = (FIXTURE / "1.ndjson").read_bytes()
+    assert len(fixture) < len(full)
+    assert full.startswith(fixture)
+    next_event = json.loads(full[len(fixture):].splitlines()[0])
+    assert (next_event["period"], next_event["minute"]) >= (1, FIXTURE_MAX_MINUTE)
+
+
 def test_fixture_folder_holds_only_contract_files_and_the_readme():
     names = sorted(p.name for p in FIXTURE.iterdir())
     assert names == sorted(["README.txt", "manifest.json"] + [e["name"] for e in _manifest()["files"]])
@@ -136,6 +146,11 @@ def test_manifest_cases_cover_both_outcomes():
 
 def test_fixed_frame_golden_matches_python():
     """The JS port is held to this golden; the golden is held to Python here."""
+    from make_frame_golden import golden_text
+
+    assert (JS_TESTS / "fixed_frame_golden.json").read_text(encoding="ascii") == golden_text(), (
+        "tests/js/fixed_frame_golden.json is stale. Fix: PYTHONPATH=src python ci/make_frame_golden.py"
+    )
     golden = json.loads((JS_TESTS / "fixed_frame_golden.json").read_text(encoding="utf-8"))
     lines = (ROOT / golden["source"]).read_text(encoding="ascii").splitlines()
     events = [json.loads(line) for line in lines]

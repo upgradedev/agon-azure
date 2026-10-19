@@ -133,7 +133,7 @@
     });
     var hint = "Each seed is a different fictional match from the synthetic generator. Choosing one loads its event file.";
     if (source === "fixture") {
-      hint += " The committed fixture holds seed " + seeds.join(", ") + " only; the other seeds arrive with the deployed match files.";
+      hint += " The committed fixture holds seed " + seeds.join(", ") + " only; the other seeds are planned to arrive with the deployed match files.";
     }
     setText(el.seedHint, hint);
     return files[0];

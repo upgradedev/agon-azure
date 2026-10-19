@@ -9,8 +9,14 @@ development and in tests. It is the first 10 minutes of the first half of seed 1
 
     PYTHONPATH=src python -m agon.webdata --seeds 1 --max-minute 10 --out web/data-fixture
 
+The file is a byte-for-byte prefix of the events.ndjson that
+python -m agon.synth.manifest --seeds 1 --out <dir> writes; a test checks that.
+
 tests/test_web_data.py regenerates it and fails if a single byte differs, so a
-generator change (a new GENERATOR_VERSION) means re-running the command above.
+generator change (a new GENERATOR_VERSION) means re-running the command above
+and then the golden the browser tests compare against:
+
+    PYTHONPATH=src python ci/make_frame_golden.py
 
 Where the app looks
 -------------------
