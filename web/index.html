@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#121922" media="(prefers-color-scheme: dark)">
+  <meta name="description" content="Agon preview build: the Match Centre shell for a planned full-time newsroom for a club media office. Synthetic, fictional data only.">
+  <title>Agon | Match Centre</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="app.css">
+  <script src="theme.js"></script>
+  <script src="app.js" defer></script>
+</head>
+<body class="has-action-bar" data-commit="__AGON_COMMIT__">
+  <a class="skip-link" href="#main">Skip to content</a>
+
+  <header class="topbar">
+    <div class="container topbar__inner">
+      <a class="brand" href="#/" aria-label="Agon, go to the Match Centre">
+        <svg class="brand__mark" viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+          <rect class="brand__tile" width="32" height="32" rx="8"/>
+          <path class="brand__glyph" d="M9 24 16 8l7 16"/>
+          <circle class="brand__ball" cx="16" cy="19.5" r="2.2"/>
+        </svg>
+        <span>Agon</span>
+      </a>
+
+      <nav class="nav" aria-label="Primary">
+        <a href="#/" data-route="/">Match Centre</a>
+        <a href="#/verify" data-route="/verify">Verify</a>
+        <a href="#/about" data-route="/about">About</a>
+      </nav>
+
+      <div class="topbar__tools">
+        <span class="chip chip--planned">Preview</span>
+        <button type="button" class="icon-button theme-toggle" id="theme-toggle" data-next="dark" aria-label="Switch to dark theme">
+          <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>
+          </svg>
+          <svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <circle cx="12" cy="12" r="4"/>
+            <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <div class="runbar">
+    <div class="container runbar__inner">
+      <p class="runbar__label" id="run-label">Preview build, commit not stamped (local build)</p>
+      <p>Synthetic, fictional clubs and players only.</p>
+    </div>
+  </div>
+
+  <main id="main" tabindex="-1">
+    <noscript>
+      <div class="container">
+        <p class="notice">This preview uses JavaScript for navigation and the theme switch. Without it you can still read the Match Centre below.</p>
+      </div>
+    </noscript>
+
+    <!-- S1 Match Centre -->
+    <section class="view" data-view="/" data-title="Match Centre" aria-labelledby="h-match">
+      <div class="container">
+        <header class="view-head">
+          <p class="eyebrow">Match Centre</p>
+          <h1 id="h-match" tabindex="-1">Set up a match, then blow the whistle</h1>
+          <p class="lead">Pick a seeded fictional match and a reading mode. At full time Agon is planned to draft the club's match report and hold it until the media officer approves it.</p>
+        </header>
+
+        <div class="match-grid">
+          <section class="card pitch-card" aria-labelledby="h-pitch">
+            <div class="card__head">
+              <h2 id="h-pitch">Pitch</h2>
+              <span class="chip chip--neutral">Illustration</span>
+            </div>
+
+            <figure class="pitch">
+              <svg viewBox="-3 -3 111 74" role="img" aria-labelledby="pitch-title pitch-desc" focusable="false">
+                <title id="pitch-title">Football pitch illustration</title>
+                <desc id="pitch-desc">A pitch drawn to scale with a ball and a shaded pressure band in the right half. It is a static illustration; no match data is loaded.</desc>
+                <defs>
+                  <pattern id="pressure-hatch" width="2.4" height="2.4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                    <line class="pitch__hatch-line" x1="0" y1="0" x2="0" y2="2.4"/>
+                  </pattern>
+                </defs>
+                <rect class="pitch__grass" x="-3" y="-3" width="111" height="74"/>
+                <rect class="pitch__stripe" x="15" y="0" width="15" height="68"/>
+                <rect class="pitch__stripe" x="45" y="0" width="15" height="68"/>
+                <rect class="pitch__stripe" x="75" y="0" width="15" height="68"/>
+
+                <rect class="pitch__pressure" x="63" y="0" width="17" height="68"/>
+                <rect x="63" y="0" width="17" height="68" fill="url(#pressure-hatch)"/>
+
+                <rect class="pitch__line" x="0" y="0" width="105" height="68"/>
+                <line class="pitch__line" x1="52.5" y1="0" x2="52.5" y2="68"/>
+                <circle class="pitch__line" cx="52.5" cy="34" r="9.15"/>
+                <circle class="pitch__spot" cx="52.5" cy="34" r="0.45"/>
+                <rect class="pitch__line" x="0" y="13.84" width="16.5" height="40.32"/>
+                <rect class="pitch__line" x="88.5" y="13.84" width="16.5" height="40.32"/>
+                <rect class="pitch__line" x="0" y="24.84" width="5.5" height="18.32"/>
+                <rect class="pitch__line" x="99.5" y="24.84" width="5.5" height="18.32"/>
+                <circle class="pitch__spot" cx="11" cy="34" r="0.45"/>
+                <circle class="pitch__spot" cx="94" cy="34" r="0.45"/>
+                <path class="pitch__line" d="M16.5 26.69A9.15 9.15 0 0 1 16.5 41.31"/>
+                <path class="pitch__line" d="M88.5 26.69A9.15 9.15 0 0 0 88.5 41.31"/>
+                <path class="pitch__line" d="M1 0A1 1 0 0 1 0 1M104 0A1 1 0 0 0 105 1M0 67A1 1 0 0 1 1 68M105 67A1 1 0 0 0 104 68"/>
+                <rect class="pitch__line" x="-1.8" y="30.34" width="1.8" height="7.32"/>
+                <rect class="pitch__line" x="105" y="30.34" width="1.8" height="7.32"/>
+
+                <circle class="pitch__ball-ring" cx="71" cy="29" r="2.2"/>
+                <circle class="pitch__ball" cx="71" cy="29" r="1.1"/>
+              </svg>
+            </figure>
+
+            <ul class="legend" aria-label="Pitch legend">
+              <li><span class="swatch swatch--pressure" aria-hidden="true"></span>Pressure band</li>
+              <li><span class="swatch swatch--ball" aria-hidden="true"></span>Ball</li>
+            </ul>
+            <p class="hint">This is a static illustration. No match data is loaded in this preview build, so the ball and the pressure band do not follow play.</p>
+          </section>
+
+          <section class="card controls-card" aria-labelledby="h-setup">
+            <h2 id="h-setup">Match setup</h2>
+
+            <fieldset class="field" aria-describedby="seed-hint">
+              <legend>Seed</legend>
+              <div class="segmented">
+                <input type="radio" name="seed" id="seed-1" value="1" checked>
+                <label for="seed-1">Seed 1</label>
+                <input type="radio" name="seed" id="seed-2" value="2">
+                <label for="seed-2">Seed 2</label>
+                <input type="radio" name="seed" id="seed-3" value="3">
+                <label for="seed-3">Seed 3</label>
+              </div>
+              <p class="hint" id="seed-hint">Each seed is planned to generate its own fictional match from the synthetic data generator, which is not connected to this preview.</p>
+            </fieldset>
+
+            <fieldset class="field" aria-describedby="mode-hint">
+              <legend>Mode</legend>
+              <div class="segmented">
+                <input type="radio" name="mode" id="mode-analyst" value="analyst" checked>
+                <label for="mode-analyst">Analyst</label>
+                <input type="radio" name="mode" id="mode-casual" value="casual">
+                <label for="mode-casual">Casual</label>
+              </div>
+              <p class="hint" id="mode-hint" aria-live="polite">Analyst mode is planned to lead with tactics and the turning points of the match.</p>
+            </fieldset>
+
+            <div class="field field--switch">
+              <div>
+                <p class="field__label" id="live-label">Run it live</p>
+                <p class="hint" id="live-reason">This switch is off because live runs are not connected in this preview build.</p>
+              </div>
+              <button type="button" class="switch" id="live-switch" role="switch" aria-checked="false" aria-disabled="true" aria-labelledby="live-label" aria-describedby="live-reason">
+                <span class="switch__thumb"></span>
+              </button>
+            </div>
+
+            <div class="action-bar">
+              <button type="button" class="button button--primary button--lg button--block" id="blow-full-time" aria-haspopup="dialog">
+                <svg class="button__icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                  <path d="M4 12a5 5 0 0 0 9.6 2H20v-4h-6.4A5 5 0 0 0 4 12z"/>
+                  <path d="M8 7V4h6"/>
+                </svg>
+                Blow full time
+              </button>
+            </div>
+          </section>
+
+          <section class="card status-card" aria-labelledby="h-newsroom">
+            <div class="card__head">
+              <h2 id="h-newsroom">Newsroom</h2>
+              <span class="chip chip--planned">Not connected</span>
+            </div>
+            <div class="status-row">
+              <span class="status-dot" aria-hidden="true"></span>
+              <p>The agents, the checks and the approval step are planned and not connected to this preview. <a href="#/about">Read what each one will do.</a></p>
+            </div>
+          </section>
+        </div>
+      </div>
+    </section>
+
+    <!-- S5 Verify placeholder -->
+    <section class="view" data-view="/verify" data-title="Verify" aria-labelledby="h-verify" hidden>
+      <div class="container">
+        <header class="view-head">
+          <p class="eyebrow">Verify</p>
+          <h1 id="h-verify" tabindex="-1">Check that what was published is what was approved</h1>
+          <p class="lead">This page is planned to recompute every published file's hash in your own browser and compare it with the hash the media officer approved.</p>
+        </header>
+
+        <div class="doc-grid">
+          <section class="card" aria-labelledby="h-nothing">
+            <div class="card__head">
+              <h2 id="h-nothing">Nothing to verify yet</h2>
+              <span class="chip chip--neutral">Empty</span>
+            </div>
+            <p>Nothing has been published from this preview build, so there is no manifest and no file to check.</p>
+            <div class="control-with-reason">
+              <button type="button" class="button button--secondary" id="recompute" aria-disabled="true" aria-describedby="recompute-reason">Recompute hashes</button>
+              <p class="hint" id="recompute-reason">Recompute hashes is unavailable because nothing has been published from this preview build yet.</p>
+            </div>
+          </section>
+
+          <section class="card" aria-labelledby="h-browser">
+            <div class="card__head">
+              <h2 id="h-browser">Your browser</h2>
+              <span class="chip" id="crypto-chip">Checking</span>
+            </div>
+            <p id="crypto-status" aria-live="polite">Checking whether this browser can compute SHA-256 hashes on this page.</p>
+            <p class="hint">This check runs a known test vector through the browser's own WebCrypto. Nothing leaves your device.</p>
+          </section>
+
+          <section class="card" aria-labelledby="h-verify-plan">
+            <div class="card__head">
+              <h2 id="h-verify-plan">How verification will work</h2>
+              <span class="chip chip--planned">Planned</span>
+            </div>
+            <ol class="steps">
+              <li><strong>Fetch the manifest</strong><span>The page downloads the published manifest and every file it lists.</span></li>
+              <li><strong>Recompute each hash here</strong><span>Your browser hashes each file with SHA-256. No server is trusted for this step.</span></li>
+              <li><strong>Compare with the approval</strong><span>Each file shows a match or a mismatch against the hash the media officer approved.</span></li>
+              <li><strong>Follow corrections</strong><span>A corrected report shows its own approval and links back to the version it replaces.</span></li>
+            </ol>
+          </section>
+        </div>
+      </div>
+    </section>
+
+    <!-- About -->
+    <section class="view" data-view="/about" data-title="About" aria-labelledby="h-about" hidden>
+      <div class="container">
+        <header class="view-head">
+          <p class="eyebrow">About</p>
+          <h1 id="h-about" tabindex="-1">What Agon is for</h1>
+          <p class="lead">Agon is planned as the full-time newsroom for a small club media office. Everything below describes the build in progress. Nothing on this page is deployed as a working service yet.</p>
+        </header>
+
+        <div class="doc-grid">
+          <section class="card" aria-labelledby="h-who">
+            <h2 id="h-who">Who it is for</h2>
+            <p>The media and supporter office of a professional football club. In the hour after the whistle, a very small team has to publish the match report, bulletins for supporters abroad, accessible versions and an item for the club website.</p>
+          </section>
+
+          <section class="card" aria-labelledby="h-real">
+            <div class="card__head">
+              <h2 id="h-real">What is real in this preview</h2>
+              <span class="chip">Built</span>
+            </div>
+            <p>This page is a static shell: the layout, the light and dark themes, the routes and the security headers. No agents run, no match data is loaded, nothing is published and no account is needed.</p>
+          </section>
+
+          <section class="card" aria-labelledby="h-fulltime">
+            <div class="card__head">
+              <h2 id="h-fulltime">What will happen at full time</h2>
+              <span class="chip chip--planned">Planned</span>
+            </div>
+            <ol class="steps">
+              <li><strong>Read the match</strong><span>Agents read the fictional match's event log through a read-only data tool.</span></li>
+              <li><strong>Write and translate</strong><span>Microsoft Foundry agents write the club's report, translate it into Greek, Spanish and French, and add an easy-read edition and audio.</span></li>
+              <li><strong>Check in code</strong><span>Plain code checks every number, name and minute against the log in every language, and blocks real club or player names.</span></li>
+              <li><strong>Wait for a person</strong><span>A Microsoft Agent Framework workflow seals the bundle under a content hash and waits until the media officer approves that exact hash on a card in Microsoft Teams.</span></li>
+              <li><strong>Publish only what was approved</strong><span>The approved files go to the club's feed and public recap page, and nothing else does.</span></li>
+            </ol>
+          </section>
+
+          <section class="card" aria-labelledby="h-approval">
+            <div class="card__head">
+              <h2 id="h-approval">Where approval happens</h2>
+              <span class="chip chip--planned">Planned</span>
+            </div>
+            <p>The media officer approves in Microsoft Teams, where the office already works. If the Teams route is unavailable, a signed single-use link carries the same decision to the same check. On this public site, a clearly labelled stand-in card will call that same check.</p>
+          </section>
+
+          <section class="card" aria-labelledby="h-data">
+            <h2 id="h-data">Data and names</h2>
+            <p>Every club, player and match is synthetic and fictional. Agon is not affiliated with or endorsed by any league, club or broadcaster, and it shows no real crests or logos.</p>
+          </section>
+
+          <section class="card" aria-labelledby="h-source">
+            <h2 id="h-source">Source</h2>
+            <p>The code is public under the MIT licence at <a href="https://github.com/upgradedev/agon-azure">github.com/upgradedev/agon-azure</a>. This page is plain HTML, CSS and JavaScript, built to be served by Azure Static Web Apps.</p>
+          </section>
+        </div>
+      </div>
+    </section>
+
+    <!-- Unknown route -->
+    <section class="view" data-view="not-found" data-title="Page not found" aria-labelledby="h-404" hidden>
+      <div class="container">
+        <header class="view-head">
+          <p class="eyebrow">Not found</p>
+          <h1 id="h-404" tabindex="-1">There is no page at this address</h1>
+          <p class="lead">The link may be mistyped. <a href="#/">Go to the Match Centre.</a></p>
+        </header>
+      </div>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <div class="container footer__inner">
+      <p>Agon preview build. Clubs, players and matches are synthetic and fictional.</p>
+      <p><a href="https://github.com/upgradedev/agon-azure">Source on GitHub</a>, MIT licence.</p>
+    </div>
+  </footer>
+
+  <dialog class="dialog" id="full-time-dialog" aria-labelledby="ft-title" aria-describedby="ft-desc">
+    <div class="dialog__body">
+      <span class="chip chip--planned">Preview build</span>
+      <h2 id="ft-title">Preview build. The full-time newsroom is not connected yet.</h2>
+      <p id="ft-desc">Nothing ran and nothing was sent anywhere. Your choices stay on this page: <strong id="ft-choice">Seed 1, Analyst mode</strong>.</p>
+      <h3>When it is connected, this button will</h3>
+      <ol class="steps">
+        <li><strong>Wake the newsroom agents</strong><span>They read the match log and draft the report in each language.</span></li>
+        <li><strong>Run the checks</strong><span>Code checks every number, name and minute before anything is sealed.</span></li>
+        <li><strong>Ask the media officer</strong><span>An approval card shows the sealed hash and waits for a decision.</span></li>
+      </ol>
+      <div class="dialog__actions">
+        <button type="button" class="button button--secondary" id="ft-close">Close</button>
+      </div>
+    </div>
+  </dialog>
+</body>
+</html>
