@@ -6,7 +6,8 @@ Rules, in order. The first is the seal check, and it is never skipped:
    (`seal.verify_manifest`). It must equal the hash the approval names. Anything else is refused.
 2. The approval is read back from the store, where only `verifier.verify` writes it; an in-memory
    verdict object is never trusted. It must be an "approve" for this hash and this target.
-3. Every gate in `seal.REQUIRED_GATES` has a verdict in the manifest, and every verdict is "pass".
+3. Every gate its kind requires (`seal.required_gates`: the report gates, or for a charter
+   `charter_check` and `rights`) has a verdict in the manifest, and every verdict is "pass".
 4. Destinations: the approval record lists the approved subset. Every listed destination must be
    offered by the sealed manifest, a bundle that offers destinations needs at least one approved,
    and each approved destination needs its adapter. Nothing is ever delivered to a destination the

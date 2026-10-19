@@ -4,11 +4,17 @@
 
     run_id, bundle_sha256, nonce, title, match_line, expires_at, editions, attested, gate_cleared,
     confirm_rows [{id, text}], destinations [{id, label}], evidence_url, published_url,
-    verify_url, parent_message_id, erratum_note
+    verify_url, parent_message_id, erratum_note, report, report_label, flags, footer
 
 and requires run_id, bundle_sha256, nonce, title and published_url. `la-agon-outlook-approval`
 takes run_id, bundle_sha256, nonce, subject, summary, confirm_rows and verify_url. The key sets
 below are checked against the Bicep source by tests/fleet/test_fleet_card.py.
+
+The Match-Day Charter card (`charter_teams_payload`) goes to the same Teams flow: its own title,
+the plain summary of the cue rules as `report` under its own `report_label`, a `footer` that says
+no AI model wrote it, no Confirm rows and no destinations (the flow then says it publishes to the
+club feed only). `report_label` and `footer` are optional; without them the flow prints the
+full-time card's own wording, so a full-time payload never sends them.
 
 Every value comes from the sealed bundle: the manifest registered in the store under its own
 hash (the bytes are re-hashed here), the `report-en.json` artifact it names (for the text of each
@@ -49,7 +55,7 @@ from agon.governance.recompute import score_after
 TEAMS_KEYS: frozenset[str] = frozenset({
     "run_id", "bundle_sha256", "nonce", "title", "match_line", "expires_at", "editions", "attested",
     "gate_cleared", "confirm_rows", "destinations", "evidence_url", "published_url", "verify_url",
-    "parent_message_id", "erratum_note", "report", "flags",
+    "parent_message_id", "erratum_note", "report", "flags", "report_label", "footer",
 })
 TEAMS_REQUIRED: frozenset[str] = frozenset({"run_id", "bundle_sha256", "nonce", "title", "published_url"})
 OUTLOOK_KEYS: frozenset[str] = frozenset({"run_id", "bundle_sha256", "nonce", "subject", "summary", "confirm_rows", "verify_url", "report"})
@@ -325,6 +331,99 @@ def outlook_payload(request: ApprovalRequest, inputs: CardInputs, match_ref: Map
 
     payload = _fit(build(ROW_TEXT_MAX), build)
     check_payload(payload, OUTLOOK_KEYS, OUTLOOK_REQUIRED)
+    return payload
+
+
+# ----------------------------------------------------------------- the Match-Day Charter card
+
+
+CHARTER_REPORT_LABEL = "The live cue rules, exactly as sealed (the Greek, Spanish and French templates are in charter.json):"
+CHARTER_FOOTER = (
+    "Built by code from the fictional fixture; no AI model wrote these rules. Live cues fill only these "
+    "templates and carry this hash. Nothing is published until you approve this exact hash."
+)
+
+
+@dataclass(frozen=True)
+class CharterInputs:
+    manifest: dict[str, Any]
+    record: MatchRecord
+    charter: dict[str, Any]
+
+
+def load_charter_inputs(store: Any, artifacts: Any, record: MatchRecord, bundle_sha256: str) -> CharterInputs:
+    """Read a sealed charter bundle by its hash and check it against the bytes and the fixture."""
+    from agon.charter import ARTIFACT_NAME, EMPTY_EVENT_LOG_SHA256
+
+    doc = store.read(verifier.BUNDLES, bundle_sha256)
+    if doc is None:
+        raise CardError("the sealed manifest is not registered in the store")
+    check = seal_mod.verify_manifest(str(doc.body.get("manifest", "")).encode("utf-8"), expected_sha256=bundle_sha256)
+    if not check.ok or check.manifest is None:
+        raise CardError("; ".join(check.reasons) or "the sealed manifest does not verify")
+    manifest = check.manifest
+    if manifest["kind"] != "charter":
+        raise CardError(f"bundle {bundle_sha256} is a {manifest['kind']} bundle, not a charter")
+    if manifest["match_id"] != record.match_id or manifest["seed_sha256"] != record.seed_sha256:
+        raise CardError("the fixture is not the one this charter was sealed for")
+    if manifest["event_log_sha256"] != EMPTY_EVENT_LOG_SHA256:
+        raise CardError("a charter is sealed before kickoff, over the empty event log")
+    raw = artifacts.get(manifest["artifacts"][ARTIFACT_NAME]["sha256"])
+    if raw is None:
+        raise CardError(f"{ARTIFACT_NAME} is missing from the artifact store")
+    charter = json.loads(raw.decode("utf-8"))
+    if charter.get("match_id") != record.match_id:
+        raise CardError("charter.json names a different match")
+    return CharterInputs(manifest=manifest, record=record, charter=charter)
+
+
+def charter_teams_payload(
+    request: ApprovalRequest, inputs: CharterInputs, match_ref: Mapping[str, Any], context: CardContext
+) -> dict[str, Any]:
+    """The Teams card for a Match-Day Charter: the rules, the scope line, no rows, no destinations."""
+    from agon.charter import LANGUAGE_NAMES, LANGUAGES, SCOPE_LINE, summary
+
+    charter = inputs.charter
+    fixture = charter["fixture"]
+    home, away = fixture["home"]["name"], fixture["away"]["name"]
+    templates = len(charter["templates"])
+    held = len(charter["held_classes"])
+    languages = [LANGUAGE_NAMES[lang] for lang in LANGUAGES]
+
+    def build(limit: int) -> dict[str, Any]:
+        text = summary(charter)
+        budget = limit * REPORT_CHARS_PER_ROW_CHAR
+        if len(text) > budget:
+            text = text[:budget].rstrip() + " [shortened to fit the card; the full rules are in charter.json]"
+        payload: dict[str, Any] = {
+            "run_id": request.run_id,
+            "bundle_sha256": request.bundle_sha256,
+            "nonce": request.nonce,
+            "title": f"Match-Day Charter: {home} v {away}, approve the live cue rules",
+            "match_line": (
+                f"{fixture['league']}, synthetic match (seed {match_ref.get('seed')}, match {match_ref.get('match_index')}), "
+                f"before kickoff. {SCOPE_LINE}"
+            ),
+            "expires_at": request.expiry,
+            "editions": languages,
+            "attested": (
+                f"The live cue rules below: {templates} cue templates in {', '.join(languages[:-1])} and {languages[-1]}, "
+                f"their thresholds, the {held} held claim classes and the voices. {SCOPE_LINE}"
+            ),
+            "report": text,
+            "report_label": CHARTER_REPORT_LABEL,
+            "gate_cleared": "none. The charter_check gate and the Rights Guard passed on every template in every language.",
+            "confirm_rows": [],
+            "destinations": [],
+            "published_url": published_url(context, request.target, request.bundle_sha256),
+            "footer": CHARTER_FOOTER,
+        }
+        if context.site_url.startswith("https://"):
+            payload["evidence_url"] = context.site_url.rstrip("/") + "/#/newsroom"
+        return payload
+
+    payload = _fit(build(ROW_TEXT_MAX), build)
+    check_payload(payload, TEAMS_KEYS, TEAMS_REQUIRED)
     return payload
 
 

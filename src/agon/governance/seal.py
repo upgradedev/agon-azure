@@ -36,9 +36,18 @@ BUNDLE_KINDS: tuple[str, ...] = ("charter", "fulltime", "erratum")
 GATE_PASS = "pass"
 # Every bundle carries a verdict from each of these gates, whatever it reads. A bundle that never
 # ran one of them cannot be sealed, cannot get a nonce, cannot be approved and cannot be published.
-# Pinned as a literal in tests/governance/test_seal.py. `charter_check` and `easy_read` join this
-# tuple when those gates exist; adding a name here is the only way a new gate becomes mandatory.
+# Pinned as a literal in tests/governance/test_seal.py. `easy_read` joins this tuple when that gate
+# exists; adding a name here is the only way a new gate becomes mandatory for a report.
 REQUIRED_GATES: tuple[str, ...] = ("factgate", "factgate_lang", "rights")
+# A Match-Day Charter (agon.charter) holds rules, not prose about a match, so the Fact Gate has
+# nothing to recompute in it; its own gate and the Rights Guard are mandatory instead. Only the kind
+# "charter" reads this table: a report (fulltime, erratum) and a manifest with no kind keep exactly
+# REQUIRED_GATES. Pinned as a literal in tests/governance/test_seal.py.
+KIND_REQUIRED_GATES: dict[str, tuple[str, ...]] = {"charter": ("charter_check", "rights")}
+# A charter bundle carries exactly one artifact, the charter itself, and offers no destination: it
+# publishes to the club feed archive only, so it can never carry a report past the Fact Gate.
+CHARTER_ARTIFACT = "charter.json"
+CHARTER_ROLE = "charter"
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _ARTIFACT_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
 # The publisher writes the manifest beside the artifacts at <target>/<hash>/manifest.json, so no
@@ -148,7 +157,7 @@ def seal(
         raise SealError("only an erratum names a parent bundle")
     if not gate_verdicts:
         raise SealError("a bundle must carry gate verdicts")
-    missing_gates = missing_required_gates(gate_verdicts)
+    missing_gates = missing_required_gates(gate_verdicts, kind)
     if missing_gates:
         raise SealError(f"a bundle must carry a verdict from every required gate; missing {missing_gates}")
     entries: dict[str, Any] = {}
@@ -346,7 +355,7 @@ def manifest_shape_problems(manifest: Any) -> list[str]:
     if not isinstance(verdicts, dict) or not verdicts or not all(isinstance(k, str) and isinstance(v, str) for k, v in verdicts.items()):
         problems.append("gate_verdicts must be a non-empty map of strings")
     else:
-        missing_gates = missing_required_gates(verdicts)
+        missing_gates = missing_required_gates(verdicts, kind)
         if missing_gates:
             problems.append(f"gate_verdicts lacks required gates {missing_gates}")
     tags = manifest["author_tags"]
@@ -370,14 +379,33 @@ def manifest_shape_problems(manifest: Any) -> list[str]:
     if not isinstance(deployment, dict) or not all(isinstance(v, str) for v in deployment.values()):
         problems.append("deployment_ids must be a map of strings")
     problems.extend(_destination_problems(manifest, artifacts))
+    if kind == "charter":
+        problems.extend(_charter_problems(manifest, artifacts))
     return problems
 
 
-def missing_required_gates(verdicts: Any) -> list[str]:
+def _charter_problems(manifest: Mapping[str, Any], artifacts: Mapping[str, Any]) -> list[str]:
+    """What only a charter bundle must satisfy: one charter.json artifact and no destinations."""
+    problems: list[str] = []
+    entry = artifacts.get(CHARTER_ARTIFACT)
+    if set(artifacts) != {CHARTER_ARTIFACT} or not isinstance(entry, dict) or entry.get("role") != CHARTER_ROLE:
+        problems.append(f"a charter bundle holds exactly one artifact, {CHARTER_ARTIFACT}, with role {CHARTER_ROLE}")
+    if "destinations" in manifest:
+        problems.append("a charter bundle offers no destination; it publishes to the club feed archive only")
+    return problems
+
+
+def required_gates(kind: Any = None) -> tuple[str, ...]:
+    """The gates a bundle of this kind must carry. A report, or no kind at all, needs REQUIRED_GATES."""
+    return KIND_REQUIRED_GATES.get(kind, REQUIRED_GATES) if isinstance(kind, str) else REQUIRED_GATES
+
+
+def missing_required_gates(verdicts: Any, kind: Any = None) -> list[str]:
     """The required gates with no verdict in `verdicts`, sorted. Everything when it is not a map."""
+    required = required_gates(kind)
     if not isinstance(verdicts, Mapping):
-        return sorted(REQUIRED_GATES)
-    return sorted(set(REQUIRED_GATES) - set(verdicts))
+        return sorted(required)
+    return sorted(set(required) - set(verdicts))
 
 
 def gates_all_pass(manifest: Mapping[str, Any]) -> bool:
@@ -386,7 +414,7 @@ def gates_all_pass(manifest: Mapping[str, Any]) -> bool:
     return (
         isinstance(verdicts, dict)
         and bool(verdicts)
-        and not missing_required_gates(verdicts)
+        and not missing_required_gates(verdicts, manifest.get("kind"))
         and all(v == GATE_PASS for v in verdicts.values())
     )
 
@@ -402,7 +430,7 @@ class ManifestCheck:
         """One truthful code for a failed check, shared by the verifier and the publisher."""
         if expected_sha256 is not None and self.bundle_sha256 != expected_sha256:
             return "sealed_hash_mismatch"
-        if isinstance(self.manifest, dict) and missing_required_gates(self.manifest.get("gate_verdicts")):
+        if isinstance(self.manifest, dict) and missing_required_gates(self.manifest.get("gate_verdicts"), self.manifest.get("kind")):
             return "required_gate_missing"
         return "manifest_invalid"
 

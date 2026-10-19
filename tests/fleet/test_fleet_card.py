@@ -305,3 +305,67 @@ def test_flags_reach_the_card_as_lines_and_never_silently_drop():
     assert card.flag_lines(None, 400) == [] and card.flag_lines({"flags": []}, 400) == []
     long = card.flag_lines({"flags": [{"by": "x", "detail": "y" * 500}]}, 60)
     assert len(long[0]) == 60 and long[0].endswith("...")
+
+
+# ----------------------------------------------------------------- the Match-Day Charter card
+
+
+@pytest.fixture(scope="module")
+def sealed_charter():
+    from charter_reference import charter_to_request
+
+    from agon.fleet.contracts import RunInput
+
+    deps = fake_deps()
+    verifier.grant_role(deps.store, OFFICER, [verifier.APPROVER_ROLE])
+    ri = RunInput(run_id="charter-1", match_ref={"source": "synth", "seed": 1, "match_index": 0}, kind="charter")
+    ref = run(charter_to_request(deps, ri))
+    assert ref.request is not None
+    inputs = card.load_charter_inputs(deps.store, deps.artifacts, deps.matches.load(ri.match_ref), ref.request.bundle_sha256)
+    return deps, ri, ref, inputs
+
+
+def test_the_charter_payload_says_what_it_approves_and_carries_no_score(sealed_charter):
+    deps, ri, ref, inputs = sealed_charter
+    payload = card.charter_teams_payload(ref.request, inputs, ri.match_ref, CONTEXT)
+    properties, required = trigger_schema(FLOWS.read_text(encoding="utf-8"), "teamsFlow")
+    assert required <= set(payload) <= properties
+    record = deps.matches.load(ri.match_ref)
+    home = record.roster.clubs[record.meta["home"]]
+    away = record.roster.clubs[record.meta["away"]]
+    assert payload["title"] == f"Match-Day Charter: {home} v {away}, approve the live cue rules"
+    score = record.meta["score"]
+    assert f"{score['home']}-{score['away']}" not in payload["title"] + payload["match_line"], "a pre-kickoff card shows no score"
+    assert "This approves the rules for live cues, not a report." in payload["attested"]
+    assert "This approves the rules for live cues, not a report." in payload["match_line"]
+    assert payload["confirm_rows"] == [] and payload["destinations"] == []
+    assert payload["report_label"] == card.CHARTER_REPORT_LABEL and payload["footer"] == card.CHARTER_FOOTER
+    assert "AI-drafted" not in payload["footer"] and "no AI model" in payload["footer"]
+    assert inputs.charter["templates"]["goal"]["text"]["en"] in payload["report"]
+    assert payload["editions"] == ["English", "Greek", "Spanish", "French"]
+    assert payload["published_url"] == f"{CONTEXT.feed_base_url}{ref.request.bundle_sha256}/manifest.json"
+    assert len(json.dumps(payload, ensure_ascii=False).encode("utf-8")) <= card.MAX_PAYLOAD_BYTES
+    assert chr(0x2014) not in json.dumps(payload, ensure_ascii=False) and chr(0x2013) not in json.dumps(payload, ensure_ascii=False)
+
+
+def test_a_full_time_payload_never_sends_the_charter_fields(sealed_run):
+    deps, ri, ref, inputs = sealed_run
+    payload = card.teams_payload(ref.request, inputs, ri.match_ref, CONTEXT)
+    assert "report_label" not in payload and "footer" not in payload
+
+
+def test_the_flow_defaults_keep_the_full_time_card_wording():
+    """Without report_label and footer the flow prints exactly what it printed before they existed."""
+    text = FLOWS.read_text(encoding="utf-8")
+    q = "\\'"  # Bicep escapes a quote inside a string as backslash quote
+    assert f"coalesce(triggerBody()?[{q}report_label{q}], {q}The English headline report, exactly as sealed:{q})" in text
+    assert (
+        f"coalesce(triggerBody()?[{q}footer{q}], {q}AI-drafted. Numbers and names checked by code. "
+        f"Nothing is published until you approve this exact hash.{q})"
+    ) in text
+
+
+def test_load_charter_inputs_refuses_a_report_bundle(sealed_run):
+    deps, ri, ref, inputs = sealed_run
+    with pytest.raises(card.CardError, match="not a charter"):
+        card.load_charter_inputs(deps.store, deps.artifacts, deps.matches.load(ri.match_ref), ref.request.bundle_sha256)

@@ -81,11 +81,18 @@ OUTCOME_STATUSES: tuple[str, ...] = (
 
 @dataclass
 class RunInput:
-    """What the `runs` queue message carries: which match, and which feed it is for."""
+    """What the `runs` queue message carries: which match, which feed, and which workflow.
+
+    `kind` names the workflow (agon.fleet.kinds.RUN_KINDS): "fulltime" runs W-fulltime, "charter"
+    runs W-charter. It defaults to "fulltime", so a message or a checkpoint written before the field
+    existed means what it always meant (a pickled instance without the attribute reads the class
+    default).
+    """
 
     run_id: str
     match_ref: dict[str, Any]
     target: str = "feed"
+    kind: str = "fulltime"
 
 
 @dataclass

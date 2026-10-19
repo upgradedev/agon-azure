@@ -195,3 +195,84 @@ def test_shape_validator_rejects_what_seal_would_never_build():
         assert S.manifest_shape_problems(d), i
         data = S.canonical_utf8(d)
         assert not S.verify_manifest(data).ok, i
+
+
+# ----------------------------------------------------------------- the charter kind (agon.charter)
+# Written out as literals, like PINNED_REQUIRED_GATES: a report keeps its three gates, and only a
+# bundle of kind "charter" reads the kind table.
+PINNED_KIND_REQUIRED_GATES = {"charter": ("charter_check", "rights")}
+CHARTER_PASS = {"charter_check": "pass", "rights": "pass"}
+
+
+def _charter(**overrides):
+    base = dict(
+        kind="charter",
+        match_id="s1-m0",
+        seed_hash="a" * 64,
+        event_log_hash=S.sha256_hex(b""),
+        charter_hash=None,
+        artifacts=[S.Artifact("charter.json", b'{"schema":"agon.charter/1"}', "application/json", "charter")],
+        gate_verdicts=dict(CHARTER_PASS),
+        author_tags={},
+        attested=["charter.json"],
+        gate_cleared=[],
+    )
+    return S.seal(**{**base, **overrides})
+
+
+def test_kind_required_gates_are_pinned_and_reports_are_untouched():
+    assert S.KIND_REQUIRED_GATES == PINNED_KIND_REQUIRED_GATES
+    assert S.required_gates("charter") == ("charter_check", "rights")
+    for kind in ("fulltime", "erratum", None, "press_release", 7):
+        assert S.required_gates(kind) == PINNED_REQUIRED_GATES, kind
+    # The golden fulltime bundle still hashes to its pinned value (test_golden_bundle_hash_is_pinned).
+    assert _golden().bundle_sha256 == GOLDEN_BUNDLE_SHA256
+
+
+def test_a_charter_bundle_seals_with_its_own_gates_and_verifies():
+    sealed = _charter()
+    assert S.manifest_shape_problems(sealed.manifest) == []
+    assert S.gates_all_pass(sealed.manifest)
+    check = S.verify_manifest(sealed.manifest_bytes, {"charter.json": b'{"schema":"agon.charter/1"}'}, sealed.bundle_sha256)
+    assert check.ok, check.reasons
+
+
+def test_a_charter_bundle_missing_a_charter_gate_is_refused():
+    for gate in ("charter_check", "rights"):
+        verdicts = {k: v for k, v in CHARTER_PASS.items() if k != gate}
+        with pytest.raises(S.SealError, match=gate):
+            _charter(gate_verdicts=verdicts)
+    # The report gates do not stand in for the charter's own gate.
+    with pytest.raises(S.SealError, match="charter_check"):
+        _charter(gate_verdicts=dict(ALL_PASS))
+
+
+def test_a_refused_charter_still_seals_but_no_gate_passes():
+    sealed = _charter(gate_verdicts={"charter_check": "refused", "rights": "refused"})
+    assert S.manifest_shape_problems(sealed.manifest) == []
+    assert not S.gates_all_pass(sealed.manifest)
+
+
+def test_a_charter_holds_only_charter_json_and_offers_no_destination():
+    with pytest.raises(S.SealError, match="exactly one artifact"):
+        _charter(artifacts=[
+            S.Artifact("charter.json", b"{}", "application/json", "charter"),
+            S.Artifact("report-en.json", b"{}", "application/json", "edition", "en"),
+        ])
+    with pytest.raises(S.SealError, match="exactly one artifact"):
+        _charter(artifacts=[S.Artifact("charter.json", b"{}", "application/json", "edition")])
+    payload = json.dumps({"schema": "agon.destination/1", "destination": "feeds"}).encode("utf-8")
+    with pytest.raises(S.SealError, match="no destination"):
+        _charter(destinations={"feeds": payload})
+
+
+def test_relabelling_a_charter_as_a_report_cannot_skip_the_fact_gate():
+    sealed = _charter()
+    d = json.loads(sealed.manifest_bytes)
+    d["kind"] = "fulltime"
+    problems = S.manifest_shape_problems(d)
+    assert any("factgate" in p for p in problems), problems
+    data = S.canonical_utf8(d)
+    check = S.verify_manifest(data, expected_sha256=S.sha256_hex(data))
+    assert not check.ok and check.refusal_code(S.sha256_hex(data)) == "required_gate_missing"
+    assert not S.gates_all_pass(d)

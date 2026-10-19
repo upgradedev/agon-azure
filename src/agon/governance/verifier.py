@@ -7,7 +7,7 @@ A channel adapter translates its payload into an `ApprovalDecision` and calls `v
 2. The nonce exists and has not been consumed.
 3. The decision's bundle hash equals the hash the nonce was issued for.
 4. The sealed manifest for that hash is in the store, its bytes still hash to it, it carries a
-   verdict from every gate in `seal.REQUIRED_GATES`, and every verdict is "pass" (a refused or
+   verdict from every gate its kind requires (`seal.required_gates`), and every verdict is "pass" (a refused or
    unchecked bundle has no Approve button, server side too).
 5. The nonce has not expired, judged by the injected `now`, never by the payload's own time.
 6. The channel is allowed for the nonce's target (the console stand-in can never approve `feed`).

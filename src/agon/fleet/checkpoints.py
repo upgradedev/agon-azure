@@ -1,4 +1,4 @@
-"""Checkpoint storage for W-fulltime: files for tests, Cosmos DB for production, and a save guard.
+"""Checkpoint storage for the fleet workflows (W-fulltime, W-charter): files for tests, Cosmos DB for production, and a save guard.
 
 Three facts from Agent Framework 1.22.0 shape this module (paths under
 ``python/packages/core/agent_framework/_workflows/`` at tag ``python-1.22.0``):
@@ -13,7 +13,7 @@ Three facts from Agent Framework 1.22.0 shape this module (paths under
    `open_cosmos_storage` always passes a pre-built ``container_client`` for the container Bicep
    pre-creates (``agon``/``checkpoints``, partition key ``/workflow_name``).
 3. Checkpoints hold pickled values (``_checkpoint_encoding.py`` module docstring): the store is a
-   trusted source, and the allow-list (`contracts.ALLOWED_CHECKPOINT_TYPES`) is defence in depth.
+   trusted source, and the allow-list (`STORAGE_ALLOWED_CHECKPOINT_TYPES`) is defence in depth.
    The checkpoints container needs the same access control as a secret store.
 """
 
@@ -25,7 +25,7 @@ from typing import Any, AsyncIterator
 
 from agent_framework import FileCheckpointStorage
 
-from agon.fleet.contracts import ALLOWED_CHECKPOINT_TYPES
+from agon.fleet.kinds import STORAGE_ALLOWED_CHECKPOINT_TYPES
 
 COSMOS_DATABASE = "agon"
 COSMOS_CONTAINER = "checkpoints"
@@ -88,7 +88,7 @@ class GuardedCheckpointStorage:
 def file_storage(directory: Path) -> FileCheckpointStorage:
     """One JSON file per checkpoint, decoded only under the pinned allow-list."""
     Path(directory).mkdir(parents=True, exist_ok=True)
-    return FileCheckpointStorage(directory, allowed_checkpoint_types=list(ALLOWED_CHECKPOINT_TYPES))
+    return FileCheckpointStorage(directory, allowed_checkpoint_types=list(STORAGE_ALLOWED_CHECKPOINT_TYPES))
 
 
 async def probe_cosmos_access(container: Any, database: str = COSMOS_DATABASE, container_name: str = COSMOS_CONTAINER) -> None:
@@ -147,7 +147,7 @@ async def open_cosmos_storage(
             container_client=container_client,
             database_name=database,
             container_name=container,
-            allowed_checkpoint_types=list(ALLOWED_CHECKPOINT_TYPES),
+            allowed_checkpoint_types=list(STORAGE_ALLOWED_CHECKPOINT_TYPES),
         )
     finally:
         await client.close()

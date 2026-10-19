@@ -6,8 +6,10 @@ when either of its two Storage queues holds a message (infra/apps.bicep):
     decisions  {"kind": "agon.decision/1", run_id, approval_id, bundle_sha256, decision, channel,
                 code}: the intake's pointer (agon.intake.VerifiedDecision), sent after the one
                 verifier recorded the decision. It is never a capability: it carries no nonce.
-    runs       a RunInput as JSON {run_id, match_ref, target}: start W-fulltime and drive it to
-                its approval pause, then post the approval card.
+    runs       a RunInput as JSON {run_id, match_ref, target, kind}: start the workflow of its
+                kind (agon.fleet.kinds: "fulltime" runs W-fulltime, the default when kind is
+                absent; "charter" runs W-charter) and drive it to its approval pause, then post
+                the approval card of that kind.
 
 Settling rules, the same as the intake's (agon.intake.drain):
 
@@ -38,7 +40,9 @@ id-fleet holds read on approvals and create-only on nonces (infra/modules/cosmos
 nothing in this module writes either container.
 
 The runs path posts the card to the Teams approval Logic App, and to the Outlook one when its URL
-is configured, only for target "feed". A sandbox run is decided on the console stand-in and never
+is configured, only for target "feed". A charter card goes to Teams only (kinds.CARD_CHANNELS).
+The decisions path needs no kind: the pause checkpoint names its own workflow, and `AfEngine`
+resumes the graph of that name. A sandbox run is decided on the console stand-in and never
 reaches Teams. Each posted channel is noted on the run ledger (`cards_posted`), so a redelivered
 runs message re-posts only what is missing, and re-sending a runs message for a run that waits
 without a card posts it.
@@ -63,9 +67,19 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, AsyncIterator, Awaitable, Callable, Mapping, Protocol, Sequence
 
 from agon.fleet import steps, stores
-from agon.fleet.card import CardContext, CardError, FlowPostError, load_inputs, outlook_payload, teams_payload
+from agon.fleet.card import (
+    CardContext,
+    CardError,
+    FlowPostError,
+    charter_teams_payload,
+    load_charter_inputs,
+    load_inputs,
+    outlook_payload,
+    teams_payload,
+)
 from agon.fleet.contracts import AWAITING_DECISION, ApprovalRequest, DecisionEnvelope, PublishRequest, RunInput
 from agon.fleet.deps import FleetDeps
+from agon.fleet.kinds import CARD_CHANNELS, CHARTER, FULLTIME, RUN_KINDS
 from agon.governance import verifier
 from agon.intake import VERIFIED_KIND, VerifiedDecision
 
@@ -176,16 +190,19 @@ def _json_object(text: str) -> dict[str, Any]:
 
 def parse_run_input(text: str) -> RunInput:
     body = _json_object(text)
-    if not {"run_id", "match_ref"} <= set(body) <= {"run_id", "match_ref", "target"}:
-        raise MessageError("a runs message has run_id, match_ref and optionally target")
+    if not {"run_id", "match_ref"} <= set(body) <= {"run_id", "match_ref", "target", "kind"}:
+        raise MessageError("a runs message has run_id, match_ref and optionally target and kind")
     run_id, match_ref, target = body["run_id"], body["match_ref"], body.get("target", "feed")
+    kind = body.get("kind", FULLTIME)
     if not isinstance(run_id, str) or not _RUN_ID.match(run_id):
         raise MessageError("run_id must be 1 to 128 characters from [A-Za-z0-9_.:-]")
     if not isinstance(match_ref, dict):
         raise MessageError("match_ref must be an object")
     if target not in verifier.TARGETS:
         raise MessageError(f"target must be one of {list(verifier.TARGETS)}")
-    return RunInput(run_id=run_id, match_ref=match_ref, target=target)
+    if kind not in RUN_KINDS:
+        raise MessageError(f"kind must be one of {list(RUN_KINDS)}")
+    return RunInput(run_id=run_id, match_ref=match_ref, target=target, kind=kind)
 
 
 def parse_pointer(text: str) -> VerifiedDecision:
@@ -260,7 +277,11 @@ class FleetWorker:
         """Post the approval card on every configured officer channel not yet posted. Returns a code."""
         if run.target != "feed":
             return "sandbox_console_only"
-        channels = [(name, poster) for name, poster in (("teams", self.teams), ("outlook", self.outlook)) if poster is not None]
+        kind = getattr(run, "kind", FULLTIME)
+        wanted = CARD_CHANNELS.get(kind, ())
+        channels = [
+            (name, poster) for name, poster in (("teams", self.teams), ("outlook", self.outlook)) if poster is not None and name in wanted
+        ]
         if not channels:
             return "no_card_channel"
         record = self.deps.ledger.record(run.run_id) or {}
@@ -268,11 +289,12 @@ class FleetWorker:
         missing = [(name, poster) for name, poster in channels if name not in done]
         if not missing:
             return "cards_already_posted"
+        loader = load_charter_inputs if kind == CHARTER else load_inputs
         try:
-            inputs = load_inputs(self.deps.store, self.deps.artifacts, self.deps.matches.load(run.match_ref), request.bundle_sha256)
+            inputs: Any = loader(self.deps.store, self.deps.artifacts, self.deps.matches.load(run.match_ref), request.bundle_sha256)
         except CardError as exc:
             raise Retry(f"card not built: {exc}") from None
-        builders = {"teams": teams_payload, "outlook": outlook_payload}
+        builders: dict[str, Any] = {"teams": charter_teams_payload} if kind == CHARTER else {"teams": teams_payload, "outlook": outlook_payload}
         failures: list[str] = []
         for name, poster in missing:
             payload = builders[name](request, inputs, run.match_ref, self.context)
@@ -525,8 +547,12 @@ class AfEngine:
         return await start_run(self.deps, self._guarded(), run)
 
     async def resume(self, handoff: dict[str, Any], envelope: DecisionEnvelope) -> dict[str, Any]:
+        """Resume the graph the pause checkpoint names (W-fulltime or W-charter), never a guess."""
         from agon.fleet.runner import resume_run
 
+        if "workflow_name" not in handoff:
+            checkpoint = await self.storage.load(handoff["checkpoint_id"])
+            handoff = {**handoff, "workflow_name": str(checkpoint.workflow_name)}
         return await resume_run(self.deps, self._guarded(), handoff, envelope)
 
     async def pending(self, checkpoint_id: str) -> tuple[str, ApprovalRequest]:
@@ -644,7 +670,7 @@ async def serve(config: WorkerConfig, args: argparse.Namespace) -> int:
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Drain the runs and decisions queues through W-fulltime.")
+    parser = argparse.ArgumentParser(description="Drain the runs and decisions queues through W-fulltime and W-charter.")
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--once", action="store_true", help="drain each queue once and exit")
     mode.add_argument("--idle-exit", type=int, default=0, help="loop, and exit after this many seconds with no message")
