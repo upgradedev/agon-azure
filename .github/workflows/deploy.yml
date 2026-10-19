@@ -8,9 +8,17 @@
 #            and uploads web/.
 # readiness  main only: the live gate (ci/readiness.py) against the deployed host,
 #            with the commit sha as a required body marker. Fails on any non-200.
-# foundry-smoke  main only, after deploy: one model call to the Foundry deployment
+# ai         main only, environment azure, after deploy: lints, what-ifs and deploys
+#            infra/ai.bicep (Foundry, Translator, Speech) as its own deployment,
+#            agon-ai. web and readiness do not depend on it, so a first-deploy
+#            failure of an AI resource (a free-tier slot taken, terms not
+#            accepted, model capacity or version refused) never holds back the
+#            public site, and agon-main, which the scheduled readiness check
+#            reads, never fails because of it.
+# foundry-smoke  main only, after ai: one model call to the Foundry deployment
 #            (.github/workflows/foundry-smoke.yml, gate C2). Fails on any non-200,
-#            including the 403 expected until the owner-side rbac deploy has run.
+#            including the refusal expected until the owner-side rbac deploy has
+#            run: HTTP 401 or 403 with error code PermissionDenied.
 #
 # The CI identity holds Contributor on the resource group only. It cannot write
 # role assignments, so infra/rbac.bicep is NOT deployed here (docs/OPERATIONS.md).
@@ -57,6 +65,8 @@ env:
   RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
   LOCATION: ${{ vars.AZURE_LOCATION }}
   DEPLOYMENT_NAME: agon-main
+  # infra/ai.bicep deploys under its own name (job ai), so it can fail alone.
+  AI_DEPLOYMENT_NAME: agon-ai
   # Same Bicep CLI as the ci.yml bicep job, so what lints is what deploys.
   BICEP_VERSION: v0.44.1
   # The three published demo seeds. ci/readiness.json pins the same three in the
@@ -122,6 +132,7 @@ jobs:
       static_site_hostname: ${{ steps.outputs.outputs.static_site_hostname }}
       storage_account: ${{ steps.outputs.outputs.storage_account }}
       feed_base_url: ${{ steps.outputs.outputs.feed_base_url }}
+      app_insights_name: ${{ steps.outputs.outputs.app_insights_name }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -174,6 +185,7 @@ jobs:
               "static_site_hostname": host,
               "storage_account": value("storageAccountName"),
               "feed_base_url": value("feedBaseUrl"),
+              "app_insights_name": value("appInsightsName"),
           }
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
               for key, val in rows.items():
@@ -239,10 +251,75 @@ jobs:
           skip_app_build: true
           skip_api_build: true
 
-  # Gate C2: one model call to what was just deployed. Independent of web and
-  # readiness, so a red smoke never holds back the public site.
-  foundry-smoke:
+  # The AI services as their own deployment, agon-ai, after agon-main. Nothing on
+  # the public path (web, readiness) needs this job, so its failure stays here.
+  ai:
     needs: deploy
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: azure
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      APP_INSIGHTS_NAME: ${{ needs.deploy.outputs.app_insights_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0 (peeled tag, git ls-remote 2026-10-19)
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Pin the Bicep CLI
+        run: |
+          az config set bicep.use_binary_from_path=false bicep.check_version=false --only-show-errors
+          az bicep install --version "$BICEP_VERSION"
+          az bicep version
+      # ci.yml lints main.bicep and rbac.bicep on every pull request; until it also
+      # lists ai.bicep, this step is the warning gate on it, with the same script.
+      - name: Build and lint ai.bicep, failing on any warning
+        run: python3 ci/bicep_check.py --runner az infra/ai.bicep
+      - name: Check the agon-main input
+        run: |
+          if [ -z "$APP_INSIGHTS_NAME" ]; then
+            echo "deploy job returned no appInsightsName output"
+            exit 1
+          fi
+      - name: What-if ai.bicep (read only)
+        run: |
+          az deployment group what-if \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$AI_DEPLOYMENT_NAME" \
+            --template-file infra/ai.bicep \
+            --parameters location="$LOCATION" appInsightsName="$APP_INSIGHTS_NAME"
+      - name: Deploy ai.bicep (incremental only, never complete)
+        run: |
+          az deployment group create \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$AI_DEPLOYMENT_NAME" \
+            --template-file infra/ai.bicep \
+            --parameters location="$LOCATION" appInsightsName="$APP_INSIGHTS_NAME" \
+            --mode Incremental \
+            --output json > "$RUNNER_TEMP/ai-deployment.json"
+      - name: AI outputs in the job summary
+        run: |
+          python3 - "$RUNNER_TEMP/ai-deployment.json" <<'PY'
+          import json, os, sys
+          outputs = json.load(open(sys.argv[1], encoding="utf-8"))["properties"]["outputs"]
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
+              fh.write("### ai.bicep outputs (deployment agon-ai)\n\n| output | value |\n|---|---|\n")
+              for key in sorted(outputs):
+                  fh.write(f"| {key} | `{json.dumps(outputs[key]['value'])}` |\n")
+          print("\n".join(f"{k}: {json.dumps(outputs[k]['value'])}" for k in sorted(outputs)))
+          PY
+
+  # Gate C2: one model call to what the ai job just deployed. Independent of web
+  # and readiness, so a red smoke never holds back the public site.
+  foundry-smoke:
+    needs: ai
     if: github.ref == 'refs/heads/main'
     permissions:
       contents: read

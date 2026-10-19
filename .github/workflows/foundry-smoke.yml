@@ -2,7 +2,7 @@
 # in Sweden Central, with a Microsoft Entra token and no SDK.
 #
 # When it runs
-#   workflow_call      from deploy.yml, in the job after "deploy", so it always calls
+#   workflow_call      from deploy.yml, in the job after "ai", so it always calls
 #                      what was just deployed. A plain push trigger on infra/** would
 #                      race the deploy and could call a deployment that does not exist
 #                      yet, so the push path goes through deploy.yml instead.
@@ -10,14 +10,18 @@
 #                      infra/rbac.bicep deploy grants CI its inference role. That
 #                      dispatched run is the gate C2 evidence the first time.
 #
-# Expect HTTP 403 until infra/rbac.bicep has been deployed with the ciPrincipalId
-# output of agon-main (docs/OPERATIONS.md, owner step 3) and the grant has propagated.
-# The job fails on that 403; it never passes without a 200.
+# Expect HTTP 401 or 403 with error code PermissionDenied until infra/rbac.bicep
+# has been deployed with the ciPrincipalId output of agon-main (docs/OPERATIONS.md,
+# owner step 3) and the grant has propagated. With a Microsoft Entra token a
+# missing data-action role is often reported as 401, so ci/foundry_smoke.py reads
+# the error code before the status: PermissionDenied prints the rbac step, and
+# only a 401 with another code (for example InvalidAuthenticationToken) prints
+# the token audience check. The job fails on either; it never passes without a 200.
 #
 # Identity: the CI app agon-azure-ci through the environment azure subject. It needs
 # Cognitive Services OpenAI User on the Foundry account (infra/rbac.bicep) and reads
-# the agon-main outputs with Contributor on the group. No key exists: the Foundry
-# account has local auth disabled.
+# the agon-ai outputs (infra/ai.bicep) with Contributor on the group. No key
+# exists: the Foundry account has local auth disabled.
 
 name: foundry-smoke
 
@@ -43,7 +47,8 @@ permissions:
 
 env:
   RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
-  DEPLOYMENT_NAME: agon-main
+  # infra/ai.bicep, deployed by the ai job of deploy.yml, holds the Foundry outputs.
+  DEPLOYMENT_NAME: agon-ai
   MODEL_DEPLOYMENT: ${{ inputs.deployment || 'gpt-5.6-luna' }}
   # Token audience for Azure OpenAI and Foundry inference with Microsoft Entra ID.
   TOKEN_RESOURCE: https://cognitiveservices.azure.com
@@ -70,12 +75,12 @@ jobs:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
           tenant-id: ${{ vars.AZURE_TENANT_ID }}
           subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
-      - name: Read the Foundry outputs of agon-main (only once it reads Succeeded)
+      - name: Read the Foundry outputs of agon-ai (only once it reads Succeeded)
         id: foundry
         run: |
           state="$(az deployment group show --resource-group "$RESOURCE_GROUP" --name "$DEPLOYMENT_NAME" --query properties.provisioningState --output tsv)"
           if [ "$state" != "Succeeded" ]; then
-            echo "agon-main is $state, not Succeeded: its outputs are not readable yet"
+            echo "$DEPLOYMENT_NAME is '$state', not Succeeded: its outputs are not readable yet"
             exit 1
           fi
           az deployment group show --resource-group "$RESOURCE_GROUP" --name "$DEPLOYMENT_NAME" \
@@ -85,7 +90,7 @@ jobs:
           outputs = json.load(open(sys.argv[1], encoding="utf-8"))
           def value(key):
               if key not in outputs:
-                  sys.exit(f"agon-main has no output {key}: deploy the Foundry module first")
+                  sys.exit(f"agon-ai has no output {key}: run the ai job of deploy.yml first")
               return outputs[key]["value"]
           names = value("foundryDeploymentNames")
           wanted = os.environ["MODEL_DEPLOYMENT"]

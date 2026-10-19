@@ -4,20 +4,23 @@
 //
 // NOT deployed by CI. The CI identity holds Contributor on the resource group,
 // which cannot write Microsoft.Authorization role assignments. The owner-side
-// session deploys this file after main.bicep, feeding it main's outputs; the
-// commands are in docs/OPERATIONS.md. CI only compiles and lints it.
+// session deploys this file after both CI deployments, feeding it their outputs:
+// agon-main (infra/main.bicep) for storage and the identities, agon-ai
+// (infra/ai.bicep) for the Foundry, Translator and Speech names. The commands
+// are in docs/OPERATIONS.md. CI only compiles and lints it.
 //
-// Deploy order: only after the agon-main deployment reads Succeeded. While a CI
-// deploy is Running, `az deployment group show -n agon-main` returns null
-// outputs; on 2026-10-19 that fed an empty storageAccountName into this file and
-// every assignment failed with ParentResourceNotFound. Every parameter below
-// carries @minLength(1), or 2 where Azure's own name minimum is 2, so an empty
-// output fails validation before any write.
+// Deploy order: only after agon-main AND agon-ai both read Succeeded. While a CI
+// deploy is Running, `az deployment group show` returns null outputs for that
+// deployment (agon-main or agon-ai); on 2026-10-19 that fed an empty
+// storageAccountName into this file and every assignment failed with
+// ParentResourceNotFound. Every parameter below carries @minLength(1), or 2
+// where Azure's own name minimum is 2, so an empty output fails validation
+// before any write.
 //
 // Cosmos data-plane grants are not here: they are Microsoft.DocumentDB resources
 // in modules/cosmos-access.bicep, deployed by main.bicep under Contributor.
 //
-// Not here yet, because the resources do not exist in main.bicep yet (add them
+// Not here yet, because the resources do not exist in any template yet (add them
 // with the resource, in this file):
 //   id-publisher: Key Vault Crypto User on the one signing key.
 //   pulls from a registry, if ACR is chosen over GHCR: AcrPull per app identity.
@@ -51,19 +54,19 @@ param publisherSandboxPrincipalId string
 @minLength(1)
 param ciPrincipalId string
 
-@description('Foundry resource name: the foundryAccountName output of main.bicep.')
+@description('Foundry resource name: the foundryAccountName output of ai.bicep (deployment agon-ai).')
 @minLength(2)
 param foundryAccountName string
 
-@description('Foundry project name: the foundryProjectName output of main.bicep.')
+@description('Foundry project name: the foundryProjectName output of ai.bicep (deployment agon-ai).')
 @minLength(2)
 param foundryProjectName string
 
-@description('Translator account name: the translatorAccountName output of main.bicep.')
+@description('Translator account name: the translatorAccountName output of ai.bicep (deployment agon-ai).')
 @minLength(2)
 param translatorAccountName string
 
-@description('Speech account name: the speechAccountName output of main.bicep.')
+@description('Speech account name: the speechAccountName output of ai.bicep (deployment agon-ai).')
 @minLength(2)
 param speechAccountName string
 
