@@ -176,6 +176,21 @@ az ad app federated-credential list --id "$app" --query "[].subject" --output ts
 
 The last command must print exactly two subjects, in the immutable-ID form GitHub issues: `repo:upgradedev@25751981/agon-azure@1425273524:ref:refs/heads/main` and `repo:upgradedev@25751981/agon-azure@1425273524:environment:azure`. Deleting this credential does not affect the deploy, the scheduled readiness check or any resource: they use the other two subjects. If a flag name differs in your az version, check `az ad app federated-credential delete --help`. Record the date and the printed subjects in `STATE.md`.
 
+### Approval flows: Teams card lifecycle and Outlook approval email (spec 14 items 4 and 5)
+
+The `flows` job of the deploy workflow deploys `infra/flows.bicep` as `agon-flows`, after `deploy`, independent of `web` and `readiness`.
+
+* `la-agon-teams-approval` posts the card to the approval channel and waits for the officer's decision. It writes the response, unchanged, to the `decisions-teams` queue with `id-logicapp`, then updates the same card in place: "Changes requested", "Published" once the published manifest is readable, or "Approved, publication not confirmed yet" after 20 minutes. An erratum first replies in the parent report's thread, and replies again once the correction is published. It uses the gate T connection `agon-teams`, referenced and never redeployed.
+* `la-agon-outlook-approval` sends the Office 365 "Send approval email" with the three options `agon.governance.channels.outlook` accepts, and writes the response to `decisions-outlook`.
+* Both HTTP triggers accept only Entra tokens from `id-fleet` (after it issues a nonce) or the CI identity (drills), through an `accessControl` policy on issuer and `appid`. Neither flow decides anything: the api's intake (`python -m agon.intake`) verifies every decision.
+* `ci/flows_check.py` keeps the flows in contract with the intake at pull request time: same queues as `agon.intake.ROUTES`, `responder` and `data` forwarded unchanged, the Outlook options of the adapter, `agon-teams` only as `existing`, no id committed.
+
+Owner steps, each once:
+
+1. Set the repository variables `AGON_TEAMS_GROUP_ID` and `AGON_TEAMS_CHANNEL_ID` to the ids of team "agon" and its approval channel (the gate T run used channel "Match Day"). Until they exist, the `flows` job writes "user-gated" in its summary and deploys nothing. The ids are not committed.
+2. After the first `flows` run creates the `agon-outlook` connection: rg-agon-swc, API connection `agon-outlook`, Edit API connection, Authorize (sign in with the officer's mailbox), Save. Then set `AGON_OFFICER_EMAIL`. The next deploy adds the Outlook flow. The workflow creates the connection only if it is missing and never redeploys it, so the consent survives.
+3. The rbac deploy (step 3 above) grants `id-logicapp` Sender on the two decision queues. Without it, a decision fails at the queue write and the run history shows 403.
+
 ### Never
 
 * Never deploy with `--mode Complete`. The resource group also holds the gate T spike (`agon-teams`, `la-agon-gate-t`, `la-agon-decision-stub`), and complete mode deletes every resource the template does not name.
