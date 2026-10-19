@@ -15,8 +15,9 @@ WORKDIR /app
 
 # Exact pins only (ci/check_pins.py covers these files). dev.txt comes in through
 # the -r lines and brings the pinned setuptools the package build below needs.
+# worker.txt adds the Storage SDKs of the fleet worker (job-agon-fleet).
 COPY requirements/ requirements/
-RUN python -m pip install -r requirements/fleet.txt -r requirements/intake.txt
+RUN python -m pip install -r requirements/fleet.txt -r requirements/intake.txt -r requirements/worker.txt
 
 COPY pyproject.toml README.md LICENSE ./
 COPY src/ src/
@@ -25,7 +26,7 @@ RUN python -m pip install --no-deps --no-build-isolation . \
 
 # Fail the build if package data did not ship: the frozen interpret model, the
 # realism bands and the pinned prompts are read at run time.
-RUN cd / && python -c "import agon.interpret.model as m; m.load_model(); from agon.agents.prompts import load_prompt; load_prompt('writer'); import agon.synth.bands, agon.intake, agon.governance.store_cosmos; print('package data ok')"
+RUN cd / && python -c "import agon.interpret.model as m; m.load_model(); from agon.agents.prompts import load_prompt; load_prompt('writer'); import agon.synth.bands, agon.intake, agon.governance.store_cosmos, agon.fleet.worker, agon.agents.publish; import azure.storage.blob, azure.storage.queue, agent_framework; print('package data ok')"
 
 RUN useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin agon
 USER 10001

@@ -2,6 +2,11 @@
 # checkpoints. Graph build, end to end to the approval pause, process kill and resume in a fresh
 # interpreter, exactly one publish request, the changes-requested path and the failure rules.
 #
+# The same job runs the fleet worker (agon.fleet.worker): its offline tests, its end to end run on
+# the real graph, and the SDK contract test of its Azure adapters against requirements/worker.txt
+# (AGON_REQUIRE_AZURE_SDK=1, so a missing SDK fails instead of skipping). The worker-sdk-guard job
+# runs that contract test WITHOUT the SDK and must see it fail (negative control).
+#
 # The live Cosmos DB kill-and-resume job lives in fleet-cosmos.yml, not here: ci/check_oidc.py
 # fails any workflow that a pull request can trigger and that grants id-token: write.
 name: fleet
@@ -12,7 +17,9 @@ on:
       - "src/agon/**"
       - "tests/fleet/**"
       - "requirements/fleet.txt"
+      - "requirements/worker.txt"
       - "requirements/dev.txt"
+      - "infra/flows.bicep"
       - ".github/workflows/fleet.yml"
   push:
     branches: [main]
@@ -20,7 +27,9 @@ on:
       - "src/agon/**"
       - "tests/fleet/**"
       - "requirements/fleet.txt"
+      - "requirements/worker.txt"
       - "requirements/dev.txt"
+      - "infra/flows.bicep"
       - ".github/workflows/fleet.yml"
   workflow_dispatch:
 
@@ -37,6 +46,7 @@ jobs:
     timeout-minutes: 30
     env:
       AGON_REQUIRE_AF: "1"
+      AGON_REQUIRE_AZURE_SDK: "1"
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUTF8: "1"
     steps:
@@ -46,8 +56,8 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
-      - name: Install exact pins
-        run: python -m pip install --disable-pip-version-check -r requirements/fleet.txt
+      - name: Install exact pins (worker.txt includes fleet.txt)
+        run: python -m pip install --disable-pip-version-check -r requirements/worker.txt
       - name: Install the package (editable, pinned backend, no isolation)
         run: python -m pip install --disable-pip-version-check --no-build-isolation --no-deps -e .
       - name: No dependency conflicts
@@ -89,3 +99,31 @@ jobs:
             ${{ runner.temp }}/fleet-pip-freeze.txt
           if-no-files-found: warn
           retention-days: 30
+
+  # Negative control for the worker's SDK contract test: without the SDK and with the variable
+  # set, it must fail with its own message, never skip.
+  worker-sdk-guard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install pinned test tooling only (no Azure SDK)
+        run: python -m pip install --disable-pip-version-check -r requirements/dev.txt
+      - name: Install the package (editable, pinned backend, no isolation)
+        run: python -m pip install --disable-pip-version-check --no-build-isolation --no-deps -e .
+      - name: The contract test fails without the SDK when required
+        env:
+          AGON_REQUIRE_AZURE_SDK: "1"
+        run: |
+          set +e
+          python -m pytest tests/fleet/test_worker_sdk_contract.py -q -p no:cacheprovider > sdk_guard.txt 2>&1
+          code=$?
+          set -e
+          cat sdk_guard.txt
+          if [ "$code" -eq 0 ]; then echo "expected a failure, got exit 0"; exit 1; fi
+          grep -q "AGON_REQUIRE_AZURE_SDK=1 but the fleet worker's Azure SDK packages are not installed" sdk_guard.txt

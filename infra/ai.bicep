@@ -90,6 +90,7 @@ output foundryDeploymentNames array = foundry.outputs.deploymentNames
 // Azure AI Translator and Speech (spec 3.2 rows 6 and 7).
 output translatorAccountName string = aiServices.outputs.translatorName
 output translatorEndpoint string = aiServices.outputs.translatorEndpoint
+output translatorCustomEndpoint string = aiServices.outputs.translatorCustomEndpoint
 output translatorRegion string = aiServices.outputs.translatorRegion
 output speechAccountName string = aiServices.outputs.speechName
 output speechEndpoint string = aiServices.outputs.speechEndpoint

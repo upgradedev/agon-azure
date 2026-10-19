@@ -8,8 +8,10 @@
 // Anonymous readers reach the two public containers without any key at all.
 //
 // Anonymous read is allowed on the account so that exactly two containers, feed
-// and sandbox, can grant it at blob level (read a named blob, no listing). No
-// other container exists, and a new one defaults to private.
+// and sandbox, can grant it at blob level (read a named blob, no listing). Every
+// other container is private (publicAccess None): today that is artifacts, the
+// fleet's content-addressed working bytes, which only data roles in
+// infra/rbac.bicep can reach. A new container defaults to private.
 
 @description('Region for the storage account.')
 param location string
@@ -29,10 +31,18 @@ param corsAllowedOrigins array = []
 @minValue(1)
 param sandboxRetentionDays int = 1
 
-// The only two containers, both readable anonymously at blob level.
+// The only two public containers, both readable anonymously at blob level.
 var publicContainers = [
   'feed'
   'sandbox'
+]
+
+// Private containers: no anonymous access at all. artifacts holds every file a
+// sealed bundle names, under its sha256 (agon.fleet.azure_ports.BlobArtifactStore,
+// create-only). id-fleet writes it; the two publisher identities only read it,
+// before they copy approved bytes into feed or sandbox.
+var privateContainers = [
+  'artifacts'
 ]
 
 // Work queues from spec 3.2 rows 1, 2, 9, 11 and 11b.
@@ -49,6 +59,9 @@ var queueNames = [
   'decisions-teams'
   'decisions-outlook'
   'intake-poison'
+  // The fleet worker (agon.fleet.worker) parks a runs or decisions message it
+  // could not settle after five deliveries here, never drops it.
+  'fleet-poison'
 ]
 
 resource account 'Microsoft.Storage/storageAccounts@2023-05-01' = {
@@ -124,6 +137,14 @@ resource containers 'Microsoft.Storage/storageAccounts/blobServices/containers@2
   }
 }]
 
+resource privateContainerResources 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = [for containerName in privateContainers: {
+  parent: blobService
+  name: containerName
+  properties: {
+    publicAccess: 'None'
+  }
+}]
+
 // Sandbox blobs are throwaway output of the anonymous live path. The rule runs
 // about once a day, so a blob can outlive the threshold by up to a day.
 resource lifecycle 'Microsoft.Storage/storageAccounts/managementPolicies@2023-05-01' = {
@@ -180,4 +201,5 @@ output queueEndpoint string = account.properties.primaryEndpoints.queue
 output feedBaseUrl string = '${account.properties.primaryEndpoints.blob}feed/'
 output sandboxBaseUrl string = '${account.properties.primaryEndpoints.blob}sandbox/'
 output containerNames array = [for (containerName, i) in publicContainers: containers[i].name]
+output privateContainerNames array = [for (containerName, i) in privateContainers: privateContainerResources[i].name]
 output queueNames array = [for (queueName, i) in queueNames: queues[i].name]

@@ -95,16 +95,18 @@ If a `TextTranslation` row appears outside `rg-agon-swc`, the Translator F0 slot
 **2. Check the built-in role ids used by `infra/rbac.bicep`.** Each line must print the role name in the comment beside it in the template:
 
 ```bash
-for id in ba92f5b4-2d11-453d-a403-e96b0029c9fe 19e7f393-937e-4f77-808e-94535e297925 8a0f0c08-91a1-4084-bc3d-661d67233fed c6a89b2d-59bc-44d0-9896-0f6e12d7b80a 53ca6127-db72-4b80-b1b0-d745d6d5456d 5e0bd9bd-7b93-4f28-af87-19fc36ad61bd a97b65f3-24c7-4388-baec-2e87135dc908 7f951dda-4ed3-4680-a7ca-43fe172d538d; do
+for id in ba92f5b4-2d11-453d-a403-e96b0029c9fe 2a2b9908-6ea1-4ae2-8e65-a410df84e7d1 19e7f393-937e-4f77-808e-94535e297925 8a0f0c08-91a1-4084-bc3d-661d67233fed c6a89b2d-59bc-44d0-9896-0f6e12d7b80a 53ca6127-db72-4b80-b1b0-d745d6d5456d 5e0bd9bd-7b93-4f28-af87-19fc36ad61bd a97b65f3-24c7-4388-baec-2e87135dc908 7f951dda-4ed3-4680-a7ca-43fe172d538d; do
   az role definition list --name "$id" --query "[].roleName" --output tsv
 done
 ```
 
-Expected, in order: Storage Blob Data Contributor, Storage Queue Data Reader, Storage Queue Data Message Processor, Storage Queue Data Message Sender, Foundry User (spec 7.1 calls it by its earlier name, Azure AI User; the tenant may still print that name), Cognitive Services OpenAI User, Cognitive Services User, AcrPull.
+Expected, in order: Storage Blob Data Contributor, Storage Blob Data Reader (read 2026-10-19 with `az role definition list --name 2a2b9908-6ea1-4ae2-8e65-a410df84e7d1`), Storage Queue Data Reader, Storage Queue Data Message Processor, Storage Queue Data Message Sender, Foundry User (spec 7.1 calls it by its earlier name, Azure AI User; the tenant may still print that name), Cognitive Services OpenAI User, Cognitive Services User, AcrPull.
 
 **3. Deploy `infra/rbac.bicep` (after the first green CI deploy, and again whenever it changes).** It reads the outputs of two deployments: `agon-main` for the storage account and the identities, and `agon-ai` for the Foundry, Translator and Speech names.
 
 **Deploy order: the CI deploy must finish first, both deployments.** While a CI deploy is `Running`, `az deployment group show` returns null outputs for that deployment. On 2026-10-19 an rbac run during a CI deploy received an empty `storageAccountName` and every assignment failed with `ParentResourceNotFound`. So both commands below stop unless `agon-main` and `agon-ai` both read `Succeeded`, and every parameter of `rbac.bicep` carries `@minLength` (1, or 2 for Cognitive Services names), so an empty output fails validation before any write.
+
+**After the fleet worker merges, the next rbac deploy must wait for the `agon-main` run of that merge.** That run creates the private `artifacts` container and the `fleet-poison` queue; an rbac deploy before it fails with `ParentResourceNotFound` on those grants. The parameter list is unchanged (the same twelve parameters as below).
 
 What it grants (each at the narrowest scope; full list in the template):
 
@@ -117,6 +119,10 @@ What it grants (each at the narrowest scope; full list in the template):
 | `id-api`, `id-fleet`, `id-publisher`, `id-publisher-sandbox` | AcrPull | the registry `cragon<suffix>` | spec 3.2 row 16: each job pulls the one image with its own identity |
 | `id-logicapp` | Storage Queue Data Message Sender | `decisions-teams` and `decisions-outlook` only | spec 14 item 5: the queue names the channel |
 | `id-api` | Message Processor and Reader on both decision queues; Sender on `intake-poison` | one queue each | spec 14 item 5: the decision intake |
+| `id-fleet` | Storage Blob Data Contributor | the private `artifacts` container | spec 3.2 row 2: the worker writes every sealed bundle file there, create-only by sha256 |
+| `id-publisher`, `id-publisher-sandbox` | Storage Blob Data Reader | the private `artifacts` container | spec 3.2 rows 11 and 11b: the publishers read the approved bytes before they write `feed` or `sandbox` |
+| `id-fleet` | Storage Queue Data Message Sender | `fleet-poison` | beyond spec 7.1: the worker parks a message it could not settle after five deliveries, never drops it |
+| CI (`agon-azure-ci`) | Storage Queue Data Message Sender | `runs` only | beyond spec 7.1: the main-only `fleet-run` drill starts one synthetic run until an api exists; remove it then |
 
 From Git Bash:
 
@@ -193,6 +199,19 @@ Owner steps, each once:
 2. After the first `flows` run creates the `agon-outlook` connection: rg-agon-swc, API connection `agon-outlook`, Edit API connection, Authorize (sign in with the officer's mailbox), Save. Then set `AGON_OFFICER_EMAIL`. The next deploy adds the Outlook flow. The workflow creates the connection only if it is missing and never redeploys it, so the consent survives.
 3. The rbac deploy (step 3 above) grants `id-logicapp` Sender on the two decision queues. Without it, a decision fails at the queue write and the run history shows 403.
 
+### The fleet worker: `job-agon-fleet` (spec 3.2 row 2, 3.4 steps 2 to 6)
+
+The `apps` job deploys `job-agon-fleet` beside the intake job, after `ai` and `flows`, as id-fleet. It runs `python -m agon.fleet.worker --ensure-agents --idle-exit 60` when KEDA sees a message on `runs` or `decisions`.
+
+* **Startup.** `--ensure-agents` finds, for analyst, writer and localiser-editor, the Foundry prompt agent version whose description carries the pinned prompt sha256 on the wanted model, and creates it from the prompt file when none exists (`python -m agon.agents.publish` does the same alone). Then `verify_deployed` reads each version back and compares the sha256 of its instructions with the local prompt. Any mismatch exits with code 3 before a message is touched; the log line `"startup": "refused"` names the role.
+* **`runs`** carries a RunInput as JSON (`{"run_id", "match_ref", "target"}`). The worker drives W-fulltime to its approval pause in the Cosmos `checkpoints` container, then posts the card to `la-agon-teams-approval`, and to `la-agon-outlook-approval` when it exists, with an Entra token of id-fleet. Target `sandbox` never posts to Teams. The posted channels are noted on the run ledger, so re-sending the same runs message posts only what is missing.
+* **`decisions`** carries the intake's pointer. The worker resumes the run only when the pause checkpoint's pending request, the approval record (bundle hash, sha256 of the nonce) and a consumed nonce all agree; it never writes `approvals` or `nonces`. A pointer for a run already past AWAITING_APPROVAL settles as a duplicate.
+* **Settling.** Every handled message is deleted and logged as one JSON line (`"agon": "fleet"`). A failure leaves the message for a retry; after five deliveries it moves to `fleet-poison`.
+* **Bytes.** Every file a sealed bundle names is written to the private `artifacts` container as `artifacts/<sha256>`, create-only (`If-None-Match: *`). The manifest is in the Cosmos `bundles` container under its hash. The Publisher reads both.
+* **Card URLs.** The `apps` job reads each Logic App's `listCallbackUrl` and keeps only `basePath` and `api-version` (the SAS signature never reaches a log or a parameter); the worker refuses a URL that carries `sp`, `sv` or `sig`. `published_url` on the card is `<feed container URL><bundle sha256>/manifest.json`, where `Publisher.publish` writes the manifest.
+* **Start a run by hand** (until an api starts runs): Actions, `fleet-run`, Run workflow on `main`, with a seed, a match index and the target. It needs the rbac deploy above (CI Sender on `runs`).
+* **Before the first approval** the officer must hold the `approver` role in the Cosmos `approvers` container; no identity in this repository writes that container (see Known gaps).
+
 ### Never
 
 * Never deploy with `--mode Complete`. The resource group also holds the gate T spike (`agon-teams`, `la-agon-gate-t`, `la-agon-decision-stub`), and complete mode deletes every resource the template does not name.
@@ -207,10 +226,11 @@ Owner steps, each once:
 | Compile and lint the templates, with no login (`main.bicep` and `rbac.bicep` in `ci.yml`; `ai.bicep` in the `ai` job of `deploy.yml` until `ci.yml` lists it) | Write Azure RBAC role assignments (`Microsoft.Authorization/roleAssignments/write`), so `infra/rbac.bicep` is owner-side |
 | Run what-if on `main`, and create or update any resource inside `rg-agon-swc` | Register resource providers, which is a subscription-level action |
 | Compile and lint the templates on a pull request, with no login | Log in to Azure from a pull request: no workflow requests a token on `pull_request` (enforced by `ci/check_oidc.py`), and once step 4 is done Entra refuses that subject |
-| Create the Cosmos DB data-plane role assignments, because they are `Microsoft.DocumentDB` resources (`infra/modules/cosmos-access.bicep`) | Read or write blobs or queues: it holds no storage data role and storage shared keys are disabled |
+| Create the Cosmos DB data-plane role assignments, because they are `Microsoft.DocumentDB` resources (`infra/modules/cosmos-access.bicep`) | Read blobs or queues, or write blobs: its one storage data role is Sender on `runs`, and storage shared keys are disabled |
 | Read and write Cosmos items in the `checkpoints` container only (built-in Data Contributor at container scope, for spike S1 on Cosmos) | Read or write any other Cosmos container: Cosmos keys are disabled and it holds no other data role |
 | Call the Foundry model deployments (Cognitive Services OpenAI User on the Foundry account, once owner step 3 has run) | Call Translator or Speech, use a Foundry project role, or read an account key (local auth is off on every Cognitive Services account) |
 | Read the Static Web Apps deployment token at run time and upload the site | Touch the budget, any other resource group, or anything outside the subscription |
+| Put one RunInput on the `runs` queue from the main-only `fleet-run` drill (Message Sender on `runs` only, once owner step 3 has run) | Read, delete or receive any queue message, or write any blob |
 | Run the live readiness gate against the deployed hostname | Prove that each identity is denied what spec 7.1 says it must not hold: that needs the deny tests, which run as each identity and are not built yet |
 
 Storage shared-key access is off because nothing in this template needs it: containers, queues, the lifecycle rule and CORS are written through Azure Resource Manager, the apps use their managed identities, and anonymous readers need no key. A tool that defaults to key access (some portal views, `az storage` without `--auth-mode login`) will be refused; use Microsoft Entra sign-in instead.
@@ -224,7 +244,7 @@ Storage shared-key access is off because nothing in this template needs it: cont
   ```
 
 * **An alert does not stop spend.** It sends a message. When one fires, look at Cost analysis for the group, find the meter, and switch off the live path first. The recorded run is static and keeps working.
-* **What this template costs at rest.** Static Web Apps Free has no charge. Cosmos DB serverless bills per request and per GB stored, with no idle charge. Storage is Standard LRS with a one-day delete rule on sandbox blobs (the rule runs about once a day, so a blob can live up to a day longer). Log Analytics keeps 30 days and caps ingestion at 1 GB a day. The two Foundry model deployments are DataZoneStandard, billed per token with no hourly charge; the Foundry resource itself has no idle charge. Translator F0 is free within its monthly character allowance; Speech S0 bills per character synthesized. No compute is deployed yet. These are the service pricing models, not a measured bill.
+* **What this template costs at rest.** Static Web Apps Free has no charge. Cosmos DB serverless bills per request and per GB stored, with no idle charge. Storage is Standard LRS with a one-day delete rule on sandbox blobs (the rule runs about once a day, so a blob can live up to a day longer). Log Analytics keeps 30 days and caps ingestion at 1 GB a day. The two Foundry model deployments are DataZoneStandard, billed per token with no hourly charge; the Foundry resource itself has no idle charge. Translator F0 is free within its monthly character allowance; Speech S0 bills per character synthesized. Compute is Container Apps jobs on the Consumption profile (intake and fleet), billed per second of execution; with no queued message nothing runs. These are the service pricing models, not a measured bill.
 * **Later lanes add** the app-level circuit breaker in the Cosmos `usage` container and the live-run caps of spec 9.3.
 
 ## Demo survival until 2026-11-11 07:59 UTC
@@ -252,4 +272,7 @@ Judges may open the public URL at any time until 2026-11-11 07:59 UTC. Until the
 * `id-fleet` holds Foundry User on the project, as spec 7.1 says. Whether a project-scope grant also authorizes direct chat completions on the account's OpenAI endpoint is not verified; the live allow and deny tests settle it, and the fallback is Cognitive Services OpenAI User on the account.
 * The Foundry project's Application Insights connection stores the component's connection string as an ApiKey credential, which is the documented shape for that connection category. It works because Application Insights still accepts telemetry with its connection string (the gap above). The App Insights connection itself is unverified until a traced run shows spans in the workspace.
 * The CI identity's Cosmos grant is container-scoped only. If the Cosmos SDK needs the account-scope `readMetadata` action at client start, add CI to `metadataPrincipals` in `infra/modules/cosmos-access.bicep` with a reason, not a wider data role.
+* No identity writes the Cosmos `approvers` container, so the officer's `approver` role must be created once outside this repository's identities (an owner-side data-plane write). Until it exists, every officer decision is refused by the verifier with `not_approver`. Status: open, 2026-10-19.
+* The fleet worker's Speech call uses `Bearer aad#<resource id>#<token>` against `<speech endpoint>tts/cognitiveservices/v1` (learn.microsoft.com, rest-text-to-speech, read 2026-10-19), not yet exercised against our resource. A failure leaves captions without audio and a flag on the card. `AGON_SPEECH_TTS_URL` overrides the URL without a code change.
+* A worker that cannot verify its prompt agents exits at startup while messages stay queued, so KEDA starts a new execution every polling interval (30 s) until the cause is fixed. Each such execution lasts seconds; watch for `"startup": "refused"` lines.
 * The Writer guardrail of spec 7.4 (prompt shields, groundedness, protected material) is not in this template yet: both deployments use the default content filter `Microsoft.DefaultV2`.
