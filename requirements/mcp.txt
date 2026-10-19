@@ -1,0 +1,11 @@
+# matchfacts MCP server (src/agon/mcp/matchfacts.py). Exact pin, read on PyPI 2026-10-19: mcp 1.30.0,
+# uploaded 2026-09-07, the maintained 1.x line whose FastMCP server API this module is written for.
+# The 2.x line (2.3.0, 2026-10-02) restructured the server package and splits out mcp-types; moving to it is a
+# separate change. Its own requires (anyio, httpx, httpx-sse, pydantic, pydantic-settings, starlette,
+# sse-starlette, uvicorn, jsonschema, python-multipart, pyjwt, typing-extensions, typing-inspection)
+# resolve through pip; .github/workflows/mcp.yml prints pip freeze so the resolved set is on record.
+# KNOWN GAP: those transitive dependencies FLOAT, so a new starlette, uvicorn or pydantic release can
+# change the mcp job with no commit here. Closing it: copy the mcp-constraints.candidate.txt that the
+# first green mcp.yml run uploads to requirements/mcp-constraints.txt (check_pins covers it) and add
+# a "-c mcp-constraints.txt" line below. Not done yet because no green run exists to take it from.
+mcp==1.30.0

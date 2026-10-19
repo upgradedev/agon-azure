@@ -1,0 +1,170 @@
+# matchfacts MCP server and the interpret model.
+# - matchfacts: installs the pinned MCP SDK, then runs an in-process client against the server that
+#   calls every tool, checks that write-like tools do not exist, does one streamable HTTP round
+#   trip, and checks the referee is unreachable. A negative control first proves the server tests
+#   FAIL (not skip) when the SDK is missing, and a junit check fails the job on any skipped test.
+# - interpret: on ubuntu and windows, the pinned interpret output hash and a full refit of the
+#   frozen model on seeds 1-500 compared byte for byte; then M6 is printed with its command.
+# Offline: no cloud, no secrets, no id-token.
+name: mcp
+
+on:
+  pull_request:
+    paths:
+      - "src/agon/mcp/**"
+      - "src/agon/interpret/**"
+      - "src/agon/referee/wp_compare.py"
+      - "src/agon/synth/**"
+      - "src/agon/governance/**"
+      - "tests/test_matchfacts_*.py"
+      - "tests/matchfacts_kit.py"
+      - "tests/test_interpret.py"
+      - "tests/test_wp_compare.py"
+      - "requirements/mcp*.txt"
+      - "ci/check_pins.py"
+      - "ci/git_paths.py"
+      - ".github/workflows/mcp.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/agon/mcp/**"
+      - "src/agon/interpret/**"
+      - "src/agon/referee/wp_compare.py"
+      - "src/agon/synth/**"
+      - "src/agon/governance/**"
+      - "tests/test_matchfacts_*.py"
+      - "tests/matchfacts_kit.py"
+      - "tests/test_interpret.py"
+      - "tests/test_wp_compare.py"
+      - "requirements/mcp*.txt"
+      - "ci/check_pins.py"
+      - "ci/git_paths.py"
+      - ".github/workflows/mcp.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mcp-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  matchfacts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install pinned test tooling and the package (no MCP SDK yet)
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements/dev.txt
+          python -m pip install --disable-pip-version-check --no-build-isolation --no-deps -e .
+      - name: Negative control, the server tests must FAIL without the SDK when it is required
+        run: |
+          set +e
+          AGON_REQUIRE_MCP=1 python -m pytest -q -p no:cacheprovider tests/test_matchfacts_server.py
+          code=$?
+          set -e
+          if [ "$code" -eq 0 ]; then
+            echo "negative control failed: the server tests passed or skipped without the SDK"
+            exit 1
+          fi
+          echo "negative control passed: pytest exited $code without the SDK"
+      - name: Install the pinned MCP SDK
+        run: python -m pip install --disable-pip-version-check -r requirements/mcp.txt
+      - name: Record the resolved package set, and a constraints candidate for the next change
+        # Transitive dependencies of mcp float until requirements/mcp-constraints.txt exists. This
+        # writes that file's candidate from the resolved set: exact name==version lines only, the
+        # editable agon install and pip's comment lines dropped, then checks it with check_pins.
+        run: |
+          python -m pip freeze --disable-pip-version-check | tee "${RUNNER_TEMP}/mcp-pip-freeze.txt"
+          cand_dir="${RUNNER_TEMP}/constraints/requirements"
+          mkdir -p "$cand_dir"
+          {
+            echo "# Candidate from mcp.yml run ${GITHUB_RUN_ID}, commit ${GITHUB_SHA}. Copy to requirements/mcp-constraints.txt."
+            grep -E '^[A-Za-z0-9][A-Za-z0-9._-]*==[^ ]+$' "${RUNNER_TEMP}/mcp-pip-freeze.txt" | grep -viE '^agon==' | sort -f
+          } > "$cand_dir/mcp-constraints.candidate.txt"
+          cat "$cand_dir/mcp-constraints.candidate.txt"
+          grep -qE '^mcp==1\.30\.0$' "$cand_dir/mcp-constraints.candidate.txt"
+          (cd "${RUNNER_TEMP}/constraints" && git init -q . && git add -A && PYTHONPATH="${GITHUB_WORKSPACE}/ci" python "${GITHUB_WORKSPACE}/ci/check_pins.py" --root .)
+      - name: Server and tools tests (every tool, no write tool, HTTP round trip, referee unreachable)
+        run: |
+          AGON_REQUIRE_MCP=1 python -m pytest -q -p no:cacheprovider -rs \
+            tests/test_matchfacts_server.py tests/test_matchfacts_tools.py \
+            --junitxml="${RUNNER_TEMP}/mcp-junit.xml"
+      - name: Fail on any skipped or missing test
+        run: |
+          python - "${RUNNER_TEMP}/mcp-junit.xml" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+          root = ET.parse(sys.argv[1]).getroot()
+          suites = [root] if root.tag == "testsuite" else list(root.iter("testsuite"))
+          tests = sum(int(s.get("tests", 0)) for s in suites)
+          skipped = sum(int(s.get("skipped", 0)) for s in suites)
+          bad = sum(int(s.get("failures", 0)) + int(s.get("errors", 0)) for s in suites)
+          server = sum(1 for c in root.iter("testcase") if "test_matchfacts_server" in (c.get("classname") or ""))
+          print(f"junit: tests {tests} skipped {skipped} failures+errors {bad} server tests {server}")
+          if tests == 0 or skipped or bad or server < 6:
+              sys.exit(1)
+          PY
+      - name: Keep pip freeze and junit as evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mcp-evidence
+          path: |
+            ${{ runner.temp }}/mcp-pip-freeze.txt
+            ${{ runner.temp }}/mcp-junit.xml
+            ${{ runner.temp }}/constraints/requirements/mcp-constraints.candidate.txt
+          if-no-files-found: warn
+          retention-days: 30
+
+  interpret:
+    name: interpret (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install pinned test tooling and the package
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements/dev.txt
+          python -m pip install --disable-pip-version-check --no-build-isolation --no-deps -e .
+      - name: Interpret tests, including the pinned output hash
+        run: python -m pytest -q -p no:cacheprovider tests/test_interpret.py tests/test_wp_compare.py
+      - name: Negative control, a refit on the wrong seeds must fail the byte check
+        run: |
+          set +e
+          python -m agon.interpret.fit --seeds 1-3 --check
+          code=$?
+          set -e
+          if [ "$code" -ne 1 ]; then
+            echo "negative control failed: --check exited $code on seeds 1-3, expected 1"
+            exit 1
+          fi
+          echo "negative control passed: a refit on the wrong seeds is a mismatch"
+      - name: Refit on seeds 1-500 and compare bytes with the committed model
+        run: python -m agon.interpret.fit --seeds 1-500 --check
+      - name: M6, interpret win probability against final results (self-measured)
+        run: python -m agon.referee.wp_compare --seeds 3001-3020

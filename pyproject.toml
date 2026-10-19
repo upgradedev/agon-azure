@@ -22,6 +22,9 @@ where = ["src"]
 [tool.setuptools.package-data]
 # The frozen realism bands and their lock ship with the package (metric M2).
 "agon.synth" = ["bands.json", "bands.lock"]
+# The frozen interpret model and its lock (spec 4 row 2); without them a non-editable install
+# leaves the model out and every matchfacts tool call raises ModelError.
+"agon.interpret" = ["model.json", "model.lock"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
