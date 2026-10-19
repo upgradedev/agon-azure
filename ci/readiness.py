@@ -28,8 +28,16 @@ zero targets fails, because an empty gate proves nothing.
 
 Only the standard library is used, so the gate runs anywhere without installs.
 
+The shipped config names the Static Web Apps host by a placeholder,
+__AGON_SWA_HOSTNAME__, because the real default hostname is only known after the
+first deploy. A placeholder URL is a FAIL that fetches nothing. The deploy
+workflow passes the real host with --set-host and adds the deployed commit sha
+as a marker with --add-marker, so the live run proves the page serves THAT
+commit, not merely some page.
+
 Usage:
     python ci/readiness.py --live                      # targets from ci/readiness.json
+    python ci/readiness.py --live --set-host x.azurestaticapps.net --add-marker demo=<sha>
     python ci/readiness.py --url https://x --marker Agon
     python ci/readiness.py --offline tests/fixtures/x  # fixture index, no network
 """
@@ -50,6 +58,12 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 DEFAULT_CONFIG = Path(__file__).with_name("readiness.json")
+# Stands for the Static Web Apps default hostname until the deploy job sets it.
+HOST_PLACEHOLDER = "__AGON_SWA_HOSTNAME__"
+# Any unreplaced __AGON_...__ token means the URL was never configured.
+_PLACEHOLDER_TOKEN = re.compile(r"__AGON_[A-Z0-9_]*__")
+# A bare DNS name: labels of letters, digits and inner hyphens, at least one dot.
+_HOSTNAME = re.compile(r"^(?=.{4,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}$")
 USER_AGENT = "agon-readiness/0.1 (+https://github.com/upgradedev/agon-azure)"
 
 EM_DASH = "\u2014"
@@ -374,6 +388,9 @@ def check_target(
     findings: list[Finding] = []
     if not target.url:
         return [Finding(target.name, "url configured", False, "no URL yet: nothing deployed")]
+    if is_placeholder(target.url):
+        return [Finding(target.name, "url configured", False,
+                        f"placeholder URL {target.url}: nothing fetched; the deploy job sets the host with --set-host")]
 
     result = fetch(target.url)
     if result.status == 200:
@@ -405,6 +422,43 @@ def check_target(
     if target.scan_assets and result.status == 200:
         findings.extend(_asset_findings(target, result, fetch, rules, max_assets))
     return findings
+
+
+def is_placeholder(url: str) -> bool:
+    """True when a URL still holds an unreplaced __AGON_...__ token."""
+    return bool(_PLACEHOLDER_TOKEN.search(url))
+
+
+def set_host(targets: list[Target], host: str) -> int:
+    """Replace the host placeholder in every target URL. Returns how many changed.
+
+    The host must be a bare lowercase DNS name: no scheme, port, path or
+    credentials, so a value from a deploy output cannot smuggle a different URL.
+    """
+    if not _HOSTNAME.match(host):
+        raise ValueError(f"--set-host needs a bare lowercase hostname, got {host!r}")
+    changed = 0
+    for target in targets:
+        if HOST_PLACEHOLDER in target.url:
+            target.url = target.url.replace(HOST_PLACEHOLDER, host)
+            changed += 1
+    return changed
+
+
+def add_markers(targets: list[Target], pairs: Iterable[str]) -> None:
+    """Apply NAME=TEXT pairs: append TEXT to the markers of the target NAME.
+
+    An unknown target name or a blank marker is an error, so a typo in the
+    workflow cannot silently drop the commit check.
+    """
+    by_name = {t.name: t for t in targets}
+    for pair in pairs:
+        name, sep, text = pair.partition("=")
+        if not sep or not text.strip():
+            raise ValueError(f"--add-marker needs NAME=TEXT with a non-blank TEXT, got {pair!r}")
+        if name not in by_name:
+            raise ValueError(f"--add-marker names unknown target {name!r}; known: {', '.join(sorted(by_name))}")
+        by_name[name].markers.append(text)
 
 
 def _markers(raw: object, name: str) -> list[str]:
@@ -474,6 +528,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--url", action="append", default=[], help="check this URL instead of the config targets")
     parser.add_argument("--marker", action="append", default=[], help="required body marker for every --url")
+    parser.add_argument("--set-host", metavar="HOST",
+                        help=f"replace {HOST_PLACEHOLDER} in every config target URL with HOST")
+    parser.add_argument("--add-marker", action="append", default=[], metavar="NAME=TEXT",
+                        help="add a required body marker to the config target NAME")
     parser.add_argument("--timeout", type=float, default=20.0)
     args = parser.parse_args(argv)
 
@@ -492,6 +550,15 @@ def main(argv: list[str] | None = None) -> int:
     if args.url:
         # With no --marker every target fails "no body marker configured".
         targets = [Target(f"url{i + 1}", u, list(args.marker)) for i, u in enumerate(args.url)]
+    try:
+        if args.set_host is not None:
+            changed = set_host(targets, args.set_host)
+            print(f"host placeholder replaced in {changed} target URL(s)")
+        add_markers(targets, args.add_marker)
+    except ValueError as exc:
+        print(f"argument error: {exc}")
+        print("verdict: FAIL (the overrides could not be applied)")
+        return 1
 
     if args.offline:
         fetch = offline_fetcher(args.offline)

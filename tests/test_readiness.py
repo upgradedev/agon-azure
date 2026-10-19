@@ -313,10 +313,85 @@ def test_shipped_config_fails_live_until_a_demo_url_exists() -> None:
     targets, gated, _ = readiness.load_config(readiness.DEFAULT_CONFIG)
     demo = [t for t in targets if t.name == "demo"]
     assert demo and gated
-    if demo[0].url:
-        pytest.skip("a demo URL is configured; the live readiness run covers it")
+    if demo[0].url and not readiness.is_placeholder(demo[0].url):
+        pytest.skip("a real demo URL is configured; the live readiness run covers it")
     findings = readiness.check_target(demo[0], lambda url: pytest.fail("must not fetch"), readiness.build_rules())
     assert [f.ok for f in findings] == [False]
+
+
+def test_shipped_config_names_the_host_by_placeholder_with_markers() -> None:
+    # Fixture held apart from the config: the demo and demo-data targets point at
+    # the placeholder host and keep their markers, so the deploy job's --set-host
+    # and --add-marker have something to act on.
+    targets, _, _ = readiness.load_config(readiness.DEFAULT_CONFIG)
+    by_name = {t.name: t for t in targets}
+    assert by_name["demo"].url == "https://__AGON_SWA_HOSTNAME__/"
+    assert {"Agon", "Match Centre"} <= set(by_name["demo"].markers)
+    assert by_name["demo"].scan_assets
+    assert by_name["demo-data"].url == "https://__AGON_SWA_HOSTNAME__/data/manifest.json"
+    assert '"combined_sha256"' in by_name["demo-data"].markers
+    for seed in (1, 2, 3):
+        assert f"seed-{seed:04d}/events.ndjson" in by_name["demo-data"].markers
+
+
+def test_placeholder_url_fails_without_fetching() -> None:
+    for url in ("https://__AGON_SWA_HOSTNAME__/", "https://x.test/__AGON_OTHER__/a"):
+        target = readiness.Target("demo", url, ["Agon"])
+        findings = readiness.check_target(target, lambda u: pytest.fail("must not fetch"), readiness.build_rules())
+        assert [f.ok for f in findings] == [False]
+        assert "placeholder URL" in findings[0].detail
+
+
+def test_set_host_replaces_placeholder_and_refuses_non_hostnames() -> None:
+    targets = [
+        readiness.Target("demo", "https://__AGON_SWA_HOSTNAME__/", ["Agon"]),
+        readiness.Target("data", "https://__AGON_SWA_HOSTNAME__/data/manifest.json", ["x"]),
+        readiness.Target("readme", "https://raw.example.test/README.md", ["x"]),
+    ]
+    assert readiness.set_host(targets, "lively-sea-0a1b2c3d4.5.azurestaticapps.net") == 2
+    assert targets[0].url == "https://lively-sea-0a1b2c3d4.5.azurestaticapps.net/"
+    assert targets[1].url.endswith(".azurestaticapps.net/data/manifest.json")
+    assert targets[2].url == "https://raw.example.test/README.md"
+    for bad in ("", "https://evil.test", "evil.test/path", "evil.test:443", "user@evil.test",
+                "Evil.Test", "localhost", "evil.test/", "a b.test"):
+        with pytest.raises(ValueError):
+            readiness.set_host([readiness.Target("demo", "https://__AGON_SWA_HOSTNAME__/", [])], bad)
+
+
+def test_add_marker_rejects_unknown_target_and_blank_text() -> None:
+    targets = [readiness.Target("demo", URL, ["Agon"])]
+    readiness.add_markers(targets, ["demo=" + "a" * 40])
+    assert targets[0].markers == ["Agon", "a" * 40]
+    for bad in ("demox=abc", "demo=", "demo=   ", "demo"):
+        with pytest.raises(ValueError):
+            readiness.add_markers(targets, [bad])
+
+
+def test_cli_set_host_and_commit_marker_pass_only_when_the_sha_is_served(tmp_path: Path) -> None:
+    host = "agon.example.test"
+    sha = "0123456789abcdef0123456789abcdef01234567"
+    stamped = GOOD_BODY.replace("<h1>Agon</h1>", f'<h1 data-commit="{sha}">Agon</h1>')
+    index = good_index(body=stamped)
+    targets = [{"name": "demo", "url": "https://__AGON_SWA_HOSTNAME__/", "markers": ["Agon"], "scan_assets": True}]
+    fixtures, config = write_case(tmp_path, index, targets=targets)
+
+    unset = run_gate("--offline", str(fixtures), "--config", str(config))
+    assert unset.returncode == 1 and "placeholder URL" in unset.stdout
+
+    good = run_gate("--offline", str(fixtures), "--config", str(config), "--set-host", host, "--add-marker", f"demo={sha}")
+    assert good.returncode == 0, good.stdout
+    assert f"marker '{sha}'" in good.stdout
+
+    stale = "f" * 40
+    old = run_gate("--offline", str(fixtures), "--config", str(config), "--set-host", host, "--add-marker", f"demo={stale}")
+    assert old.returncode == 1
+    assert f"FAIL    demo              marker '{stale}'" in old.stdout or "missing from body" in old.stdout
+
+    typo = run_gate("--offline", str(fixtures), "--config", str(config), "--set-host", host, "--add-marker", f"dmeo={sha}")
+    assert typo.returncode == 1 and "unknown target" in typo.stdout
+
+    bad_host = run_gate("--offline", str(fixtures), "--config", str(config), "--set-host", "https://evil.test/")
+    assert bad_host.returncode == 1 and "bare lowercase hostname" in bad_host.stdout
 
 
 def test_pinned_defaults_cannot_be_removed_by_config() -> None:

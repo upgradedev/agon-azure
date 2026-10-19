@@ -1,10 +1,28 @@
 {
+  "_notes": [
+    "__AGON_SWA_HOSTNAME__ stands for the Static Web Apps default hostname. A target URL that still holds it FAILS without any fetch.",
+    "The deploy workflow replaces it with the staticSiteDefaultHostname output of infra/main.bicep (--set-host) and adds the deployed commit sha to the demo markers (--add-marker demo=<sha>).",
+    "demo markers: 'Agon' (the brand in the top bar), 'Match Centre' (the S1 landing view and nav item), plus the full 40-character commit sha stamped into data-commit at deploy.",
+    "demo-data markers: the generator manifest key 'combined_sha256' and the three per-seed event files, so the recorded synthetic data must have shipped with the page.",
+    "The published seeds are pinned in two places: PUBLISHED_SEEDS in .github/workflows/deploy.yml and the demo-data markers below. Change both together."
+  ],
   "targets": [
     {
       "name": "demo",
-      "url": "",
-      "markers": ["Agon"],
+      "url": "https://__AGON_SWA_HOSTNAME__/",
+      "markers": ["Agon", "Match Centre"],
       "scan_assets": true
+    },
+    {
+      "name": "demo-data",
+      "url": "https://__AGON_SWA_HOSTNAME__/data/manifest.json",
+      "markers": [
+        "\"combined_sha256\"",
+        "seed-0001/events.ndjson",
+        "seed-0002/events.ndjson",
+        "seed-0003/events.ndjson"
+      ],
+      "scan_assets": false
     },
     {
       "name": "repo-readme",
@@ -26,6 +44,10 @@
     {
       "item": "Innovation Studio project saved complete",
       "manual_step": "owner saves the project page with every required field and records the time in STATE.md"
+    },
+    {
+      "item": "Azure RBAC grants from infra/rbac.bicep",
+      "manual_step": "owner-side session deploys infra/rbac.bicep with main.bicep outputs (docs/OPERATIONS.md); CI cannot write role assignments"
     }
   ]
 }

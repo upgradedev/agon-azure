@@ -1,0 +1,253 @@
+# Deploy Agon to Azure and prove the public URL serves the commit (spec 9.1, 9.2, 11.2 S8).
+#
+# what-if    main only, before every deploy: compiles main.bicep and asks Azure what
+#            would change. It is not run on pull requests (see below).
+# deploy     main only, environment azure: incremental deployment of main.bicep.
+# web        main only: generates the recorded synthetic data for the published
+#            seeds, stamps the commit, fetches the Static Web Apps token at run time
+#            and uploads web/.
+# readiness  main only: the live gate (ci/readiness.py) against the deployed host,
+#            with the commit sha as a required body marker. Fails on any non-200.
+#
+# The CI identity holds Contributor on the resource group only. It cannot write
+# role assignments, so infra/rbac.bicep is NOT deployed here (docs/OPERATIONS.md).
+#
+# No job here runs on pull_request. A pull request workflow runs the diff of its
+# own branch before anyone reviews it, and the only Azure identity this repo has
+# holds Contributor on the group. So pull requests get compile and lint only (the
+# bicep job in ci.yml, no login), and the Azure what-if diff is read on main just
+# before the deploy. The pull_request federated subject must also be removed on
+# the owner side, because a branch could add its own workflow that uses it
+# (docs/OPERATIONS.md, step 4). Do not add pull_request back without a separate
+# Reader plus whatIf identity.
+# Actions are pinned by full commit sha; the comment names the version and how the
+# sha was read.
+
+name: deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "infra/**"
+      - "web/**"
+      - "src/agon/synth/**"
+      - ".github/workflows/deploy.yml"
+      - "ci/readiness.py"
+      - "ci/readiness.json"
+      - "ci/stamp_web.py"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Every run shares one group and never cancels a running one, so two deploys
+# never overlap.
+concurrency:
+  group: deploy-azure-main
+  cancel-in-progress: false
+
+env:
+  RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+  LOCATION: ${{ vars.AZURE_LOCATION }}
+  DEPLOYMENT_NAME: agon-main
+  # Same Bicep CLI as the ci.yml bicep job, so what lints is what deploys.
+  BICEP_VERSION: v0.44.1
+  # The three published demo seeds. ci/readiness.json pins the same three in the
+  # demo-data markers; change both together.
+  PUBLISHED_SEEDS: "1,2,3"
+
+jobs:
+  what-if:
+    # Only main has a federated subject, so a manual run from any other branch
+    # would only fail at login.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0 (peeled tag, git ls-remote 2026-10-19)
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Pin the Bicep CLI
+        run: |
+          az config set bicep.use_binary_from_path=false bicep.check_version=false --only-show-errors
+          az bicep install --version "$BICEP_VERSION"
+          az bicep version
+      - name: What-if (read only)
+        run: |
+          az deployment group what-if \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$DEPLOYMENT_NAME" \
+            --template-file infra/main.bicep \
+            --parameters location="$LOCATION"
+
+  deploy:
+    needs: what-if
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: azure
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      static_site_name: ${{ steps.outputs.outputs.static_site_name }}
+      static_site_hostname: ${{ steps.outputs.outputs.static_site_hostname }}
+      storage_account: ${{ steps.outputs.outputs.storage_account }}
+      feed_base_url: ${{ steps.outputs.outputs.feed_base_url }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0 (peeled tag, git ls-remote 2026-10-19)
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Pin the Bicep CLI
+        run: |
+          az config set bicep.use_binary_from_path=false bicep.check_version=false --only-show-errors
+          az bicep install --version "$BICEP_VERSION"
+          az bicep version
+      - name: Deploy main.bicep (incremental only, never complete)
+        run: |
+          az deployment group create \
+            --resource-group "$RESOURCE_GROUP" \
+            --name "$DEPLOYMENT_NAME" \
+            --template-file infra/main.bicep \
+            --parameters location="$LOCATION" \
+            --mode Incremental \
+            --output json > "$RUNNER_TEMP/deployment.json"
+      - name: Capture the deployment outputs
+        id: outputs
+        run: |
+          python3 - "$RUNNER_TEMP/deployment.json" <<'PY'
+          import json, os, re, sys
+          outputs = json.load(open(sys.argv[1], encoding="utf-8"))["properties"]["outputs"]
+          value = lambda key: outputs[key]["value"]
+          host = value("staticSiteDefaultHostname")
+          # A bare lowercase DNS name, so nothing downstream can be pointed elsewhere.
+          if not re.fullmatch(r"(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9-]{2,63}", host):
+              sys.exit(f"unexpected static site hostname: {host!r}")
+          rows = {
+              "static_site_name": value("staticSiteName"),
+              "static_site_hostname": host,
+              "storage_account": value("storageAccountName"),
+              "feed_base_url": value("feedBaseUrl"),
+          }
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as fh:
+              for key, val in rows.items():
+                  fh.write(f"{key}={val}\n")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
+              fh.write("### main.bicep outputs\n\n| output | value |\n|---|---|\n")
+              for key in sorted(outputs):
+                  fh.write(f"| {key} | `{json.dumps(outputs[key]['value'])}` |\n")
+          print("\n".join(f"{k}: {v}" for k, v in rows.items()))
+          PY
+
+  web:
+    needs: deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: azure
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      PYTHONPATH: src
+      SWA_NAME: ${{ needs.deploy.outputs.static_site_name }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Generate the recorded synthetic data for the published seeds
+        run: |
+          rm -rf web/data
+          python -m agon.synth.manifest --seeds "$PUBLISHED_SEEDS" --out web/data --print-hash
+      - name: Stamp the commit and re-hash the data against its manifest
+        run: python ci/stamp_web.py web --sha "$GITHUB_SHA" --data-dir web/data --seeds "$PUBLISHED_SEEDS"
+      - name: Static checks on the exact tree that ships
+        run: python ci/web_check.py web
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0 (peeled tag, git ls-remote 2026-10-19)
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Fetch the deployment token at run time (never a repo secret)
+        id: token
+        run: |
+          token="$(az staticwebapp secrets list --name "$SWA_NAME" --resource-group "$RESOURCE_GROUP" --query properties.apiKey --output tsv)"
+          if [ -z "$token" ]; then
+            echo "no deployment token returned for $SWA_NAME"
+            exit 1
+          fi
+          echo "::add-mask::$token"
+          echo "token=$token" >> "$GITHUB_OUTPUT"
+      # No release tags exist for v1; the sha is the head of the v1 branch, read with
+      # git ls-remote on 2026-10-19. The action pulls a container image that this pin
+      # does not fix (see docs/OPERATIONS.md, risks).
+      - uses: Azure/static-web-apps-deploy@4d27395796ac319302594769cfe812bd207490b1 # v1 (branch head)
+        with:
+          azure_static_web_apps_api_token: ${{ steps.token.outputs.token }}
+          action: upload
+          app_location: web
+          api_location: ""
+          output_location: ""
+          skip_app_build: true
+          skip_api_build: true
+
+  readiness:
+    needs: [deploy, web]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      HOST: ${{ needs.deploy.outputs.static_site_hostname }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      # A bounded wait for the CDN to serve the new upload. It never passes or fails
+      # anything: the gate below runs exactly once and decides.
+      - name: Wait until the new commit is served (at most 20 x 15 s)
+        run: |
+          for attempt in $(seq 1 20); do
+            # No pipe into grep -q: under pipefail an early grep exit fails curl.
+            body="$(curl --silent --max-time 20 "https://$HOST/" || true)"
+            case "$body" in
+              *"$GITHUB_SHA"*)
+                echo "attempt $attempt: commit $GITHUB_SHA is served"
+                exit 0
+                ;;
+            esac
+            echo "attempt $attempt: commit $GITHUB_SHA not served yet"
+            sleep 15
+          done
+          echo "commit not seen after 20 attempts; the readiness gate decides"
+      - name: Readiness gate, live, run once
+        run: |
+          set -o pipefail
+          python ci/readiness.py --live --set-host "$HOST" --add-marker "demo=$GITHUB_SHA" | tee "$RUNNER_TEMP/readiness.txt"
+      - name: Readiness table in the job summary
+        if: always()
+        run: |
+          {
+            echo "### Readiness, commit $GITHUB_SHA, https://$HOST/"
+            echo
+            echo '```'
+            cat "$RUNNER_TEMP/readiness.txt" 2>/dev/null || echo "no readiness output"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

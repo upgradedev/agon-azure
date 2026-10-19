@@ -1,0 +1,72 @@
+# Spec 9.4: the live readiness gate twice a day through the judging window, so a
+# judge URL that dies between deploys is seen within hours. Read only: it reads
+# the static site hostname from the last agon-main deployment and fetches public
+# pages. It never deploys or changes anything.
+
+name: readiness
+
+on:
+  schedule:
+    - cron: "17 5,17 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: readiness-scheduled
+  cancel-in-progress: false
+
+env:
+  RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+  # The demo must stay up until this instant; after it the run reports and stops.
+  WINDOW_END: "2026-11-11T07:59:00Z"
+
+jobs:
+  readiness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Judging window check
+        id: window
+        run: |
+          now="$(date -u +%s)"; end="$(date -u -d "$WINDOW_END" +%s)"
+          if [ "$now" -gt "$end" ]; then
+            echo "judging window ended at $WINDOW_END; disable this workflow"
+            echo "open=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "open=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.window.outputs.open == 'true'
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        if: steps.window.outputs.open == 'true'
+        with:
+          python-version: "3.12"
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0 (peeled tag, git ls-remote 2026-10-19)
+        if: steps.window.outputs.open == 'true'
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Read the deployed hostname (read only)
+        id: host
+        if: steps.window.outputs.open == 'true'
+        run: |
+          host="$(az deployment group show --resource-group "$RESOURCE_GROUP" --name agon-main --query properties.outputs.staticSiteDefaultHostname.value --output tsv)"
+          case "$host" in
+            ""|*/*|*:*|*" "*) echo "unexpected hostname from agon-main: '$host'"; exit 1 ;;
+          esac
+          echo "host=$host" >> "$GITHUB_OUTPUT"
+      # No commit marker here: the deployed commit is the last one that touched the
+      # deploy paths, not necessarily the head of main. deploy.yml checks the sha.
+      - name: Readiness gate, live
+        if: steps.window.outputs.open == 'true'
+        env:
+          HOST: ${{ steps.host.outputs.host }}
+        run: python ci/readiness.py --live --set-host "$HOST"
