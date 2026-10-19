@@ -11,7 +11,8 @@ A channel adapter translates its payload into an `ApprovalDecision` and calls `v
    unchecked bundle has no Approve button, server side too).
 5. The nonce has not expired, judged by the injected `now`, never by the payload's own time.
 6. The channel is allowed for the nonce's target (the console stand-in can never approve `feed`).
-7. The approver holds the role the nonce requires.
+7. The nonce's stored role equals `TARGET_ROLE[target]`, and the approver holds that role. The
+   role is derived from the target; a nonce that names any other role is refused.
 8. An approval ticks every Confirm row the card carried.
 9. Consume-once: compare-and-set on the nonce document's etag. Exactly one decision wins.
 
@@ -45,6 +46,10 @@ TARGET_CHANNELS: dict[str, frozenset[str]] = {
 }
 APPROVER_ROLE = "approver"
 SANDBOX_ROLE = "sandbox_approver"
+# The role a target demands is fixed here, never chosen by the caller of issue_nonce() and never
+# read on trust from the nonce document: the console visitor holds sandbox_approver, so a feed
+# nonce that asked for that role would hand the anonymous identity the public feed.
+TARGET_ROLE: dict[str, str] = {"feed": APPROVER_ROLE, "sandbox": SANDBOX_ROLE}
 NONCE_MAX_LEN = 128
 DEFAULT_TTL_SECONDS = 30 * 60
 
@@ -122,7 +127,6 @@ def issue_nonce(
     now: datetime,
     ttl_seconds: int = DEFAULT_TTL_SECONDS,
     confirm_rows: Iterable[str] = (),
-    role: str | None = None,
 ) -> str:
     """Create the single-use nonce a card, email or link carries. Refuses a bundle a gate refused."""
     if target not in TARGETS:
@@ -143,7 +147,7 @@ def issue_nonce(
             "bundle_sha256": bundle_sha256,
             "purpose": check.manifest["kind"],
             "target": target,
-            "role": role or (APPROVER_ROLE if target == "feed" else SANDBOX_ROLE),
+            "role": TARGET_ROLE[target],
             "issued_at": _epoch(now),
             "expires_at": _epoch(now) + ttl_seconds,
             "confirm_rows": sorted(set(confirm_rows)),
@@ -219,10 +223,17 @@ def verify(decision: ApprovalDecision, store: Store, now: datetime) -> VerifyRes
     if decision.channel not in TARGET_CHANNELS.get(target, frozenset()):
         return _refuse("channel_not_allowed", f"channel {decision.channel} cannot approve target {target}", decision)
 
+    required_role = TARGET_ROLE.get(target)
+    if required_role is None or record.get("role") != required_role:
+        return _refuse(
+            "role_mismatch",
+            f"target {target} requires the {required_role} role; the request names {record.get('role')}",
+            decision,
+        )
     principal = normalize_principal(decision.approver)
     role_doc = store.read(APPROVERS, principal)
-    if role_doc is None or record.get("role") not in role_doc.body.get("roles", []):
-        return _refuse("not_approver", f"{principal} does not hold the {record.get('role')} role", decision)
+    if role_doc is None or required_role not in role_doc.body.get("roles", []):
+        return _refuse("not_approver", f"{principal} does not hold the {required_role} role", decision)
 
     if decision.decision == "approve":
         missing = sorted(set(record.get("confirm_rows", [])) - set(decision.confirmed_rows))

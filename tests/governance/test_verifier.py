@@ -201,3 +201,40 @@ def test_a_bundle_with_only_an_unknown_passing_gate_gets_no_nonce():
     nonce = govkit.plant_nonce(env.store, sha)
     planted = dataclasses.replace(_decision(env), bundle_sha256=sha, nonce=nonce)
     assert verify(planted, env.store, govkit.later(1)).code == "required_gate_missing"
+
+
+def test_target_role_map_is_pinned():
+    assert verifier.TARGET_ROLE == {"feed": "approver", "sandbox": "sandbox_approver"}
+
+
+def test_issue_nonce_takes_no_role_override():
+    env = govkit.make_env()
+    with pytest.raises(TypeError):
+        verifier.issue_nonce(env.store, env.bundle.bundle_sha256, target="feed", now=govkit.T0, role=verifier.SANDBOX_ROLE)
+    for target, role in (("feed", "approver"), ("sandbox", "sandbox_approver")):
+        nonce = verifier.issue_nonce(env.store, env.bundle.bundle_sha256, target=target, now=govkit.T0)
+        assert env.store.read(NONCES, nonce).body["role"] == role
+
+
+def test_a_feed_nonce_naming_the_sandbox_role_is_refused_for_the_visitor():
+    """Reviewer probe: a feed nonce carrying role=sandbox_approver let the console visitor approve
+    the public feed through Teams. The role now comes from the target, not from the nonce."""
+    env = govkit.make_env()
+    nonce = govkit.plant_nonce(env.store, env.bundle.bundle_sha256, key="wrong-role", target="feed", role=verifier.SANDBOX_ROLE)
+    payload = govkit.teams_payload(env, upn=govkit.VISITOR)
+    payload["data"]["nonce"] = nonce
+    result = teams.handle(payload, env.store, govkit.later(5))
+    assert result.code == "role_mismatch" and not result.approved
+    assert env.store.read(NONCES, nonce).body["status"] == "pending"
+    # The officer is refused on that nonce too: a tampered nonce is not repaired by a stronger role.
+    payload_officer = govkit.teams_payload(env)
+    payload_officer["data"]["nonce"] = nonce
+    assert teams.handle(payload_officer, env.store, govkit.later(6)).code == "role_mismatch"
+
+
+def test_a_nonce_with_an_unknown_target_is_refused():
+    env = govkit.make_env()
+    nonce = govkit.plant_nonce(env.store, env.bundle.bundle_sha256, key="odd-target", target="public", role="approver")
+    result = verify(_decision(env, nonce=nonce), env.store, govkit.later(1))
+    assert not result.ok and result.code in {"channel_not_allowed", "role_mismatch"}
+    assert env.store.read(NONCES, nonce).body["status"] == "pending"
