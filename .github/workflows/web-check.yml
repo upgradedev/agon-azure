@@ -1,0 +1,34 @@
+# Static checks for the web shell. Separate from the main CI workflow so the
+# front-end lane can change it without touching platform files.
+name: web-check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  web-check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4.2.2
+
+      - uses: actions/setup-python@v5.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Web shell checks (stdlib only)
+        run: python ci/web_check.py web
+
+      - name: Contrast table recomputed from tokens
+        run: python ci/web_check.py web --print-contrast
+
+      - name: Install pinned test runner
+        run: python -m pip install --disable-pip-version-check "pytest==9.0.2"
+
+      - name: Checker tests, each rule proven to fail once
+        run: python -m pytest tests/test_web_check.py -q -p no:cacheprovider

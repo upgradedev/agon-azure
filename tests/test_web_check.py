@@ -1,0 +1,160 @@
+"""Tests for ci/web_check.py.
+
+Why they are shaped this way: a gate is only evidence if it is shown to fail.
+Each case copies the real web/ shell into a temporary folder, breaks exactly
+one thing, and asserts that the named rule fires. The real shell must pass
+untouched, so the fixtures cannot drift from what ships.
+
+Dash characters are built with chr() so this file contains none.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import shutil
+import sys
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parent.parent
+WEB = ROOT / "web"
+
+
+def _load_checker():
+    spec = importlib.util.spec_from_file_location("agon_web_check", ROOT / "ci" / "web_check.py")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module  # dataclasses resolve annotations through sys.modules
+    spec.loader.exec_module(module)
+    return module
+
+
+web_check = _load_checker()
+
+EM = chr(0x2014)
+EN = chr(0x2013)
+
+
+def _copy_web(tmp_path: Path) -> Path:
+    target = tmp_path / "web"
+    shutil.copytree(WEB, target)
+    return target
+
+
+def _mutate(web: Path, name: str, old: str, new: str) -> None:
+    path = web / name
+    text = path.read_text(encoding="utf-8")
+    assert old in text, f"mutation anchor {old!r} not found in {name}; the fixture went stale"
+    path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+
+def _rules(web: Path) -> set[str]:
+    _, violations = web_check.scan(web)
+    return {v.rule for v in violations}
+
+
+def test_real_shell_passes():
+    count, violations = web_check.scan(WEB)
+    assert count >= 6
+    assert violations == [], "\n".join(str(v) for v in violations)
+
+
+def test_main_exit_codes(tmp_path, capsys):
+    assert web_check.main([str(WEB)]) == 0
+    out = capsys.readouterr().out
+    assert "scanned" in out and "PASS" in out
+
+    web = _copy_web(tmp_path)
+    _mutate(web, "index.html", "</body>", "<script>alert(1)</script></body>")
+    assert web_check.main([str(web)]) == 1
+    assert "FAIL" in capsys.readouterr().out
+
+
+def test_empty_directory_fails(tmp_path):
+    count, violations = web_check.scan(tmp_path)
+    assert count == 0
+    assert [v.rule for v in violations] == ["no-files"]
+
+
+# (rule expected, file, anchor, replacement)
+MUTATIONS = [
+    ("inline-script", "index.html", "</body>", "<script>alert(1)</script></body>"),
+    ("inline-script", "index.html", '<script src="app.js" defer></script>', '<script src="app.js" defer>run()</script>'),
+    ("inline-handler", "index.html", '<button type="button" class="icon-button', '<button onclick="go()" type="button" class="icon-button'),
+    ("inline-handler", "index.html", '<circle class="pitch__ball" ', '<circle onload="go()" class="pitch__ball" '),
+    ("inline-style", "index.html", '<p class="lead">Pick', '<p class="lead" style="color:red">Pick'),
+    ("inline-style", "index.html", "</head>", "<style>body{}</style></head>"),
+    ("javascript-url", "index.html", 'href="#/verify" data-route', 'href="javascript:go()" data-route'),
+    ("missing-lang", "index.html", '<html lang="en">', "<html>"),
+    ("img-alt", "index.html", "</main>", '<img src="favicon.svg"></main>'),
+    ("button-name", "index.html", "</main>", '<button type="button"><svg aria-hidden="true"></svg></button></main>'),
+    ("button-name", "index.html", 'aria-label="Switch to dark theme"', ""),
+    ("disabled-reason", "index.html", 'aria-disabled="true" aria-describedby="recompute-reason"', 'aria-disabled="true"'),
+    ("disabled-reason", "index.html", "</main>", '<button type="button" disabled>Go</button></main>'),
+    ("broken-ref", "index.html", 'aria-describedby="seed-hint"', 'aria-describedby="seed-hint-gone"'),
+    ("duplicate-id", "index.html", 'id="h-pitch"', 'id="h-setup"'),
+    ("external-asset", "index.html", '<script src="theme.js">', '<script src="https://cdn.example.com/x.js">'),
+    ("commit-label", "index.html", ' data-commit="__AGON_COMMIT__"', ""),
+    ("dash", "index.html", "Pick a seeded", f"Pick {EM} a seeded"),
+    ("dash", "index.html", "Pick a seeded", f"Pick {EN} a seeded"),
+    ("dash", "index.html", "Pick a seeded", "Pick &mdash; a seeded"),
+    ("dash", "index.html", "Pick a seeded", "Pick &#x2013; a seeded"),
+    ("dash", "app.js", '"Switch to "', '"Switch \\u2014 to "'),
+    ("dash", "app.css", '.runbar__label::before {\n  content: "";', '.runbar__label::before {\n  content: "\\2014";'),
+    ("unsafe-js", "app.js", "label.textContent = ", "label.innerHTML = "),
+    ("unsafe-js", "app.js", "initRunLabel();\n  initTheme();", "eval(name);\n  initRunLabel();\n  initTheme();"),
+    ("unsafe-js", "app.js", 'toggle.setAttribute("data-next", next);', 'toggle.setAttribute("style", next);'),
+    ("csp-unsafe", "staticwebapp.config.json", "script-src 'self';", "script-src 'self' 'unsafe-inline';"),
+    ("csp-unsafe", "staticwebapp.config.json", "default-src 'self';", "default-src 'self' 'unsafe-eval';"),
+    ("csp-script-src", "staticwebapp.config.json", "script-src 'self';", "script-src 'self' https://cdn.example.com;"),
+    ("csp-style-src", "staticwebapp.config.json", "style-src 'self';", "style-src 'self' https:;"),
+    ("csp-frame-ancestors", "staticwebapp.config.json", " frame-ancestors 'none';", ""),
+    ("csp-object-src", "staticwebapp.config.json", " object-src 'none';", ""),
+    ("csp-missing", "staticwebapp.config.json", '"Content-Security-Policy"', '"X-Old-Policy"'),
+    ("header-nosniff", "staticwebapp.config.json", '"nosniff"', '"sniff"'),
+    ("header-referrer", "staticwebapp.config.json", '"no-referrer"', '"unsafe-url"'),
+    ("spa-fallback", "staticwebapp.config.json", "/*.{css,js,", "/*.{"),
+    ("config-json", "staticwebapp.config.json", "{", "{{"),
+    ("contrast-fail", "app.css", "--text-muted: #4b5767;", "--text-muted: #a8b0ba;"),
+    ("contrast-mismatch", "app.css", "--text-muted: #4b5767;", "--text-muted: #3f4a59;"),
+    ("contrast-threshold", "app.css", "| --bg           | 4.5 | 16.94", "| --bg           | 1.5 | 16.94"),
+    ("contrast-table", "app.css", "   --on-primary     | --primary      |", "   --on-primary-x   | --primary      |"),
+    ("dark-drift", "app.css", ':root[data-theme="dark"] {\n  color-scheme: dark;\n\n  --bg: #0b1016;', ':root[data-theme="dark"] {\n  color-scheme: dark;\n\n  --bg: #000000;'),
+    ("theme-coverage", "app.css", "  --ball-edge: #0e1621;\n", "  --ball-edge: #0e1621;\n  --new-colour: #123456;\n"),
+]
+
+
+@pytest.mark.parametrize(("rule", "name", "old", "new"), MUTATIONS, ids=[f"{m[0]}-{i}" for i, m in enumerate(MUTATIONS)])
+def test_each_rule_fails_on_a_broken_copy(tmp_path, rule, name, old, new):
+    web = _copy_web(tmp_path)
+    _mutate(web, name, old, new)
+    assert rule in _rules(web)
+
+
+def test_missing_required_file_fails(tmp_path):
+    web = _copy_web(tmp_path)
+    (web / "staticwebapp.config.json").unlink()
+    assert "missing-file" in _rules(web)
+
+
+def test_contrast_math_known_values():
+    assert round(web_check.contrast_ratio("#000000", "#ffffff"), 2) == 21.0
+    assert round(web_check.contrast_ratio("#ffffff", "#ffffff"), 2) == 1.0
+    # #767676 on white is the usual smallest grey that reaches 4.5:1.
+    assert web_check.contrast_ratio("#767676", "#ffffff") >= 4.5
+    assert web_check.contrast_ratio("#777777", "#ffffff") < 4.5
+    assert web_check.contrast_ratio("#fff", "#000") == web_check.contrast_ratio("#ffffff", "#000000")
+
+
+def test_required_pairs_are_all_in_the_shipped_table():
+    css = (WEB / "app.css").read_text(encoding="utf-8")
+    listed = {(fg, bg) for _, fg, bg, *_ in web_check.contrast_rows(css)}
+    assert set(web_check.REQUIRED_PAIRS) <= listed
+
+
+def test_no_dash_characters_in_shipped_or_check_files():
+    files = [p for p in (ROOT / "web").rglob("*") if p.is_file()]
+    files += [ROOT / "ci" / "web_check.py", Path(__file__)]
+    for path in files:
+        text = path.read_text(encoding="utf-8")
+        assert EM not in text and EN not in text, path
