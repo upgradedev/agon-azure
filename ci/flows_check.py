@@ -9,7 +9,7 @@ instead of as a silent refusal in Azure:
 * the gate T connection `agon-teams` is only ever referenced with `existing` anywhere in infra/,
   so no deploy can reset the owner's consent on it;
 * no team, channel, tenant or object id is committed in the flow files (no GUID, no thread id);
-* both flow triggers carry the Entra caller policy (accessControl).
+* every flow trigger carries the Entra caller policy (accessControl).
 
 Usage: python ci/flows_check.py [--infra DIR]
 """
@@ -68,8 +68,10 @@ def check(sources: dict[str, str], routes: set[str], outlook_options: str) -> li
     options = re.findall(r"Options:\s*'([^']*)'", flows)
     if options != [outlook_options]:
         problems.append(f"the Outlook flow offers {options}, the adapter accepts [{outlook_options!r}]")
-    if flows.count("accessControl: accessControl") != 2 or "openAuthenticationPolicies" not in flows:
-        problems.append("both flow triggers must carry the Entra caller policy (accessControl)")
+    workflows = flows.count("'Microsoft.Logic/workflows@")
+    guarded = len(re.findall(r"^\s+accessControl: \w+", flows, re.MULTILINE))
+    if workflows == 0 or guarded != workflows or "openAuthenticationPolicies" not in flows:
+        problems.append(f"every flow trigger must carry the Entra caller policy (accessControl): {guarded} of {workflows} do")
     for name, text in sorted(sources.items()):
         if name in ID_FREE and _GUID.search(text):
             problems.append(f"{name}: a GUID literal is committed; team, channel, tenant and object ids are parameters")
