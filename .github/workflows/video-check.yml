@@ -1,0 +1,183 @@
+# The submission video on pull requests: no Azure, no secrets, no id-token.
+#
+# selftest   the beat sheet validates (ci/video/beatsheet.py); the pure tests pass
+#            (tests/test_video_beats.py, which also greps that the 115 s cap agrees
+#            in the gate, its fixture and the workflows); and the sync gate is
+#            proven to fail for the right reason on every broken synthetic file and
+#            to pass the good ones (ci/video/sync_gate_selftest.py; one good file is
+#            built by narrate.py and compose.py, so the composer is held to the gate).
+# rehearsal  one beat end to end before merge, because video.yml can only be
+#            dispatched on main: the real Playwright capture of the verify beat from
+#            the live site at the commit it serves, an espeak-ng STAND-IN narration
+#            (never the submitted voice: Azure Speech runs only in video.yml on main),
+#            compose, and the sync gate on the composed mp4. The receipt and the
+#            step summary say stand-in.
+#
+# Actions are pinned by full commit sha; the comment names the version.
+
+name: video-check
+
+on:
+  pull_request:
+    paths:
+      - "video/**"
+      - "ci/video/**"
+      - "ci/fixtures/video/**"
+      - "tests/test_video_beats.py"
+      - "console/e2e/video-capture.ts"
+      - "console/playwright.video.config.ts"
+      - "console/package.json"
+      - "console/package-lock.json"
+      - ".github/workflows/video.yml"
+      - ".github/workflows/video-check.yml"
+  push:
+    branches: [main]
+    paths:
+      - "video/**"
+      - "ci/video/**"
+      - "ci/fixtures/video/**"
+      - "tests/test_video_beats.py"
+      - "console/e2e/video-capture.ts"
+      - "console/playwright.video.config.ts"
+      - "console/package.json"
+      - "console/package-lock.json"
+      - ".github/workflows/video.yml"
+      - ".github/workflows/video-check.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: video-check-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The cap, pinned here, in ci/video/sync_gate.py and in ci/fixtures/video/gate_cases.json.
+  VIDEO_CAP_SECONDS: "115"
+  REHEARSAL_BEATS: verify
+
+jobs:
+  selftest:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: ffmpeg and the caption font from the Ubuntu archive (version printed)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends ffmpeg fonts-dejavu-core
+          ffmpeg -hide_banner -version | head -1
+      - name: The beat sheet validates
+        run: python ci/video/beatsheet.py --check video/beats.json
+      - name: Pure tests (beat sheet, timing, captions, the cap literal in all three places)
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements/dev.txt
+          python -m pytest -q -p no:cacheprovider tests/test_video_beats.py
+      - name: The sync gate fails for the right reason on every broken file
+        run: |
+          python ci/video/sync_gate_selftest.py --cap-seconds "$VIDEO_CAP_SECONDS" \
+            --work "$RUNNER_TEMP/selftest" --summary "$GITHUB_STEP_SUMMARY"
+      - name: Upload the composed self-test file
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: video-selftest
+          path: |
+            ${{ runner.temp }}/selftest/composed_good/out/agon-video-preview.mp4
+            ${{ runner.temp }}/selftest/composed_good/out/receipt.json
+            ${{ runner.temp }}/selftest/composed_good/out/captions.srt
+          if-no-files-found: warn
+          retention-days: 14
+
+  rehearsal:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+      - name: ffmpeg, the caption font and espeak-ng from the Ubuntu archive (versions printed)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends ffmpeg fonts-dejavu-core espeak-ng
+          ffmpeg -hide_banner -version | head -1
+          espeak-ng --version
+      - name: The commit the live site serves
+        id: live
+        run: |
+          site="$(python -c 'import json; print(json.load(open("video/beats.json", encoding="utf-8"))["site"])')"
+          sha="$(curl -fsS "$site/" | grep -o 'data-commit="[0-9a-f]\{40\}"' | head -1 | cut -d'"' -f2)"
+          if ! [[ "$sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "$site served no 40-hex data-commit"
+            exit 1
+          fi
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Rehearsal of beats \`$REHEARSAL_BEATS\` against $site at \`$sha\`, with a stand-in narration." >> "$GITHUB_STEP_SUMMARY"
+      - name: Stand-in narration (espeak-ng, not the submitted voice)
+        run: |
+          python ci/video/narrate.py --beats video/beats.json --out "$RUNNER_TEMP/narration" \
+            --only "$REHEARSAL_BEATS" --engine espeak --summary "$GITHUB_STEP_SUMMARY"
+      - name: Exact pins, and the lock agrees with package.json
+        working-directory: console
+        run: node scripts/check-deps.mjs --lock
+      - name: Install the console from its lock (no install scripts)
+        working-directory: console
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Chromium for Playwright (here only)
+        working-directory: console
+        run: npx --no-install playwright install --with-deps chromium
+      - name: Record the rehearsal clip from the live site
+        working-directory: console
+        env:
+          AGON_VIDEO_BEATS: ${{ github.workspace }}/video/beats.json
+          AGON_VIDEO_RELEASE_SHA: ${{ steps.live.outputs.sha }}
+          AGON_VIDEO_ONLY: ${{ env.REHEARSAL_BEATS }}
+          AGON_VIDEO_CLIPS: ${{ runner.temp }}/clips
+        run: npx --no-install playwright test -c playwright.video.config.ts
+      - name: Compose the rehearsal preview
+        env:
+          RELEASE_SHA: ${{ steps.live.outputs.sha }}
+        run: |
+          python ci/video/compose.py --beats video/beats.json --narration "$RUNNER_TEMP/narration" \
+            --clips "$RUNNER_TEMP/clips" --release-sha "$RELEASE_SHA" --out "$RUNNER_TEMP/preview" \
+            --summary "$GITHUB_STEP_SUMMARY"
+      - name: The sync gate on the composed mp4
+        run: |
+          python ci/video/sync_gate.py "$RUNNER_TEMP/preview/agon-video-preview.mp4" \
+            --receipt "$RUNNER_TEMP/preview/receipt.json" --srt "$RUNNER_TEMP/preview/captions.srt" \
+            --cap-seconds "$VIDEO_CAP_SECONDS" --report "$RUNNER_TEMP/preview/gate.json" --summary "$GITHUB_STEP_SUMMARY"
+      - name: Upload the rehearsal (mp4, receipt, timing, SRT, gate report, clip and its receipt)
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: video-rehearsal
+          path: |
+            ${{ runner.temp }}/preview/agon-video-preview.mp4
+            ${{ runner.temp }}/preview/receipt.json
+            ${{ runner.temp }}/preview/timing.json
+            ${{ runner.temp }}/preview/captions.srt
+            ${{ runner.temp }}/preview/gate.json
+            ${{ runner.temp }}/clips/*.webm
+            ${{ runner.temp }}/clips/*.json
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Upload the Playwright report
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: video-rehearsal-report
+          path: |
+            console/playwright-report/video/
+            console/test-results/video/
+          if-no-files-found: ignore
