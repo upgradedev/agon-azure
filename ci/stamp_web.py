@@ -242,6 +242,20 @@ def stamp_intel(web_dir: Path, data_dir: Path, seeds: list[int]) -> str:
     return f"wrote and verified {count} intel files under {intel_dir.as_posix()}"
 
 
+def stamp_kinematics(web_dir: Path, data_dir: Path) -> str:
+    """Write web_dir/kinematics from the event files just verified in data_dir (agon.webkinematics),
+    then re-hash and check them, including that each names the sha256 of the events it came from."""
+    from agon.webkinematics import KINEMATICS_DIR, verify_kinematics_dir, write_kinematics_web
+
+    kin_dir = web_dir / KINEMATICS_DIR
+    try:
+        write_kinematics_web(kin_dir, data_dir)
+        count = verify_kinematics_dir(kin_dir, data_dir)
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise StampError(f"kinematics: {exc}") from exc
+    return f"wrote and verified {count} kinematics files under {kin_dir.as_posix()}"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("web_dir", type=Path)
@@ -259,6 +273,7 @@ def main(argv: list[str] | None = None) -> int:
             print(stamp_match(args.web_dir, args.data_dir))
             print(stamp_cues(args.web_dir))
             print(stamp_intel(args.web_dir, args.data_dir, parse_seeds(args.seeds)))
+            print(stamp_kinematics(args.web_dir, args.data_dir))
         runs = verify_runs(args.web_dir)
         print(f"verified {len(runs)} runs under {args.web_dir.as_posix()}/runs" + (f": {', '.join(runs)}" if runs else ""))
     except (StampError, KeyError, TypeError, ValueError) as exc:
