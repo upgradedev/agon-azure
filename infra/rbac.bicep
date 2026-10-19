@@ -24,9 +24,10 @@
 // with the resource, in this file):
 //   id-publisher: Key Vault Crypto User on the one signing key.
 //   pulls from a registry, if ACR is chosen over GHCR: AcrPull per app identity.
-// id-mcp and id-logicapp hold no Azure RBAC role on storage. id-mcp reads Cosmos
-// only (cosmos-access.bicep); id-logicapp calls the api over HTTP with an Entra
-// token whose audience is the api, which is app configuration, not RBAC.
+// id-mcp holds no Azure RBAC role on storage; it reads Cosmos only
+// (cosmos-access.bicep). id-logicapp holds exactly one role: Message Sender on
+// the two inbound decision queues (spec 14 item 5), so the queue a decision
+// arrives on names its channel and nothing else can write there.
 
 targetScope = 'resourceGroup'
 
@@ -41,6 +42,10 @@ param fleetPrincipalId string
 @description('Principal id of id-api: the idApiPrincipalId output of main.bicep.')
 @minLength(1)
 param apiPrincipalId string
+
+@description('Principal id of id-logicapp: the idLogicappPrincipalId output of main.bicep.')
+@minLength(1)
+param logicappPrincipalId string
 
 @description('Principal id of id-publisher: the idPublisherPrincipalId output of main.bicep.')
 @minLength(1)
@@ -89,6 +94,51 @@ var cognitiveServicesOpenAiUser = '5e0bd9bd-7b93-4f28-af87-19fc36ad61bd'
 var cognitiveServicesUser = 'a97b65f3-24c7-4388-baec-2e87135dc908'
 
 var queueGrants = [
+  // Spec 14 item 5: the Teams and Outlook Logic Apps hand decisions over through
+  // one queue per channel. id-logicapp may only send there; the api's intake
+  // receives, deletes and parks undeliverable messages in intake-poison.
+  {
+    principalId: logicappPrincipalId
+    queue: 'decisions-teams'
+    role: storageQueueDataMessageSender
+    reason: 'spec 14 item 5: id-logicapp sends Teams card responses'
+  }
+  {
+    principalId: logicappPrincipalId
+    queue: 'decisions-outlook'
+    role: storageQueueDataMessageSender
+    reason: 'spec 14 item 5: id-logicapp sends Outlook approval responses'
+  }
+  {
+    principalId: apiPrincipalId
+    queue: 'decisions-teams'
+    role: storageQueueDataMessageProcessor
+    reason: 'spec 14 item 5: the api intake receives and deletes Teams decisions'
+  }
+  {
+    principalId: apiPrincipalId
+    queue: 'decisions-outlook'
+    role: storageQueueDataMessageProcessor
+    reason: 'spec 14 item 5: the api intake receives and deletes Outlook decisions'
+  }
+  {
+    principalId: apiPrincipalId
+    queue: 'decisions-teams'
+    role: storageQueueDataReader
+    reason: 'spec 14 item 5: KEDA queue length for the intake job'
+  }
+  {
+    principalId: apiPrincipalId
+    queue: 'decisions-outlook'
+    role: storageQueueDataReader
+    reason: 'spec 14 item 5: KEDA queue length for the intake job'
+  }
+  {
+    principalId: apiPrincipalId
+    queue: 'intake-poison'
+    role: storageQueueDataMessageSender
+    reason: 'spec 14 item 5: the intake parks a decision it cannot settle, never drops it'
+  }
   // Spec 7.1 table.
   {
     principalId: fleetPrincipalId

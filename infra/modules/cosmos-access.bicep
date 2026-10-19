@@ -117,6 +117,37 @@ var builtInGrants = [
     role: 'contributor'
     container: 'usage'
   }
+  // Spec 14 item 5: the api runs the one verifier for the queue and HTTP routes.
+  // verify() reads the bundle, reads the approver's role, replaces the nonce on
+  // consume (etag compare-and-set) and creates the approval (approvals above).
+  {
+    principalId: apiPrincipalId
+    role: 'contributor'
+    container: 'nonces'
+  }
+  {
+    principalId: apiPrincipalId
+    role: 'reader'
+    container: 'approvers'
+  }
+  // The fleet issues nonces create-only (createOnlyGrants below), keeps the run
+  // ledger, and reads approval records and roles; it never writes an approval
+  // (the api verifies first, spec 3.4 step 5).
+  {
+    principalId: fleetPrincipalId
+    role: 'contributor'
+    container: 'runs'
+  }
+  {
+    principalId: fleetPrincipalId
+    role: 'reader'
+    container: 'approvals'
+  }
+  {
+    principalId: fleetPrincipalId
+    role: 'reader'
+    container: 'approvers'
+  }
   // BEYOND THE SPEC 7.1 TABLE (spec 11.2 S1 "Cosmos once S0 passes"). The CI
   // identity runs the S1 durable-approval spike against a real Cosmos checkpoint
   // store, so it writes the checkpoints container and nothing else. It is not in
@@ -195,19 +226,32 @@ resource builtInAssignments 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssign
   ]
 }]
 
-var createOnlyContainers = [
-  'published'
-  'provenance'
+// Create-only grants. The publisher's two keep their original assignment names
+// (same guid() inputs). The fleet issues approval nonces but may never replace
+// one: only the verifier, running as id-api, consumes a nonce.
+var createOnlyGrants = [
+  {
+    principalId: publisherPrincipalId
+    container: 'published'
+  }
+  {
+    principalId: publisherPrincipalId
+    container: 'provenance'
+  }
+  {
+    principalId: fleetPrincipalId
+    container: 'nonces'
+  }
 ]
 
 @batchSize(1)
-resource createOnlyAssignments 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-11-15' = [for container in createOnlyContainers: {
+resource createOnlyAssignments 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssignments@2024-11-15' = [for grant in createOnlyGrants: {
   parent: account
-  name: guid(account.id, publisherPrincipalId, 'agon-create-only', container)
+  name: guid(account.id, grant.principalId, 'agon-create-only', grant.container)
   properties: {
     roleDefinitionId: createOnlyRole.id
-    principalId: publisherPrincipalId
-    scope: '${databaseScope}/colls/${container}'
+    principalId: grant.principalId
+    scope: '${databaseScope}/colls/${grant.container}'
   }
   dependsOn: [
     builtInAssignments
@@ -237,5 +281,5 @@ resource metadataAssignments 'Microsoft.DocumentDB/databaseAccounts/sqlRoleAssig
 }]
 
 output builtInAssignmentCount int = length(builtInGrants)
-output createOnlyAssignmentCount int = length(createOnlyContainers)
+output createOnlyAssignmentCount int = length(createOnlyGrants)
 output metadataAssignmentCount int = length(metadataPrincipals)
