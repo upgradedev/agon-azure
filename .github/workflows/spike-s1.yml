@@ -1,0 +1,63 @@
+# Spike S1: does a pending Agent Framework approval survive the death of the process that issued it?
+# Runs offline (no cloud, no secrets). The job fails unless the driver prints S1 RESULT: PASS.
+name: spike-s1
+
+on:
+  pull_request:
+    paths:
+      - "spikes/s1_durable_approval/**"
+      - "tests/test_spike_s1_bundle.py"
+      - ".github/workflows/spike-s1.yml"
+  push:
+    branches: [main]
+    paths:
+      - "spikes/s1_durable_approval/**"
+      - "tests/test_spike_s1_bundle.py"
+      - ".github/workflows/spike-s1.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: spike-s1-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  s1:
+    name: s1 (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install exact pins
+        run: python -m pip install --disable-pip-version-check -r spikes/s1_durable_approval/requirements.txt pytest==9.0.2
+      - name: Record the resolved package set
+        run: python -m pip freeze --disable-pip-version-check | tee "${RUNNER_TEMP}/s1-pip-freeze.txt"
+      - name: Unit tests (stdlib helpers, pinned ids and allow-list, graph build)
+        run: python -m pytest -q -p no:cacheprovider tests/test_spike_s1_bundle.py
+      - name: Driver (A pauses, A dies, fresh B resumes, negative controls)
+        run: python spikes/s1_durable_approval/driver.py --work-dir "${RUNNER_TEMP}/s1-runs"
+      - name: Keep run directories and pip freeze as evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: s1-evidence-${{ matrix.os }}
+          path: |
+            ${{ runner.temp }}/s1-runs
+            ${{ runner.temp }}/s1-pip-freeze.txt
+          if-no-files-found: warn
+          retention-days: 30
