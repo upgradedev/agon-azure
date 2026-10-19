@@ -25,6 +25,8 @@ where = ["src"]
 # The frozen interpret model and its lock (spec 4 row 2); without them a non-editable install
 # leaves the model out and every matchfacts tool call raises ModelError.
 "agon.interpret" = ["model.json", "model.lock"]
+# The pinned prompts and their manifest (spec 4); load_prompt fails closed without them.
+"agon.agents" = ["prompts/*.md", "prompts/manifest.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

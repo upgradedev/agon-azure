@@ -63,6 +63,33 @@ jobs:
       - name: Run tests
         run: python -m pytest -q
 
+  # The one job image (Dockerfile), built on every pull request without pushing
+  # and without any Azure login. The build itself fails if package data did not
+  # ship; the run steps prove the installed (non-editable) package works.
+  image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build the image (no push)
+        run: docker build --pull --tag agon:ci .
+      - name: The installed package runs the M16 route audit
+        run: docker run --rm agon:ci python -m agon.governance.routes
+      - name: The intake refuses to start without its configuration
+        run: |
+          set +e
+          docker run --rm agon:ci python -m agon.intake --once
+          code=$?
+          set -e
+          if [ "$code" -ne 2 ]; then echo "expected exit 2 without configuration, got $code"; exit 1; fi
+      - name: The image runs as a non-root user
+        run: |
+          uid="$(docker run --rm agon:ci id -u)"
+          if [ "$uid" = "0" ]; then echo "the image runs as root"; exit 1; fi
+          echo "runs as uid $uid"
+
   # Every requirements file line must be an exact == pin.
   pins:
     runs-on: ubuntu-latest
@@ -142,11 +169,11 @@ jobs:
           "$HOME/.azure/bin/bicep" --version
       - name: Negative control, a known linter warning must fail the check
         run: python ci/bicep_check.py --runner bicep --bicep "$HOME/.azure/bin/bicep" --expect-fail ci/fixtures/bicep_warning.bicep
-      - name: Build and lint main, rbac, ai, flows and connections templates, failing on any warning
-        run: python ci/bicep_check.py --runner bicep --bicep "$HOME/.azure/bin/bicep" infra/main.bicep infra/rbac.bicep infra/ai.bicep infra/flows.bicep infra/connections.bicep
+      - name: Build and lint main, rbac, ai, flows, connections and apps templates, failing on any warning
+        run: python ci/bicep_check.py --runner bicep --bicep "$HOME/.azure/bin/bicep" infra/main.bicep infra/rbac.bicep infra/ai.bicep infra/flows.bicep infra/connections.bicep infra/apps.bicep
       # The same two checks through `az bicep build`, which reports Bicep warnings
       # through its own log; the negative control proves they still reach the gate.
       - name: Negative control through az bicep build
         run: python ci/bicep_check.py --runner az --expect-fail ci/fixtures/bicep_warning.bicep
       - name: Build and lint through az bicep build, failing on any warning
-        run: python ci/bicep_check.py --runner az infra/main.bicep infra/rbac.bicep infra/ai.bicep infra/flows.bicep infra/connections.bicep
+        run: python ci/bicep_check.py --runner az infra/main.bicep infra/rbac.bicep infra/ai.bicep infra/flows.bicep infra/connections.bicep infra/apps.bicep
