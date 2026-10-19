@@ -329,9 +329,10 @@ def test_shipped_config_names_the_host_by_placeholder_with_markers() -> None:
     assert {"Agon", "Match Centre"} <= set(by_name["demo"].markers)
     assert by_name["demo"].scan_assets
     assert by_name["demo-data"].url == "https://__AGON_SWA_HOSTNAME__/data/manifest.json"
-    assert '"combined_sha256"' in by_name["demo-data"].markers
+    # The web data contract (agon.webdata), the shape the browser accepts.
+    assert '"generator":"synth-v' in by_name["demo-data"].markers
     for seed in (1, 2, 3):
-        assert f"seed-{seed:04d}/events.ndjson" in by_name["demo-data"].markers
+        assert f'"name":"{seed}.ndjson"' in by_name["demo-data"].markers
 
 
 def test_placeholder_url_fails_without_fetching() -> None:
