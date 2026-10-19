@@ -179,3 +179,49 @@ def test_the_cli_writes_and_reports(served, tmp_path, capsys):
     assert "wrote and verified 2 match files for seeds 1, 2" in capsys.readouterr().out
     assert webmatch.main(["--data", str(tmp_path / "missing"), "--out", str(tmp_path / "m2")]) == 1
     assert "webmatch: FAIL" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------- the cue list
+
+
+def _stamped(tmp_path: Path) -> tuple[Path, Path]:
+    web = tmp_path / "web"
+    web.mkdir()
+    (web / "index.html").write_bytes(SHELL.encode("utf-8"))
+    data = web / "data"
+    write_web_data(str(data), [1], max_minute=5)
+    return web, data
+
+
+def test_without_cue_files_the_stamp_lists_none(tmp_path, capsys):
+    web, data = _stamped(tmp_path)
+    assert stamp_web.main([str(web), "--sha", SHA, "--data-dir", str(data), "--seeds", "1"]) == 0
+    assert "listed 0 cue files" in capsys.readouterr().out
+    assert json.loads((web / "cues" / "manifest.json").read_text(encoding="ascii")) == {"files": [], "schema": "agon.cues-manifest/1"}
+
+
+def test_a_cue_file_under_a_charter_is_listed_with_its_hash(tmp_path):
+    web, _ = _stamped(tmp_path)
+    (web / "cues").mkdir()
+    body = {"schema": "agon.cues/1", "seed": 1, "charter_sha256": "a" * 64, "cues": []}
+    data = json.dumps(body).encode("ascii")
+    (web / "cues" / "1.json").write_bytes(data)
+    assert stamp_web.stamp_cues(web) == f"listed 1 cue files under {(web / 'cues').as_posix()}"
+    listed = json.loads((web / "cues" / "manifest.json").read_text(encoding="ascii"))["files"]
+    assert listed == [{"charter_sha256": "a" * 64, "name": "1.json", "seed": 1, "sha256": webmatch.sha256_hex(data)}]
+
+
+@pytest.mark.parametrize(
+    ("name", "body", "problem"),
+    [
+        ("1.json", {"schema": "agon.cues/1", "seed": 1, "charter_sha256": "nope", "cues": []}, "no approved charter"),
+        ("1.json", {"schema": "agon.cues/1", "seed": 2, "charter_sha256": "a" * 64, "cues": []}, "for seed 1"),
+        ("one.json", {"schema": "agon.cues/1", "seed": 1, "charter_sha256": "a" * 64, "cues": []}, "unexpected file"),
+    ],
+)
+def test_a_cue_file_without_a_charter_or_for_another_seed_stops_the_stamp(tmp_path, name, body, problem):
+    web, _ = _stamped(tmp_path)
+    (web / "cues").mkdir()
+    (web / "cues" / name).write_bytes(json.dumps(body).encode("ascii"))
+    with pytest.raises(stamp_web.StampError, match=problem):
+        stamp_web.stamp_cues(web)

@@ -1,6 +1,9 @@
 /*
   Live cues: timed, machine-readable overlay lines for the replay, published
-  per seed as cues/<seed>.json under an approved charter hash. Until a cue file
+  per seed as cues/<seed>.json under an approved charter hash. ci/stamp_web.py
+  lists the cue files present in cues/manifest.json (an empty list until a
+  charter is approved); the console reads the list first and fetches a seed's
+  file only when it is listed, re-hashing it against the list. Until a cue file
   exists the Match Centre says so, and draws nothing in its place.
 
   Expected shape (agon.cues/1):
@@ -11,7 +14,7 @@
   (match seconds, the second half starting where the first half ended).
 */
 import { isInt, isObject } from "./core";
-import { fetchBytes } from "./hash";
+import { fetchBytes, sha256Hex } from "./hash";
 import type { Language } from "../hooks/preferences";
 
 export const CUES_SCHEMA = "agon.cues/1";
@@ -63,9 +66,25 @@ export function validateCues(body: unknown, seed: number): string[] {
   return problems;
 }
 
+const NONE = (seed: number): CueLoad => ({
+  status: "missing",
+  message: `Live cues: there is no approved charter and no cue file for seed ${seed} yet, so no lower-third is shown.`,
+});
+
 export async function loadCues(seed: number): Promise<CueLoad> {
   try {
-    const fetched = await fetchBytes(`cues/${seed}.json`);
+    const list: unknown = JSON.parse((await fetchBytes("cues/manifest.json")).text);
+    if (!isObject(list) || list.schema !== "agon.cues-manifest/1" || !Array.isArray(list.files)) {
+      return { status: "error", message: "cues/manifest.json is not an agon.cues-manifest/1 list." };
+    }
+    const entry = (list.files as unknown[]).find((f) => isObject(f) && f.seed === seed);
+    if (!isObject(entry) || typeof entry.name !== "string" || typeof entry.sha256 !== "string" || !/^[0-9]{1,9}\.json$/.test(entry.name)) {
+      return NONE(seed);
+    }
+    const fetched = await fetchBytes(`cues/${entry.name}`);
+    if ((await sha256Hex(fetched.buffer)) !== entry.sha256) {
+      return { status: "error", message: `cues/${entry.name} does not hash to its list entry, so it is not drawn.` };
+    }
     const body: unknown = JSON.parse(fetched.text);
     const problems = validateCues(body, seed);
     if (problems.length) {
@@ -76,10 +95,7 @@ export async function loadCues(seed: number): Promise<CueLoad> {
   } catch (error) {
     const text = error instanceof Error ? error.message : String(error);
     if (/answered 404|returned a web page/.test(text)) {
-      return {
-        status: "missing",
-        message: `Live cues: there is no approved charter and no cue file for seed ${seed} yet, so no lower-third is shown.`,
-      };
+      return NONE(seed);
     }
     return { status: "error", message: `Live cues could not be read: ${text}.` };
   }
