@@ -90,15 +90,40 @@ def urllib_transport(url: str, headers: dict[str, str], body: bytes, timeout: fl
         return Response(exc.code, exc.read().decode("utf-8", errors="replace"))
 
 
-def hint(status: int) -> str:
-    """A next step for the statuses this smoke is expected to meet."""
+RBAC_HINT = ("the CI identity holds no inference role on this account yet: deploy infra/rbac.bicep "
+             "(docs/OPERATIONS.md, owner step 3) and allow a few minutes for the grant to propagate")
+AUDIENCE_HINT = ("the token was refused: check its audience (this workflow asks for "
+                 "https://cognitiveservices.azure.com; the v1 API page also documents https://ai.azure.com) "
+                 "and that the token is for the tenant that holds the Foundry account")
+
+
+def error_code(body: str) -> str:
+    """error.code from an Azure error body, or "" when the body carries none."""
+    try:
+        data = json.loads(body)
+    except (json.JSONDecodeError, TypeError):
+        return ""
+    error = data.get("error") if isinstance(data, dict) else None
+    code = error.get("code") if isinstance(error, dict) else None
+    return code if isinstance(code, str) else ""
+
+
+def hint(status: int, body: str = "") -> str:
+    """A next step for the failures this smoke is expected to meet.
+
+    The error code decides before the status does. With a Microsoft Entra token,
+    a principal that lacks the inference data action is answered with code
+    PermissionDenied, and field reports show it with status 401, not only 403. So
+    PermissionDenied always means "deploy infra/rbac.bicep", and the audience hint
+    is kept for a 401 that carries any other code (for example
+    InvalidAuthenticationToken) or none.
+    """
+    if error_code(body) == "PermissionDenied":
+        return RBAC_HINT
     if status == 401:
-        return ("the token was refused: check its audience (this workflow asks for "
-                "https://cognitiveservices.azure.com; the v1 API page also documents https://ai.azure.com) "
-                "and that the token is for the tenant that holds the Foundry account")
+        return AUDIENCE_HINT
     if status == 403:
-        return ("the CI identity holds no inference role on this account yet: deploy infra/rbac.bicep "
-                "(docs/OPERATIONS.md, owner step 3) and allow a few minutes for the grant to propagate")
+        return RBAC_HINT + "; if the role is in place, check the account's network rules"
     if status == 404:
         return "no such deployment on this account, or the v1 path is not served on this host"
     if status == 429:
@@ -125,7 +150,7 @@ def run(endpoint: str, deployment: str, token: str, prompt: str, max_completion_
                                    "latency_ms": latency_ms, "url": url}
     if response.status != 200:
         lines.append(f"body: {response.body[:BODY_PREVIEW]}")
-        lines.append(f"FAIL: expected HTTP 200; {hint(response.status)}")
+        lines.append(f"FAIL: expected HTTP 200; {hint(response.status, response.body)}")
         return False, lines, evidence
 
     try:

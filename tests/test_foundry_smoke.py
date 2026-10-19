@@ -67,6 +67,34 @@ def test_any_non_200_fails(monkeypatch, capsys, status: int) -> None:
     assert "FAIL: expected HTTP 200" in capsys.readouterr().out
 
 
+def azure_error(code: str) -> str:
+    return json.dumps({"error": {"code": code, "message": "fixture message"}})
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_permission_denied_points_at_rbac_whatever_the_status(status: int) -> None:
+    # A missing data-action role on an Entra token is often reported as 401, not 403.
+    text = foundry_smoke.hint(status, azure_error("PermissionDenied"))
+    assert text == foundry_smoke.RBAC_HINT
+    assert "audience" not in text
+
+
+@pytest.mark.parametrize("body", [azure_error("InvalidAuthenticationToken"), "not json", "",
+                                  json.dumps({"error": "flat string"}), json.dumps(["list"])])
+def test_401_without_permission_denied_points_at_the_audience(body: str) -> None:
+    assert foundry_smoke.hint(401, body) == foundry_smoke.AUDIENCE_HINT
+
+
+def test_403_without_a_code_still_points_at_rbac() -> None:
+    assert foundry_smoke.hint(403, "not json").startswith(foundry_smoke.RBAC_HINT)
+
+
+def test_the_printed_failure_carries_the_rbac_hint_for_a_401_permission_denied(monkeypatch, capsys) -> None:
+    assert call(monkeypatch, Recorder(401, azure_error("PermissionDenied"))) == 1
+    out = capsys.readouterr().out
+    assert "infra/rbac.bicep" in out and "audience" not in out
+
+
 @pytest.mark.parametrize("body", [
     "not json",
     json.dumps({"model": "m", "choices": []}),
