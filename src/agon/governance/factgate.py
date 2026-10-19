@@ -15,6 +15,11 @@ digits (the easy-read rules require it too). A spelled-out number is therefore i
 which is why a claim value missing from the prose is itself a mismatch.
 
 The gate fails closed: an unknown claim type, statistic, kind, subject or event id is a mismatch.
+
+Season claims (season_streak, table_position, player_season_total) are recomputed from
+`facts.season` after the matchday of the reported match. No season data, a reported match that is
+not in the season, or a season record whose score disagrees with this match's log is a mismatch.
+Their values go through check 2 like every other claim, so "a 3rd win in a row" must carry 3.
 """
 
 from __future__ import annotations
@@ -26,7 +31,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 from agon.governance import recompute
-from agon.governance.claims import Claim, Sentence
+from agon.governance.claims import SEASON_CLAIM_TYPES, Claim, Sentence
 from agon.governance.recompute import MatchFacts, RecomputeError
 
 MAX_IDS_IN_REASON = 6
@@ -102,6 +107,9 @@ def claim_numbers(claim: Claim) -> list[int]:
         return [claim.value]
     if claim.type == "minute" and isinstance(claim.value, str) and _MINUTE_VALUE.match(claim.value):
         return [int(part) for part in claim.value.split("+")]
+    if claim.type in SEASON_CLAIM_TYPES and _is_int(claim.value):
+        # A goal difference can be negative; the prose writes its digits ("-2" is read as 2).
+        return [abs(claim.value)]
     return []
 
 
@@ -204,6 +212,40 @@ def _check_event_ref(claim: Claim, facts: MatchFacts, by_id: dict[str, Any]) -> 
     return []
 
 
+def _check_season(claim: Claim, facts: MatchFacts) -> list[str]:
+    season = facts.season
+    if season is None:
+        return [f"{claim.type} claim needs season data; this match was checked without a season"]
+    if not facts.events:
+        return [f"{claim.type} claim: the match has no events, so its matchday is unknown"]
+    match_id = facts.events[0].match_id
+    record = season.match_by_id(match_id)
+    if record is None:
+        return [f"{claim.type} claim: match {match_id} is not in season {season.season}"]
+    logged = recompute.score_after(facts, None)
+    if (record.home_id, record.away_id, record.home_goals, record.away_goals) != (
+        facts.home_id, facts.away_id, logged["home"], logged["away"]
+    ):
+        return [f"{claim.type} claim: season {season.season} records {match_id} differently from this match's log"]
+    if not _is_int(claim.value):
+        return [f"{claim.type} value must be an int"]
+    if claim.type == "player_season_total" and claim.subject not in facts.roster.players:
+        return [f"player_season_total subject {claim.subject!r} is not a rostered player"]
+    if claim.value < 0 and not (claim.type == "table_position" and claim.stat == "goal_difference"):
+        return [f"{claim.type} value must be a non-negative int"]
+    try:
+        actual = recompute.season_claim_value(season, claim.type, claim.stat, claim.subject, record.matchday)
+    except RecomputeError as exc:
+        return [str(exc)]
+    if actual != claim.value:
+        stat = claim.stat if claim.stat is not None else "position"
+        return [
+            f"{claim.type} {stat} for {claim.subject} after matchday {record.matchday}: "
+            f"claimed {claim.value}, season says {actual}"
+        ]
+    return []
+
+
 def check_claim(claim: Claim, facts: MatchFacts, text: str = "", by_id: dict[str, Any] | None = None) -> list[str]:
     """Reasons this claim disagrees with the log; empty means it holds."""
     by_id = by_id if by_id is not None else facts.by_id()
@@ -220,6 +262,8 @@ def check_claim(claim: Claim, facts: MatchFacts, text: str = "", by_id: dict[str
         return _check_name(claim, facts, by_id, text)
     if claim.type == "event_ref":
         return _check_event_ref(claim, facts, by_id)
+    if claim.type in SEASON_CLAIM_TYPES:
+        return _check_season(claim, facts)
     return [f"unknown claim type {claim.type!r}"]
 
 
