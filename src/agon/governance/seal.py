@@ -33,6 +33,10 @@ GATE_PASS = "pass"
 REQUIRED_GATES: tuple[str, ...] = ("factgate", "factgate_lang", "rights")
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _ARTIFACT_NAME = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+# The publisher writes the manifest beside the artifacts at <target>/<hash>/manifest.json, so no
+# artifact may take that name: it would land where the visitor's browser fetches the manifest.
+MANIFEST_NAME = "manifest.json"
+RESERVED_ARTIFACT_NAMES: frozenset[str] = frozenset({MANIFEST_NAME})
 
 
 class SealError(ValueError):
@@ -137,6 +141,8 @@ def seal(
     for art in artifacts:
         if not _ARTIFACT_NAME.match(art.name):
             raise SealError(f"artifact name {art.name!r} is not a safe lowercase file name")
+        if art.name in RESERVED_ARTIFACT_NAMES:
+            raise SealError(f"artifact name {art.name!r} is reserved for the bundle manifest")
         if art.name in entries:
             raise SealError(f"duplicate artifact {art.name!r}")
         entry: dict[str, Any] = {
@@ -226,6 +232,8 @@ def manifest_shape_problems(manifest: Any) -> list[str]:
     for name, entry in artifacts.items():
         if not _ARTIFACT_NAME.match(name):
             problems.append(f"artifact name {name!r} is not a safe lowercase file name")
+        if name in RESERVED_ARTIFACT_NAMES:
+            problems.append(f"artifact name {name!r} is reserved for the bundle manifest")
         if not isinstance(entry, dict):
             problems.append(f"artifact {name!r} entry is not an object")
             continue

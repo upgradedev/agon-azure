@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import threading
 
 import govkit
 from agon.governance import publisher as P
@@ -90,6 +91,8 @@ def test_overwrite_of_different_bytes_is_refused_and_identical_bytes_resume():
     assert result.code == "overwrite_refused"
     assert sink.get(f"feed/{sha}/report-el.txt") == b"someone else's bytes"
     assert env.store.read(P.PUBLISHED, sha) is None
+    # Every path is checked before the first write: audio-el.mp3 sorts first and is NOT left behind.
+    assert set(sink.blobs) == {f"feed/{sha}/report-el.txt"}
 
     env2, approval2 = _approved_env()
     sink2 = P.InMemorySink()
@@ -124,6 +127,7 @@ def test_erratum_supersedes_without_touching_the_original():
     assert _publish(pub, v2_env, v2_ok.approval_id).ok
     link = env.store.read(P.SUPERSESSIONS, v1).body
     assert link["parent"] == v1 and link["child"] == v2_env.bundle.bundle_sha256
+    assert link["state"] == "published"
     assert env.store.read(P.PUBLISHED, v1).body == v1_receipt
     assert {k: v for k, v in sink.blobs.items() if k.startswith(f"feed/{v1}/")} == v1_blobs
     assert env.store.read(P.PUBLISHED, v2_env.bundle.bundle_sha256).body["parent_bundle_sha256"] == v1
@@ -132,6 +136,7 @@ def test_erratum_supersedes_without_touching_the_original():
     v3_env = govkit.make_env(store=env.store, kind="erratum", parent=v1, tag=" another fix")
     v3_ok = teams.handle(govkit.teams_payload(v3_env), env.store, govkit.later(120))
     assert _publish(pub, v3_env, v3_ok.approval_id).code == "parent_already_superseded"
+    assert not any(k.startswith(f"feed/{v3_env.bundle.bundle_sha256}/") for k in sink.blobs)
 
 
 def test_erratum_of_an_unpublished_parent_is_refused():
@@ -222,3 +227,110 @@ def test_parent_receipt_without_a_match_id_fails_closed():
     child = govkit.make_env(store=store, kind="erratum", parent=parent, tag=" fix")
     ok = teams.handle(govkit.teams_payload(child), store, govkit.later(90))
     assert _publish(P.Publisher(store, P.InMemorySink(), "feed"), child, ok.approval_id).code == "parent_match_mismatch"
+
+
+def test_an_artifact_named_like_the_manifest_cannot_be_sealed():
+    arts = [S.Artifact("manifest.json", b"{}", "application/json", "edition", "en")]
+    try:
+        S.seal(**{**_seal_inputs(), "artifacts": arts, "attested": [], "gate_cleared": []})
+    except S.SealError as exc:
+        assert "reserved" in str(exc)
+    else:
+        raise AssertionError("seal() accepted an artifact named manifest.json")
+
+
+def _seal_inputs():
+    return dict(
+        kind="fulltime",
+        match_id="s9-m0",
+        seed_hash="a" * 64,
+        event_log_hash="b" * 64,
+        charter_hash=None,
+        artifacts=[],
+        gate_verdicts=dict(govkit.PASS_VERDICTS),
+        author_tags={},
+        attested=[],
+        gate_cleared=[],
+    )
+
+
+def _rename_to_manifest(manifest, files):
+    manifest["artifacts"]["manifest.json"] = manifest["artifacts"].pop("report-el.txt")
+    manifest["attested_scope"]["gate_cleared"] = ["audio-el.mp3"]
+    files["manifest.json"] = files.pop("report-el.txt")
+    return files
+
+
+def test_reviewer_probe_hand_built_manifest_json_artifact_writes_nothing():
+    """Reviewer probe: an artifact named manifest.json was approved, then failed overwrite_refused
+    with its bytes left at feed/<hash>/manifest.json. Now it is refused before anything is written."""
+    store, data, sha, files = _hand_built(_rename_to_manifest)
+    sink = P.InMemorySink()
+    result = P.Publisher(store, sink, "feed").publish(
+        bundle_sha256=sha, approval_id="planted", manifest_bytes=data, artifacts=files, now=govkit.T0
+    )
+    assert result.code == "seal_mismatch" and "reserved" in result.detail
+    assert sink.blobs == {}
+    try:
+        verifier.issue_nonce(store, sha, target="feed", now=govkit.T0)
+    except verifier.IssueError as exc:
+        assert "reserved" in str(exc)
+    else:
+        raise AssertionError("a nonce was issued for a manifest with a reserved artifact name")
+
+
+class _RaceStore(InMemoryStore):
+    """Holds the first two readers of one parent's supersession record until both have read it,
+    so both concurrent errata pass the pre-check and the race is settled by the store alone."""
+
+    def __init__(self) -> None:
+        super().__init__(after_read=self._hold)
+        self.armed = False
+        self._barrier = threading.Barrier(2, timeout=10)
+        self._lock = threading.Lock()
+        self._waiting = 0
+
+    def _hold(self, container, key):
+        if not self.armed or container != P.SUPERSESSIONS:
+            return
+        with self._lock:
+            if self._waiting >= 2:
+                return
+            self._waiting += 1
+        self._barrier.wait()
+
+
+def test_concurrent_errata_of_one_parent_loser_writes_no_public_bytes():
+    store = _RaceStore()
+    env, approval_id = _approved_env(store=store)
+    sink = P.InMemorySink()
+    pub = P.Publisher(store, sink, "feed")
+    assert _publish(pub, env, approval_id).ok
+    parent = env.bundle.bundle_sha256
+    a = govkit.make_env(store=store, kind="erratum", parent=parent, tag=" fix a")
+    b = govkit.make_env(store=store, kind="erratum", parent=parent, tag=" fix b")
+    ok_a = teams.handle(govkit.teams_payload(a), store, govkit.later(90))
+    ok_b = teams.handle(govkit.teams_payload(b), store, govkit.later(91))
+    assert ok_a.approved and ok_b.approved
+
+    results = {}
+
+    def run(label, e, approval):
+        results[label] = _publish(pub, e, approval)
+
+    store.armed = True
+    threads = [threading.Thread(target=run, args=("a", a, ok_a.approval_id)), threading.Thread(target=run, args=("b", b, ok_b.approval_id))]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join(timeout=30)
+    store.armed = False
+
+    codes = sorted(r.code for r in results.values())
+    assert codes == ["parent_already_superseded", "published"], codes
+    winner_label = "a" if results["a"].ok else "b"
+    winner, loser = (a, b) if winner_label == "a" else (b, a)
+    assert not any(k.startswith(f"feed/{loser.bundle.bundle_sha256}/") for k in sink.blobs)
+    assert sink.get(f"feed/{winner.bundle.bundle_sha256}/manifest.json") == winner.bundle.manifest_bytes
+    link = store.read(P.SUPERSESSIONS, parent).body
+    assert link["child"] == winner.bundle.bundle_sha256 and link["state"] == "published"

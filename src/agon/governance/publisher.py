@@ -14,6 +14,13 @@ Rules, in order. The first is the seal check, and it is never skipped:
 6. An erratum names its parent. The parent must be published on this target, for the same
    match_id (a receipt without one fails closed), and not yet superseded; a new supersession
    record links parent to child. The parent's receipt and bytes are never touched.
+7. Nothing public is written until every refusal that can be decided has been: each target path
+   is checked for foreign bytes first, and an erratum claims its parent (create-only supersession
+   record, state "claimed") BEFORE any blob write, so of two concurrent errata of one parent the
+   loser writes nothing. The record moves to state "published" after the receipt exists. A
+   "claimed" record whose child has no receipt is a publish that stopped half way; the same child
+   can resume it, no other child can take the parent, and readers must join the record with the
+   child's receipt before showing a correction.
 
 The receipt is a create-only record keyed by the bundle hash, with its own sha256.
 """
@@ -25,12 +32,12 @@ from datetime import datetime
 from typing import Any, Mapping, Protocol
 
 from agon.governance import seal as seal_mod
-from agon.governance.store import Conflict, Store
+from agon.governance.store import Conflict, PreconditionFailed, Store
 from agon.governance.verifier import APPROVALS, TARGETS
 
 PUBLISHED = "published"
 SUPERSESSIONS = "supersessions"
-MANIFEST_NAME = "manifest.json"
+MANIFEST_NAME = seal_mod.MANIFEST_NAME
 
 
 class AlreadyExists(Exception):
@@ -88,6 +95,16 @@ class Publisher:
                 return f"{path} already holds different bytes; overwrite refused"
         return None
 
+    def _mark_supersession_published(self, parent: str, child: str) -> None:
+        """Move the parent's supersession record from claimed to published, by etag."""
+        link = self.store.read(SUPERSESSIONS, parent)
+        if link is None or link.body.get("child") != child or link.body.get("state") == "published":
+            return
+        try:
+            self.store.replace(SUPERSESSIONS, parent, {**link.body, "state": "published"}, if_match=link.etag)
+        except PreconditionFailed:
+            pass  # a concurrent publish of the same child already moved it
+
     def publish(
         self,
         *,
@@ -134,13 +151,12 @@ class Publisher:
 
         prefix = f"{self.target}/{check.bundle_sha256}"
         listed = manifest["artifacts"]
-        for name in sorted(artifacts):
-            problem = self._write(f"{prefix}/{name}", artifacts[name], listed[name]["media_type"])
-            if problem:
-                return _refuse("overwrite_refused", problem)
-        problem = self._write(f"{prefix}/{MANIFEST_NAME}", manifest_bytes, "application/json")
-        if problem:
-            return _refuse("overwrite_refused", problem)
+        plan = [(f"{prefix}/{name}", artifacts[name], listed[name]["media_type"]) for name in sorted(artifacts)]
+        plan.append((f"{prefix}/{MANIFEST_NAME}", manifest_bytes, "application/json"))
+        for path, data, _ in plan:
+            existing = self.sink.get(path)
+            if existing is not None and existing != data:
+                return _refuse("overwrite_refused", f"{path} already holds different bytes; overwrite refused")
 
         published_at = datetime.fromtimestamp(int(now.timestamp()), tz=now.tzinfo).isoformat()
         if parent is not None:
@@ -148,12 +164,23 @@ class Publisher:
                 self.store.create(
                     SUPERSESSIONS,
                     parent,
-                    {"parent": parent, "child": check.bundle_sha256, "approval_id": approval_id, "at": published_at},
+                    {
+                        "parent": parent,
+                        "child": check.bundle_sha256,
+                        "approval_id": approval_id,
+                        "at": published_at,
+                        "state": "claimed",
+                    },
                 )
             except Conflict:
-                existing = self.store.read(SUPERSESSIONS, parent)
-                if existing is None or existing.body.get("child") != check.bundle_sha256:
+                existing_link = self.store.read(SUPERSESSIONS, parent)
+                if existing_link is None or existing_link.body.get("child") != check.bundle_sha256:
                     return _refuse("parent_already_superseded", f"parent {parent} was superseded by another bundle")
+
+        for path, data, media_type in plan:
+            problem = self._write(path, data, media_type)
+            if problem:
+                return _refuse("overwrite_refused", problem)
 
         body = {
             "bundle_sha256": check.bundle_sha256,
@@ -173,4 +200,6 @@ class Publisher:
             self.store.create(PUBLISHED, check.bundle_sha256, receipt)
         except Conflict:
             return _refuse("already_published", "this bundle was published by a concurrent publish")
+        if parent is not None:
+            self._mark_supersession_published(parent, check.bundle_sha256)
         return PublishResult(ok=True, code="published", detail=f"published {check.bundle_sha256} to {self.target}", receipt=receipt)

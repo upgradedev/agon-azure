@@ -109,6 +109,7 @@ def test_seal_refuses_inconsistent_inputs():
         dict(gate_verdicts={"anything": "pass"}),  # the reviewer's probe: no required gate at all
         dict(gate_verdicts={"factgate": "pass", "factgate_lang": "pass"}),  # rights never ran
         dict(attested=["nope.txt"]),
+        dict(artifacts=[S.Artifact("manifest.json", b"{}", "application/json", "edition")], attested=[]),
     ]
     for override in bad_cases:
         with pytest.raises(S.SealError):
@@ -186,6 +187,7 @@ def test_shape_validator_rejects_what_seal_would_never_build():
         lambda d: d["artifacts"]["audio-el.mp3"].update(sha256="xyz"),
         lambda d: d["author_tags"].update({"s9": "intern"}),
         lambda d: d["attested_scope"].update(attested=["ghost.txt"]),
+        lambda d: d["artifacts"].update({"manifest.json": d["artifacts"]["audio-el.mp3"]}),
     ]
     for i, mutate in enumerate(broken):
         d = json.loads(json.dumps(m))
