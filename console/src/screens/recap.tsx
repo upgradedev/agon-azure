@@ -19,6 +19,7 @@ import { Notice } from "../components/ui/notice";
 import { LabelLine, ScreenHeader, SeedNotice, StepNav, View } from "../components/screen";
 import { editionLabel, isApproved, matchLine, sentenceById, why, type Why } from "../lib/runs";
 import { usePreferences } from "../hooks/preferences";
+import { Listen } from "../components/listen";
 import { hrefFor, type Route } from "../lib/router";
 import { cn } from "../lib/cn";
 import { VERDICT_TONE } from "./newsroom-wall";
@@ -293,6 +294,7 @@ export function Recap({ active, route, loaded, error, blownSeed }: Props) {
             <p className="text-sm text-muted">This run lists no edition that could be loaded, so there is nothing to read.</p>
           )}
         </div>
+        {current ? <Listen run={run} manifest={loaded.manifest} edition={current.meta.edition} active={active} /> : null}
       </div>
 
       <Dialog

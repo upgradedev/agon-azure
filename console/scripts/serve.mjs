@@ -30,6 +30,7 @@ const TYPES = {
   ".woff2": "font/woff2",
   ".woff": "font/woff",
   ".png": "image/png",
+  ".mp3": "audio/mpeg",
   ".ico": "image/x-icon",
   ".webmanifest": "application/manifest+json",
 };
