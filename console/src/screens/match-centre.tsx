@@ -9,7 +9,7 @@
   the ball jumps from event to event and nothing starts on its own.
 */
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { Pause, Play, Whistle } from "lucide-react";
+import { Pause, Play, Volume2, VolumeX, Whistle } from "lucide-react";
 import { Card, CardBody, CardHeader, CardTitle } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -50,6 +50,7 @@ import { GLOSSARY, GLOSSARY_ORDER } from "../lib/glossary";
 import { cn } from "../lib/cn";
 import { useReducedMotion } from "../hooks/stores";
 import { usePreferences } from "../hooks/preferences";
+import { usePitchSound } from "../hooks/pitch-sound";
 import { axisSeconds, liveAt, loadAnalysis, type AnalysisLoad, type MatchClub, type Side } from "../lib/match";
 import { cueAt, cueText, loadCues, type CueLoad } from "../lib/cues";
 import { Scoreboard } from "../components/match/scoreboard";
@@ -176,6 +177,8 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
   const [cues, setCues] = useState<CueLoad>({ status: "loading" });
   const [scoreNews, setScoreNews] = useState("");
   const reduceMotion = useReducedMotion();
+  const sound = usePitchSound();
+  const soundIndex = useRef(-1);
   const tRef = useRef(0);
   const scoreKey = useRef("");
   const ids = {
@@ -184,6 +187,7 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
     scrubberHint: useId(),
     seedHint: useId(),
     analysisHint: useId(),
+    soundHint: useId(),
     liveReason: useId(),
     liveLabel: useId(),
     blowHint: useId(),
@@ -363,6 +367,30 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
     return { index, clock, minute, ball: { x: ball.x / 10, y: ball.y / 10 }, event, path, pressureLeft, score, press, seq, nowS, trail, ballSide };
   }, [ready, t, reduceMotion, analysis]);
 
+  /* Pitch Sound follows the replay: pan with the ball, tick tempo with the window's pressing,
+     a tone for each shot and a rising figure for each goal as the replay passes them. */
+  useEffect(() => {
+    if (!sound.running || !ready || !view) {
+      soundIndex.current = view ? view.index : -1;
+      return;
+    }
+    const file = analysis.status === "ready" ? analysis.file : null;
+    const band = file && view.nowS !== null ? file.bands.find((b) => b.from_s <= view.nowS! && view.nowS! < b.to_s) ?? null : null;
+    sound.update(view.ball.x, band ? band.home_pressures + band.away_pressures : null, playing && !reduceMotion);
+    const from = soundIndex.current;
+    const to = view.index;
+    if (to > from && to - from <= 60) {
+      const passed = ready.events.slice(from + 1, to + 1).filter((e) => e.type === "shot");
+      if (passed.some((e) => e.outcome === "goal")) {
+        sound.earcon("goal");
+      } else if (passed.length) {
+        sound.earcon("shot");
+      }
+    }
+    soundIndex.current = to;
+    /* sound's functions are recreated each render; the replay position drives this. */
+  }, [view, sound.running, playing, reduceMotion, analysis, ready]);
+
   /* The score is announced only when it changes, never on the ticking clock,
      and not on the first render of a match. */
   useEffect(() => {
@@ -526,7 +554,7 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
       />
       <GuideCard progress={progress} />
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start">
         <Card aria-labelledby="h-replay" data-state={ready ? "ready" : match.status} className="min-w-0">
           <CardHeader>
             <CardTitle id="h-replay">Replay</CardTitle>
@@ -627,6 +655,32 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
                   ]}
                 />
               </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => (sound.running ? sound.stop() : sound.start())}
+                  aria-pressed={sound.running}
+                  disabled={!sound.supported}
+                  aria-describedby={ids.soundHint}
+                >
+                  <Volume2 aria-hidden="true" />
+                  Pitch Sound
+                </Button>
+                {sound.running ? (
+                  <Button variant="secondary" size="sm" onClick={sound.toggleMute} aria-pressed={sound.muted}>
+                    <VolumeX aria-hidden="true" />
+                    Mute
+                  </Button>
+                ) : null}
+              </div>
+              <p id={ids.soundHint} className="text-xs leading-5 text-muted">
+                {!sound.supported
+                  ? "Pitch Sound needs the Web Audio API, which this browser does not offer."
+                  : reduceMotion
+                    ? "Pitch Sound plays the replay as sound, made in this browser: with reduced motion on, only a tone for each shot and a rising figure for each goal. It starts only when you press it."
+                    : "Pitch Sound plays the replay as sound, made in this browser: a tick that pans with the ball and speeds up with the pressing, a tone for each shot and a rising figure for each goal. It starts only when you press it."}
+              </p>
               {playReason ? (
                 <p id={ids.playReason} className="text-sm text-muted">
                   {playReason}

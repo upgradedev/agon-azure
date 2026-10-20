@@ -29,10 +29,20 @@ import {
 import { hrefFor } from "../lib/router";
 import { cn } from "../lib/cn";
 import { useReducedMotion } from "../hooks/stores";
-import type { GateVerdict, LoadedRun, Run } from "../lib/types";
+import type { BundleState, GateVerdict, LoadedRun, Run } from "../lib/types";
 
 const STEP_MS = 1100;
 type Step = number | "all";
+
+function lifecycleOf(run: Run): BundleState[] {
+  const seen: BundleState[] = [];
+  for (const s of run.states) {
+    if (!seen.includes(s.state)) {
+      seen.push(s.state);
+    }
+  }
+  return WALL_STATES.every((w) => seen.includes(w)) ? seen : [...WALL_STATES, ...seen.filter((s) => !WALL_STATES.includes(s))];
+}
 
 export function wallLabel(run: Run): string {
   return run.provenance === "design_preview"
@@ -127,7 +137,10 @@ export function NewsroomWall({ active, loaded, error, blownSeed, replayRequest }
   }, [reduceMotion]);
 
   const current = run ? stateAt(run, shown) : "";
-  const reached = current ? WALL_STATES.indexOf(current) : -1;
+  /* The run's own lifecycle: the four states before a decision, then Approved and Published (or
+     Changes requested) when the run reached them. It wraps onto a second line on a phone. */
+  const lifecycle = run ? lifecycleOf(run) : WALL_STATES;
+  const reached = current ? lifecycle.indexOf(current) : -1;
   const names: Record<string, string> = run ? deskNames(run) : {};
   const activeDesks = new Set(
     run && step !== "all" ? run.desks.filter((d) => d.lines.some((l) => l.step === step)).map((d) => d.desk) : [],
@@ -174,7 +187,7 @@ export function NewsroomWall({ active, loaded, error, blownSeed, replayRequest }
                 </Badge>
               </div>
               <ol className="flex flex-wrap items-center gap-1.5" aria-label="Bundle states">
-                {WALL_STATES.map((name, i) => {
+                {lifecycle.map((name, i) => {
                   const done = i < reached;
                   const isCurrent = name === current;
                   return (
