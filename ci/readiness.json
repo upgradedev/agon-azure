@@ -94,7 +94,9 @@
     "without anyone asking",
     "Every channel calls the same verifier",
     "only through a read-only Model Context Protocol server",
-    "Nothing has been published from this site"
+    "Nothing has been published from this site",
+    "The decision endpoint is not deployed",
+    "Recompute every hash in your browser"
   ],
   "user_gated": [
     {

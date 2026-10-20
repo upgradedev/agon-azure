@@ -6,7 +6,9 @@ player or match data was used to build, seed or calibrate it.
 Sections that describe parts not built yet say so. Nothing below is a claim about real football:
 the realism bands in section 4 are ranges we chose as sanity checks, and every number is
 self-measured with the command printed beside it, except two counts in section 5 (52 of 161) that
-say they have no command on the current code.
+say they have no command on the current code, and the two calibration figures in section 4 (0.5693
+and 0.2484, over the 600 matches of seeds 1 to 200 at match indices 0, 7 and 15), for which no
+single command is printed.
 
 Run every command in this card from the repository root with `src` on the import path: prefix it
 with `PYTHONPATH=src` in bash, or run `$env:PYTHONPATH = 'src'` once in PowerShell.

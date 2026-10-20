@@ -299,7 +299,7 @@ def test_a_record_already_there_on_the_normal_path_keeps_the_refusal() -> None:
 # id-fleet may create nonces (create-only, infra/modules/cosmos-access.bicep), and RBAC cannot
 # constrain a field, so the fleet can create a nonce that already reads "consumed", with a consumed
 # block it wrote itself. A redelivery must never turn that block into an approval record: "the
-# fleet may create a nonce but never consume one" (README). Each case below must be refused with
+# fleet may only create nonce documents, never update one" (README, Architecture). Each case below must be refused with
 # no write, no approval record and no pointer.
 
 PLANTED = "planted-by-fleet"

@@ -242,8 +242,8 @@ export function Verify({ active }: { active: boolean }) {
       <ScreenHeader
         view="verify"
         eyebrow="Verify"
-        title="Recompute every hash in your browser"
-        lead="This page downloads each published file and hashes the exact bytes with SHA-256 on your device; every match or mismatch below is counted here, not asserted by a server."
+        title="Recompute the sealed hashes in your browser"
+        lead="This page downloads this site's copy of each sealed file, the bundle manifest and the event and names files, and hashes the exact bytes with SHA-256 on your device; every match or mismatch below is counted here, not asserted by a server."
       />
 
       <div className="mb-6 flex flex-wrap items-center gap-3">

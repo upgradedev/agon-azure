@@ -13,7 +13,7 @@
   "beats": [
     {
       "id": "card-arrives",
-      "narration": "When the match is over, Agon writes the club's match report in four languages, and nothing is published until the media officer approves this exact bundle in Microsoft Teams.",
+      "narration": "Once a run is started, Agon writes the club's match report in four languages, and nothing is published until the media officer approves this exact bundle in Microsoft Teams.",
       "visual": [
         {
           "source": "teams:card-arrives",
