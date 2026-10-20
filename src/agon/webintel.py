@@ -59,8 +59,18 @@ METRICS_SCHEMA = "agon.webintel.metrics/1"
 MILESTONES_SCHEMA = "agon.webintel.milestones/1"
 MILESTONE_SEASON = 1
 LABEL = (
-    "Synthetic match between fictional clubs. Every number is computed from the event log by "
-    "agon.interpret; nothing here describes real football."
+    "Synthetic match between fictional clubs. The metrics, passes and rhythm are computed from this "
+    "match's event log by agon.interpret with the Fact Gate's definitions; nothing here describes real "
+    "football."
+)
+MILESTONES_PROVENANCE = (
+    "Season facts recomputed by agon.governance.recompute (the Fact Gate's definitions) over every match "
+    "of the simulated season up to this matchday (agon.synth.season), not over this match's log alone: "
+    "the table also needs the other fixtures of each matchday."
+)
+SEASON_MILESTONES_LABEL = (
+    "Synthetic season of fictional clubs. Every milestone is recomputed by agon.governance.recompute (the "
+    "Fact Gate's definitions) over all matches of the simulated season up to its matchday."
 )
 METRICS_NAME = re.compile(r"^metrics-([0-9]+)\.json$")
 MILESTONES_NAME = re.compile(r"^milestones-season-([0-9]+)\.json$")
@@ -312,7 +322,7 @@ def milestones_payload(season: Season) -> dict[str, Any]:
         "schema": MILESTONES_SCHEMA,
         "season": season.season,
         "generator": GENERATOR_VERSION,
-        "label": "Synthetic season of fictional clubs; every milestone is recomputed by the Fact Gate's code.",
+        "label": SEASON_MILESTONES_LABEL,
         "rules": milestone_rules(),
         "matchdays": [{"matchday": md, "matches": games} for md, games in sorted(days.items())],
     }
@@ -401,6 +411,7 @@ def metrics_payload(seed: int, data_dir: str) -> dict[str, Any]:
         "rhythm": rhythm(view, clubs, model),
         "milestones": milestones_for_match(season_facts(season), match_id, s_clubs, s_players) if whole else [],
         "milestones_note": None if whole else TRUNCATED_NOTE,
+        "milestones_provenance": MILESTONES_PROVENANCE,
         "citable": {"claim_type": "stat", "stats": [dict(c) for c in CITABLE], "note": NOT_CITABLE_NOTE},
     }
 
@@ -518,7 +529,7 @@ DEFINITION_KEYS = frozenset({"key", "label", "unit", "scope", "better", "descrip
 METRICS_KEYS = frozenset({
     "kind", "schema", "seed", "match_id", "generator", "interpret", "pack", "model_sha256", "events_sha256",
     "label", "home", "away", "clubs", "definitions", "teams", "series", "players", "passes", "rhythm",
-    "milestones", "milestones_note", "citable",
+    "milestones", "milestones_note", "milestones_provenance", "citable",
 })
 MILESTONE_KEYS = frozenset({"kind", "subject", "matchday", "match_id", "sentence", "claims"})
 CLAIM_KEYS = frozenset({"type", "value", "event_ids", "subject", "stat"})

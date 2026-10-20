@@ -1,16 +1,23 @@
 intel/: the intelligence files the console draws
 ==================================================
 
-Written at deploy by ci/stamp_web.py (agon.webintel.write_intel_web), from the exact
-data/<seed>.ndjson and data/<seed>.world.json files it has just verified, then re-checked
-by agon.webintel.verify_intel_dir. Reproduce locally:
+Written at deploy by ci/stamp_web.py (agon.webintel.write_intel_web), then re-checked by
+agon.webintel.verify_intel_dir. Where the numbers come from:
+  * metrics, passes and rhythm: the exact data/<seed>.ndjson and data/<seed>.world.json files
+    the stamp has just verified, read by agon.interpret with the Fact Gate's definitions;
+  * milestones: agon.governance.recompute over the simulated season up to the match's matchday
+    (agon.synth.season: every fixture of those matchdays, not only the served match), after
+    checking that the served log is that season's match byte for byte.
+Reproduce locally:
 
     python -m agon.webdata --seeds 1,2,3 --out build/data
     python -m agon.webintel --data build/data --seeds 1,2,3 --out build/intel
 
 Every file is canonical JSON: sorted keys, ASCII, integers, strings, booleans and null only
 (no floats), one final LF. The validators in src/agon/webintel.py are the contract; this file
-describes them and a test checks that every key named below exists in the code.
+describes them. A test (tests/test_webintel.py) checks one direction only: every key the code
+writes into a metrics or milestones file, sub-keys included, is named here. It does not check
+that every word below is a key.
 
 Synthetic data only: fictional clubs and players, nothing about real football. Units:
   ppm         parts per million (xG 0.42 is 420000)
@@ -118,9 +125,13 @@ rhythm        why moments matter, in the rules' words:
 milestones    citable season facts for this match: list of {kind, subject, matchday,
               match_id, sentence, claims}. kind is first_goal, season_goals, first_assist,
               season_assists, table or club_streak. claims are Fact Gate claims
-              (player_season_total, season_streak or table_position) whose values the
+              {type, stat, subject, value, event_ids}, type player_season_total,
+              season_streak or table_position, event_ids empty, whose values the
               sentence writes in digits. The published matches are matchday 1 of their
               season, so their facts are first goals, first assists and table positions.
+
+milestones_provenance  one sentence saying where the milestones come from (the season, not
+              this log alone); show it with them.
 
 milestones_note  null when the served log is the whole season match. When it is only the
               first part (a truncated replay such as the development fixture), milestones is

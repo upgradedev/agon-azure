@@ -188,14 +188,35 @@ def test_ordinals():
         "1st", "2nd", "3rd", "4th", "11th", "12th", "13th", "21st", "22nd", "101st"]
 
 
-def test_readme_names_every_key_and_column():
+CLUB_ID = re.compile(r"^C[0-9]+$")
+
+
+def _keys_written(value, found: set[str]) -> set[str]:
+    """Every dict key in a written file, at any depth; club ids used as keys are data, not keys."""
+    if isinstance(value, dict):
+        for k, v in value.items():
+            if not CLUB_ID.match(k):
+                found.add(k)
+            _keys_written(v, found)
+    elif isinstance(value, list):
+        for v in value:
+            _keys_written(v, found)
+    return found
+
+
+def test_readme_names_every_key_the_code_writes(site):
+    # One direction, as the README says: every key written (sub-keys included) is named in it.
+    _, intel = site
     text = README.read_text(encoding="ascii")
     assert not any(d in text for d in DASHES)
     words = set(re.findall(r"[a-z0-9_]+", text))
-    expected = set(TEAM_KEYS) | set(PLAYER_KEYS) | set(SERIES_KEYS) | set(webintel.PASS_COLUMNS) | set(webintel.METRICS_KEYS)
-    expected |= set(webintel.MANIFEST_KEYS) | set(webintel.MANIFEST_FILE_KEYS) | {c["stat"] for c in webintel.CITABLE}
-    missing = sorted(k for k in expected if k not in words)
+    written: set[str] = set()
+    for name in ("manifest.json", "metrics-1.json", "milestones-season-1.json"):
+        _keys_written(_load(intel, name), written)
+    written |= set(webintel.PASS_COLUMNS) | {c["stat"] for c in webintel.CITABLE}
+    missing = sorted(k for k in written if k not in words)
     assert not missing, f"webintel_README.txt does not mention: {missing}"
+    assert len(written) > 120
 
 
 def test_cli_writes_and_verifies(site, tmp_path, capsys):

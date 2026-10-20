@@ -60,7 +60,11 @@ METRICS: dict[str, dict[str, str]] = {
     "key_passes": {
         "label": "Key passes", "unit": "count", "scope": "club, player", "better": "higher",
         "description": "Passes that led straight to a shot by a teammate.",
-        "rule": "The assist rule applied to every shot: the last completed pass to the shooter in the same possession, with only his own carries in between; penalties have none.",
+        "rule": (
+            "The assist rule applied to every shot: walking back from the shot inside its possession, skipping the "
+            "opponent's events (a pressure, a lost tackle) and the shooter's own carries, the first event must be a "
+            "completed pass to the shooter by a teammate; anything else, and every penalty, means no key pass."
+        ),
     },
     "xg_open_play_ppm": {
         "label": "Open-play xG", "unit": "ppm", "scope": "club", "better": "higher",

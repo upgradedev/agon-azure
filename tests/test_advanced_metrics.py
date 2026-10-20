@@ -139,6 +139,8 @@ def _chain_with_shot() -> list[dict]:
 def test_key_pass_skips_own_carries_and_opponent_events():
     events = _chain_with_shot()
     assert key_pass_index(events, 4) == 1
+    # The published rule says the walk skips the opponent's events, as the pressure at seq 3 shows.
+    assert "opponent's events" in METRICS["key_passes"]["rule"]
     view = MatchView.build(events, "H", "A", "t")
     p = pack(view)
     xg = xg_ppm(events[4], "H")
