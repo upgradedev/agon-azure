@@ -256,12 +256,26 @@ def stamp_kinematics(web_dir: Path, data_dir: Path) -> str:
     return f"wrote and verified {count} kinematics files under {kin_dir.as_posix()}"
 
 
+def stamp_ops(web_dir: Path, evidence_dir: Path) -> str:
+    """Copy the recorded runs' job execution evidence into web_dir/ops (agon.webops), validated against the shipped runs."""
+    from agon.webops import OPS_DIR, verify_ops_dir, write_ops
+
+    try:
+        write_ops(str(web_dir), str(evidence_dir))
+        count = verify_ops_dir(str(web_dir))
+    except (ValueError, OSError, KeyError, TypeError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise StampError(f"ops: {exc}") from exc
+    return f"wrote and verified {count} execution evidence files under {(web_dir / OPS_DIR).as_posix()}"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("web_dir", type=Path)
     parser.add_argument("--sha", required=True, help="full commit sha to stamp")
     parser.add_argument("--data-dir", type=Path, help="generated data directory to verify")
     parser.add_argument("--seeds", default="", help="published seeds the manifest must list, e.g. 1,2,3")
+    parser.add_argument("--evidence-dir", type=Path, default=Path(__file__).resolve().parent.parent / "evidence",
+                        help="recorded run execution evidence (default: evidence/ in the repository)")
     args = parser.parse_args(argv)
     try:
         stamp_commit(args.web_dir, args.sha)
@@ -276,6 +290,8 @@ def main(argv: list[str] | None = None) -> int:
             print(stamp_kinematics(args.web_dir, args.data_dir))
         runs = verify_runs(args.web_dir)
         print(f"verified {len(runs)} runs under {args.web_dir.as_posix()}/runs" + (f": {', '.join(runs)}" if runs else ""))
+        if args.data_dir is not None:
+            print(stamp_ops(args.web_dir, args.evidence_dir))
     except (StampError, KeyError, TypeError, ValueError) as exc:
         print(f"stamp_web: FAIL: {exc}")
         return 1

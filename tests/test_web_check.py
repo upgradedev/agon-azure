@@ -125,6 +125,7 @@ MUTATIONS = [
     ("spa-fallback-dirs", "staticwebapp.config.json", '"/cues/*"', '"/cues/*.txt"'),
     ("spa-fallback-dirs", "staticwebapp.config.json", '"/intel/*"', '"/intel/*.txt"'),
     ("spa-fallback-dirs", "staticwebapp.config.json", '"/kinematics/*"', '"/kinematics/*.txt"'),
+    ("spa-fallback-dirs", "staticwebapp.config.json", '"/ops/*"', '"/ops/*.txt"'),
     ("config-json", "staticwebapp.config.json", "{", "{{"),
     ("contrast-fail", "app.css", "--text-muted: #4b5767;", "--text-muted: #a8b0ba;"),
     ("contrast-mismatch", "app.css", "--text-muted: #4b5767;", "--text-muted: #3f4a59;"),

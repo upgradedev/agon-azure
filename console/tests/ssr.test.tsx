@@ -100,7 +100,7 @@ describe.each(SOURCES)("prerendered markup, %s", (_name, fetchText, committed) =
   });
 
   it("renders every view, with only the Match Centre visible", () => {
-    for (const view of ["home", "newsroom", "approve", "recap", "verify", "data-lab", "how-it-works", "about", "not-found"]) {
+    for (const view of ["home", "newsroom", "approve", "recap", "verify", "data-lab", "media-office", "how-it-works", "about", "not-found"]) {
       expect(html).toContain(`data-view="${view}"`);
     }
     expect(html).toMatch(/<section data-view="home" aria-labelledby="h-home">/);

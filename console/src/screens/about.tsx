@@ -21,6 +21,21 @@ const LIBRARIES = [
   "Vitest, Playwright and axe-core in CI",
 ];
 
+const WHY_BUY: [string, string][] = [
+  ["The segment", "A small club media office: one to three people who publish every match in several languages and cannot afford a factual slip."],
+  ["The trigger", "Full time. The report has to be out in minutes, in every language the club serves, on the website, the feed and the social channels."],
+  ["What it replaces", "Writing the report by hand, translating it, and pasting it into each channel one by one, with nobody checking the numbers but the writer."],
+  [
+    "The controls",
+    "Code checks every number, name and minute against the event log (Fact Gate) and screens names (Rights Guard). Nothing is published until one person approves one sealed hash, the published bytes are recomputed against it, and social posts stay previews.",
+  ],
+  [
+    "The residual gaps",
+    "This build runs on synthetic data only. Posting to Instagram and YouTube needs Meta and Google app approval; the Teams newsroom and journalist email sends are not deployed; there is no tracking data, so no running speed or distance; cost per match is not measured yet.",
+  ],
+  ["Where to look", "The Media office view shows the recorded run as a head of department reads it: status, timings from Azure, what went out where, the checks and the approval audit trail."],
+];
+
 export function About({ active, runs }: { active: boolean; runs: RunsData | null }) {
   const shown = runs ? runs.runs[runs.defaultRunId]?.run ?? null : null;
   const recorded = shown !== null && shown.provenance === "pipeline";
@@ -67,6 +82,22 @@ export function About({ active, runs }: { active: boolean; runs: RunsData | null
                 nothing is published and no account is needed.
               </p>
             )}
+          </CardBody>
+        </Card>
+
+        <Card aria-labelledby="h-why-buy" className="lg:col-span-2">
+          <CardHeader>
+            <CardTitle id="h-why-buy">Why a club buys this</CardTitle>
+          </CardHeader>
+          <CardBody>
+            <dl className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+              {WHY_BUY.map(([term, text]) => (
+                <div key={term} className="rounded-lg border border-line p-3">
+                  <dt className="text-sm font-semibold text-fg">{term}</dt>
+                  <dd className="mt-1 text-sm leading-6 text-muted">{text}</dd>
+                </div>
+              ))}
+            </dl>
           </CardBody>
         </Card>
 

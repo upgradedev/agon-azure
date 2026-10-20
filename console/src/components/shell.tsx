@@ -22,6 +22,7 @@ export const PATH_STEPS: { view: ViewKey; label: string; long: string }[] = [
 ];
 
 export const MORE_LINKS: { view: ViewKey; label: string }[] = [
+  { view: "media-office", label: "Media office" },
   { view: "how-it-works", label: "How it works" },
   { view: "data-lab", label: "Data Lab" },
   { view: "about", label: "About" },
