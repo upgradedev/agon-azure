@@ -143,6 +143,21 @@ export function usePitchSound(): PitchSound {
     }
   }
 
+  /* A hidden tab freezes the replay, so Pitch Sound stops rather than ticking on unseen. */
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden" && engine.current) {
+        const e = engine.current;
+        clearTimer(e);
+        void e.ctx.close();
+        engine.current = null;
+        setRunning(false);
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, []);
+
   useEffect(
     () => () => {
       const e = engine.current;

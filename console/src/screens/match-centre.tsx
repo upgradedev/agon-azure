@@ -9,7 +9,7 @@
   the ball jumps from event to event and nothing starts on its own.
 */
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { Pause, Play, Volume2, VolumeX, Whistle } from "lucide-react";
+import { Pause, Play, Users, Volume2, VolumeX, Whistle } from "lucide-react";
 import { Card, CardBody, CardHeader, CardTitle } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -51,6 +51,8 @@ import { cn } from "../lib/cn";
 import { useReducedMotion } from "../hooks/stores";
 import { usePreferences } from "../hooks/preferences";
 import { usePitchSound } from "../hooks/pitch-sound";
+import { indicatorWords, indicatorsAt, loadKinematics, playersAt, runningKmh, type KinematicsLoad } from "../lib/kinematics";
+import type { NameTag, PlayerDot } from "../components/pitch";
 import { axisSeconds, liveAt, loadAnalysis, type AnalysisLoad, type MatchClub, type Side } from "../lib/match";
 import { cueAt, cueText, loadCues, type CueLoad } from "../lib/cues";
 import { Scoreboard } from "../components/match/scoreboard";
@@ -175,6 +177,8 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
   const mode = prefs.mode;
   const [analysis, setAnalysis] = useState<AnalysisLoad>({ status: "loading" });
   const [cues, setCues] = useState<CueLoad>({ status: "loading" });
+  const [tracking, setTracking] = useState(false);
+  const [kin, setKin] = useState<KinematicsLoad>({ status: "off" });
   const [scoreNews, setScoreNews] = useState("");
   const reduceMotion = useReducedMotion();
   const sound = usePitchSound();
@@ -188,6 +192,7 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
     seedHint: useId(),
     analysisHint: useId(),
     soundHint: useId(),
+    trackingHint: useId(),
     liveReason: useId(),
     liveLabel: useId(),
     blowHint: useId(),
@@ -271,6 +276,32 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
       cancelled = true;
     };
   }, [match]);
+
+  /* Synthetic tracking (about 1.3 MB a match): fetched only once the viewer asks for the players. */
+  useEffect(() => {
+    if (!tracking) {
+      setKin({ status: "off" });
+      return undefined;
+    }
+    if (manifestError || match.status === "error") {
+      setKin({ status: "error", message: "The synthetic tracking needs the match file, which could not be read, so the players cannot be shown." });
+      return undefined;
+    }
+    if (match.status !== "ready") {
+      setKin({ status: "loading" });
+      return undefined;
+    }
+    let cancelled = false;
+    setKin({ status: "loading" });
+    loadKinematics(match.seed, match.entry.sha256).then((value) => {
+      if (!cancelled) {
+        setKin(value);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [tracking, match, manifestError]);
 
   /* Live cues for the seed, when a cue file exists under an approved charter. */
   useEffect(() => {
@@ -507,6 +538,34 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
   const clubs: Record<Side, MatchClub | null> = file ? file.clubs : { home: clubOf(homeKit), away: clubOf(awayKit) };
   const live = file && view ? liveAt(file, view.seq) : null;
   const focusPlayer = prefs.focus && prefs.player && file?.players.some((p) => p.player_id === prefs.player) ? prefs.player : null;
+  const kinFile = kin.status === "ready" ? kin.file : null;
+  const atNow = kinFile && view && ready ? playersAt(kinFile, view.clock.period, view.clock.clock) : [];
+  const playerDots: PlayerDot[] = atNow.map((p) => ({
+    x: p.x / 10,
+    y: p.y / 10,
+    side: ready && p.team === ready.derived.home ? "home" : "away",
+    focus: p.player_id === focusPlayer,
+  }));
+  /* Name tags for the player in the latest event and the followed player, with the tracking's trigger indicators. */
+  const nameTags: NameTag[] = [];
+  if (kinFile && view && ready && names) {
+    for (const id of new Set([view.event?.player ?? null, focusPlayer].filter((v): v is string => Boolean(v)))) {
+      const at = atNow.find((p) => p.player_id === id);
+      const kp = kinFile.players.find((p) => p.player_id === id);
+      if (!at || !kp) {
+        continue;
+      }
+      const lines = [names.player(id)];
+      const flags = indicatorsAt(kp, view.clock.period, view.clock.clock).map(indicatorWords);
+      if (flags.length) {
+        lines.push(flags.join(", "));
+      }
+      if (id === focusPlayer) {
+        lines.push(`top running speed ${runningKmh(kp.top_speed_kmh_x10)} (synthetic)`);
+      }
+      nameTags.push({ x: at.x / 10, y: at.y / 10, side: at.team === ready.derived.home ? "home" : "away", lines });
+    }
+  }
   const cue = cues.status === "ready" && view ? cueAt(cues.cues, view.nowS) : null;
   const cueLine = cue ? cueText(cue, prefs.language) : null;
   const clubChoices = file ? [file.clubs.home, file.clubs.away] : [clubs.home, clubs.away].filter((c): c is MatchClub => c !== null);
@@ -598,6 +657,8 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
               trail={view ? view.trail : []}
               ballSide={view ? view.ballSide : null}
               focusRing={Boolean(focusPlayer && view?.event?.player === focusPlayer)}
+              players={playerDots}
+              tags={nameTags}
               overlay={
                 cue && cueLine && cues.status === "ready" ? (
                   <div className="pointer-events-none absolute inset-x-2 bottom-2 motion-safe:animate-rise sm:inset-x-4 sm:bottom-4" aria-live="polite">
@@ -690,6 +751,37 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
                   : reduceMotion
                     ? "Pitch Sound plays the replay as sound, made in this browser: with reduced motion on, only a tone for each shot and a rising figure for each goal. It starts only when you press it."
                     : "Pitch Sound plays the replay as sound, made in this browser: a tick that pans with the ball and speeds up with the pressing, a tone for each shot and a rising figure for each goal. It starts only when you press it."}
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setTracking((v) => !v)}
+                  aria-pressed={tracking}
+                  disabled={Boolean(manifestError) || match.status === "error"}
+                  aria-describedby={ids.trackingHint}
+                >
+                  <Users aria-hidden="true" />
+                  Show the players
+                </Button>
+              </div>
+              <p id={ids.trackingHint} className="text-xs leading-5 text-muted" aria-live="polite">
+                {manifestError || match.status === "error"
+                  ? "The synthetic tracking needs the match file, which could not be read, so the players cannot be shown."
+                  : kin.status === "off"
+                    ? "Shows all 22 players, with name tags for the player in the latest event and the one you follow. The tracks are synthetic, modelled from the event log within speed and acceleration caps, not measured; about 1.3 MB, loaded only when you ask."
+                    : kin.status === "loading"
+                      ? "Loading the synthetic tracking for this match."
+                      : kin.status === "ready"
+                        ? "Synthetic tracking, modelled from the event log within speed and acceleration caps, not measured: a tag shows a sprint (25.2 km/h or more), a top-speed burst (30 km/h or more) or a 2 km milestone as it happens."
+                        : kin.message}
+                {kin.status === "ready" ? (
+                  <>
+                    {" "}
+                    Positions are modelled and can miss the event spot: <a href="kinematics/README.txt">kinematics/README.txt</a> explains how the misses are
+                    counted, and each match&apos;s kinematics file holds the counts under checks.
+                  </>
+                ) : null}
               </p>
               {playReason ? (
                 <p id={ids.playReason} className="text-sm text-muted">
@@ -879,7 +971,7 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
         </p>
         <div className="mt-4">
           {analysis.status === "ready" && view !== null ? (
-            <Analysis file={analysis.file} names={sideNames} prefs={prefs} nowS={view.nowS} nowSeq={view.seq} />
+            <Analysis file={analysis.file} names={sideNames} prefs={prefs} nowS={view.nowS} nowSeq={view.seq} kinematics={kinFile} />
           ) : analysis.status === "ready" ? null : (
             <Notice tone={analysis.status === "loading" ? "loading" : analysis.status === "error" ? "danger" : "info"}>
               {analysis.status === "loading" ? "Loading the match analysis for this seed." : analysis.message}

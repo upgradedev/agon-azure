@@ -54,6 +54,6 @@ describe("the captions notes", () => {
     expect(disclosureLine(base, "", true)).toBe("AI disclosure");
     expect(disclosureLine(null, "the captions could not be read", true)).toContain("could not be read");
     expect(disclosureLine(null, "", false)).toContain("no captions file");
-    expect(disclosureLine(null, "", true)).toBe("loading");
+    expect(disclosureLine(null, "", true)).toBe("an AI disclosure, whose words are still loading");
   });
 });

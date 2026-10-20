@@ -71,6 +71,9 @@ def test_the_fixture_matches_the_published_match_and_its_rules():
         assert stats["xg"][side] == body["live"][-1][f"{side}_xg_ppm"]
     assert body["live"][-1]["home_possession_permille"] == stats["possession"]["home"]
     assert set(body["rules"]) == {"possession", "big_chance", "star", "speed", "distance"}
+    # one story for speed and distance: events only in the engine, running figures only from the synthetic tracking layer
+    assert "proxy" in body["rules"]["speed"] and "synthetic tracking layer" in body["rules"]["speed"]
+    assert "not measured" in body["rules"]["distance"] and "no tracking" not in json.dumps(body["rules"])
     assert all(p["distance_dm"] is None for p in body["players"])
     assert all(t["at_s"] <= body["axis"]["end_s"] for t in body["timeline"])
 
