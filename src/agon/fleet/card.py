@@ -48,6 +48,7 @@ from typing import Any, Callable, Mapping
 
 from agon.fleet.contracts import ApprovalRequest
 from agon.fleet.sources import MatchRecord
+from agon.governance import destinations as dest_mod
 from agon.governance import seal as seal_mod
 from agon.governance import verifier
 from agon.governance.recompute import score_after
@@ -234,7 +235,13 @@ def flag_lines(card: Mapping[str, Any] | None, limit: int) -> list[str]:
 
 
 def _destinations(request: ApprovalRequest, manifest: Mapping[str, Any]) -> list[dict[str, str]]:
-    """The destinations this bundle offers, as the card's {id, label} toggles; [] means feed only.
+    """The destinations this bundle offers, as the card's {id, label, delivery} toggles; [] means feed only.
+
+    `delivery` is what the Publisher does with a ticked destination (`destinations.DELIVERY`):
+    "written" (published to the club's own channels), "preview" (the exact payload, never posted)
+    or "outbox" (the payload and its queue message are recorded; the send flow is not deployed).
+    An id outside the registry reads "outbox", so the card never calls it published. The flow uses
+    it to label the toggles and to split the Published card into published, prepared and recorded.
 
     Lane C6 seals the offered destinations into the manifest and adds them to the ApprovalRequest;
     the officer ticks a subset on the card and the verifier refuses anything outside the offer. The
@@ -252,6 +259,8 @@ def _destinations(request: ApprovalRequest, manifest: Mapping[str, Any]) -> list
             out.append({"id": item, "label": item.replace("_", " ").capitalize()})
         elif isinstance(item, Mapping) and isinstance(item.get("id"), str):
             out.append({"id": item["id"], "label": str(item.get("label") or item["id"].replace("_", " ").capitalize())})
+    for row in out:
+        row["delivery"] = dest_mod.DELIVERY.get(row["id"], dest_mod.OUTBOX)
     return out
 
 

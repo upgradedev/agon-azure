@@ -340,7 +340,7 @@ resource teamsFlow 'Microsoft.Logic/workflows@2019-05-01' = {
             select: {
               type: 'Input.Toggle'
               id: '@{concat(\'dest:\', item()?[\'id\'])}'
-              title: '@{item()?[\'label\']}'
+              title: '@{concat(item()?[\'label\'], if(equals(coalesce(item()?[\'delivery\'], \'outbox\'), \'preview\'), \' (preview only, not posted)\', if(equals(coalesce(item()?[\'delivery\'], \'outbox\'), \'written\'), \'\', \' (recorded only; the send flow is not deployed yet)\')))}'
               value: 'true'
               valueOn: 'true'
               valueOff: 'false'
@@ -813,7 +813,55 @@ resource teamsFlow 'Microsoft.Logic/workflows@2019-05-01' = {
           }
           inputs: {
             from: '@coalesce(triggerBody()?[\'destinations\'], json(\'[]\'))'
-            where: '@equals(string(body(\'Post_card_and_wait\')?[\'data\']?[concat(\'dest:\', item()?[\'id\'])]), \'true\')'
+            where: '@and(equals(string(body(\'Post_card_and_wait\')?[\'data\']?[concat(\'dest:\', item()?[\'id\'])]), \'true\'), equals(coalesce(item()?[\'delivery\'], \'outbox\'), \'written\'))'
+          }
+        }
+        Preview_destinations: {
+          type: 'Query'
+          runAfter: {
+            Post_card_and_wait: [
+              'Succeeded'
+            ]
+          }
+          inputs: {
+            from: '@coalesce(triggerBody()?[\'destinations\'], json(\'[]\'))'
+            where: '@and(equals(string(body(\'Post_card_and_wait\')?[\'data\']?[concat(\'dest:\', item()?[\'id\'])]), \'true\'), equals(coalesce(item()?[\'delivery\'], \'outbox\'), \'preview\'))'
+          }
+        }
+        Preview_labels: {
+          type: 'Select'
+          runAfter: {
+            Preview_destinations: [
+              'Succeeded'
+            ]
+          }
+          inputs: {
+            from: '@body(\'Preview_destinations\')'
+            select: '@item()?[\'label\']'
+          }
+        }
+        Recorded_destinations: {
+          type: 'Query'
+          runAfter: {
+            Post_card_and_wait: [
+              'Succeeded'
+            ]
+          }
+          inputs: {
+            from: '@coalesce(triggerBody()?[\'destinations\'], json(\'[]\'))'
+            where: '@and(equals(string(body(\'Post_card_and_wait\')?[\'data\']?[concat(\'dest:\', item()?[\'id\'])]), \'true\'), not(equals(coalesce(item()?[\'delivery\'], \'outbox\'), \'written\')), not(equals(coalesce(item()?[\'delivery\'], \'outbox\'), \'preview\')))'
+          }
+        }
+        Recorded_labels: {
+          type: 'Select'
+          runAfter: {
+            Recorded_destinations: [
+              'Succeeded'
+            ]
+          }
+          inputs: {
+            from: '@body(\'Recorded_destinations\')'
+            select: '@item()?[\'label\']'
           }
         }
         Sent_labels: {
@@ -858,6 +906,12 @@ resource teamsFlow 'Microsoft.Logic/workflows@2019-05-01' = {
             Sent_labels: [
               'Succeeded'
             ]
+            Preview_labels: [
+              'Succeeded'
+            ]
+            Recorded_labels: [
+              'Succeeded'
+            ]
             Unsent_labels: [
               'Succeeded'
             ]
@@ -865,7 +919,9 @@ resource teamsFlow 'Microsoft.Logic/workflows@2019-05-01' = {
           inputs: statusCard('Published', [
             '@{concat(\'Approved by \', body(\'Post_card_and_wait\')?[\'responder\']?[\'displayName\'], \' at \', body(\'Post_card_and_wait\')?[\'responseTime\'], \'.\')}'
             '@{concat(\'Published bundle sha256: \', triggerBody()?[\'bundle_sha256\'])}'
-            '@{concat(\'Sent to: \', if(empty(body(\'Sent_labels\')), \'the club feed only\', join(body(\'Sent_labels\'), \', \')), \'.\')}'
+            '@{concat(\'Published to: \', if(empty(body(\'Sent_labels\')), \'the club feed only\', join(body(\'Sent_labels\'), \', \')), \'.\')}'
+            '@{concat(\'Prepared as a preview, not posted: \', if(empty(body(\'Preview_labels\')), \'none\', join(body(\'Preview_labels\'), \', \')), \'.\')}'
+            '@{concat(\'Recorded for sending; the send flow is not deployed yet: \', if(empty(body(\'Recorded_labels\')), \'none\', join(body(\'Recorded_labels\'), \', \')), \'.\')}'
             '@{concat(\'Not sent, as you chose: \', if(empty(body(\'Unsent_labels\')), \'none\', join(body(\'Unsent_labels\'), \', \')), \'.\')}'
             '@{concat(\'Manifest: \', triggerBody()?[\'published_url\'])}'
             '@{concat(\'Recompute the hash in your browser: \', coalesce(triggerBody()?[\'verify_url\'], triggerBody()?[\'published_url\']))}'
