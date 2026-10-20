@@ -202,7 +202,7 @@ export function MediaOffice({ active, runs }: { active: boolean; runs: RunsData 
             <Tile
               label="No fleet worker held the run"
               value={fleet.length >= 2 ? span(fleet[0].end, fleet[1].start) : "not in the files"}
-              note="Between the fleet worker that paused and the new fleet worker that resumed from the durable checkpoint; the decision intake job ran inside this gap."
+              note="Between the fleet worker that paused and the new fleet worker that resumed from the durable checkpoint; the decision intake job started inside this gap and overlapped the new worker."
             />
             <Tile
               label="Editions sealed"

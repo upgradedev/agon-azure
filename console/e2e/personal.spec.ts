@@ -98,19 +98,23 @@ test("live cues show inside a listed cue's window, or the page says none is appr
     await expect(page.getByText(/Live cues: there is no approved charter and no cue file for seed 1 yet/)).toBeVisible();
     return;
   }
-  const cue = (await (await page.request.get(`/cues/${entry.name}`)).json()).cues[0] as { at_s: number; until_s: number };
+  const cues = (await (await page.request.get(`/cues/${entry.name}`)).json()).cues as { at_s: number; until_s: number }[];
+  expect(cues.length, `cues/${entry.name} is listed for seed 1 but holds no cue`).toBeGreaterThan(0);
   const axis = (await (await page.request.get("/match/1.json")).json()).axis as { half_offset_s: number; half_time_s: number };
   const events = (await (await page.request.get("/data/1.ndjson")).text())
     .trim()
     .split("\n")
     .map((line) => JSON.parse(line) as { period: number; minute: number; second: number });
-  /* The replay clock of lib/core.ts buildTimeline: the second half follows the first half's last event. */
-  const p1End = Math.max(...events.filter((e) => e.period === 1).map((e) => e.minute * 60 + e.second)) + 1;
-  const toReplay = (s: number) => (s < axis.half_time_s ? s : p1End + (s - axis.half_offset_s - 2700));
-  const slider = page.getByLabel("Match time");
+  /* The drawn axis of the match analysis, and the replay clock of lib/core.ts buildTimeline (the
+     second half follows the first half's last event). */
+  const clock = (e: { minute: number; second: number }) => e.minute * 60 + e.second;
+  const p1End = Math.max(...events.filter((e) => e.period === 1).map(clock)) + 1;
+  const onAxis = (e: { period: number; minute: number; second: number }) => clock(e) + (e.period === 2 ? axis.half_offset_s : 0);
+  const onReplay = (e: { period: number; minute: number; second: number }) => (e.period === 1 ? clock(e) : p1End + clock(e) - 2700);
+  /* The first cue whose window holds an event: the replay can stand on that event, so the cue applies. */
+  const pick = cues.map((c) => ({ c, e: events.find((e) => c.at_s <= onAxis(e) && onAxis(e) < c.until_s) })).find((x) => x.e);
+  expect(pick, "no listed cue's window holds an event of the replay, so none can be shown").toBeTruthy();
   const label = page.getByText(/Live cue, charter [0-9a-f]{12}/);
-  for (let s = cue.at_s; s < cue.until_s && !(await label.isVisible()); s += 1) {
-    await slider.fill(String(Math.max(0, Math.floor(toReplay(s)))));
-  }
+  await page.getByLabel("Match time").fill(String(onReplay(pick!.e!)));
   await expect(label).toBeVisible();
 });

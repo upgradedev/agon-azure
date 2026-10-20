@@ -71,7 +71,7 @@ export function validateEvidence(body: unknown, runId: string, bundleSha256: str
 export async function loadOps(runId: string, bundleSha256: string): Promise<OpsLoad> {
   const none: OpsLoad = {
     status: "missing",
-    message: `This recorded run has no executions file, so its job timings are not shown; the run file carries the approval time only.`,
+    message: `This recorded run has no executions file, so its job timings are not shown; the run file carries only the time the decision was verified and recorded.`,
   };
   try {
     const list: unknown = JSON.parse((await fetchBytes(OPS_MANIFEST)).text);
