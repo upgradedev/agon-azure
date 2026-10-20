@@ -55,6 +55,7 @@ class StreamId:
     STOPPAGE = 19
     STORYLINE = 20
     FIXTURES = 21
+    KINEMATICS = 22  # agon.synth.kinematics only: ball speeds and personal shape offsets, never the engine
 
 
 def mix64(z: int) -> int:

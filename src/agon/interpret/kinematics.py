@@ -1,12 +1,18 @@
 """Speed and distance triggers named in the brief: top speed at 30 km/h or more, sprint at 25.2 km/h
 or more, and every 2 km of distance.
 
-What exists today, stated plainly: synth-v0.2 generates NO tracking data (DATASET_CARD.md section 8).
-So this module has two parts:
+What exists, stated plainly: the match engine generates events, not tracking. A separate synthetic
+kinematics layer (`agon.synth.kinematics`, DATASET_CARD.md section 2) derives 1 Hz positions for
+every player from a finished event log with a simple, documented motion model and speed and
+acceleration caps. Those positions are synthetic, not measured, and a 1 Hz step speed is a 1-second
+average. This module has three parts:
 
 1. `triggers_from_samples` works on any per-player position stream (milliseconds, decimetres). It
-   is the real trigger logic, tested on hand-built samples, and is what a tracking feed would use.
-2. `carry_proxy` is the events-only adapter: a carry's start-to-end displacement divided by the
+   is the trigger logic, tested on hand-built samples.
+2. `triggers_from_segments` runs the same logic over several streams of one player (one per
+   period), so no speed step bridges half time while distance milestones count across the match.
+   It is what the synthetic tracking layer is read with.
+3. `carry_proxy` is the events-only adapter: a carry's start-to-end displacement divided by the
    time to the next event, at one-second resolution. That is an ON-BALL DISPLACEMENT PROXY, not a
    player's running speed: the clock is whole seconds and the path between two points is unknown.
    Distance milestones are not derivable from events at all (a player's running distance is mostly
@@ -25,12 +31,20 @@ from agon.interpret.frame import MatchView, clock_seconds, minute_label
 SPRINT_KMH_X10 = 252
 TOP_SPEED_KMH_X10 = 300
 MILESTONE_DM = 20_000  # 2 km
+# The two notes below are part of `interpret_match` output, whose hash tests/test_interpret.py pins,
+# so their bytes stay as they are. They describe the events-only proxy and remain true: the match
+# engine (synth-v0.2) itself generates no tracking. TRACKING_NOTE describes the separate layer.
 EVENTS_ONLY_NOTE = (
     "events only: carry displacement over whole-second gaps to the next event; an on-ball proxy, "
     "not running speed. synth-v0.2 generates no tracking data."
 )
 MILESTONES_UNAVAILABLE = (
     "not derivable from events: running distance needs tracking data, which synth-v0.2 does not generate"
+)
+TRACKING_NOTE = (
+    "synthetic tracking: 1 Hz positions derived from the event log by agon.synth.kinematics, a simple "
+    "motion model with team shape, event anchors and speed and acceleration caps; not measured "
+    "positions. Speeds are 1-second averages; distance is the sum of 1-second steps."
 )
 
 
@@ -41,44 +55,73 @@ def speed_kmh_x10(dist_dm: int, dt_ms: int) -> int:
     return dist_dm * 3600 // dt_ms
 
 
-def triggers_from_samples(player: str, samples: Sequence[tuple[int, int, int]]) -> dict[str, Any]:
-    """Triggers for one player's (t_ms, x_dm, y_dm) samples in time order.
+Segment = tuple[Any, Sequence[tuple[int, int, int]]]
 
-    A sprint is a maximal run of consecutive steps at or above 25.2 km/h; a top-speed trigger is a
-    step at or above 30 km/h; a milestone fires each time cumulative distance crosses a 2 km mark.
+
+def _scan(segments: Sequence[Segment]) -> tuple[int, int, list[tuple[Any, int, int]], list[tuple[Any, int]], list[tuple[int, Any, int]]]:
+    """The trigger logic over one or more sample streams of one player.
+
+    A sprint is a maximal run of consecutive steps at or above 25.2 km/h and ends with its stream; a
+    top-speed trigger is a step at or above 30 km/h; a milestone fires each time distance, counted
+    across all streams, crosses a 2 km mark. No step is taken between two streams.
     """
     top = 0
-    sprints: list[dict[str, int]] = []
-    top_speed: list[int] = []
-    milestones: list[dict[str, int]] = []
     dist = 0
-    run_start: int | None = None
-    for (t0, x0, y0), (t1, x1, y1) in zip(samples, samples[1:]):
-        step = isqrt((x1 - x0) ** 2 + (y1 - y0) ** 2)
-        v = speed_kmh_x10(step, t1 - t0)
-        top = max(top, v)
-        before = dist
-        dist += step
-        for mark in range(before // MILESTONE_DM + 1, dist // MILESTONE_DM + 1):
-            milestones.append({"km": mark * MILESTONE_DM // 10_000, "t_ms": t1})
-        if v >= TOP_SPEED_KMH_X10:
-            top_speed.append(t1)
-        if v >= SPRINT_KMH_X10:
-            if run_start is None:
-                run_start = t0
-        elif run_start is not None:
-            sprints.append({"start_ms": run_start, "end_ms": t0})
-            run_start = None
-    if run_start is not None and samples:
-        sprints.append({"start_ms": run_start, "end_ms": samples[-1][0]})
+    sprints: list[tuple[Any, int, int]] = []
+    top_speed: list[tuple[Any, int]] = []
+    milestones: list[tuple[int, Any, int]] = []
+    for label, samples in segments:
+        run_start: int | None = None
+        for (t0, x0, y0), (t1, x1, y1) in zip(samples, samples[1:]):
+            step = isqrt((x1 - x0) ** 2 + (y1 - y0) ** 2)
+            v = speed_kmh_x10(step, t1 - t0)
+            top = max(top, v)
+            before = dist
+            dist += step
+            for mark in range(before // MILESTONE_DM + 1, dist // MILESTONE_DM + 1):
+                milestones.append((mark * MILESTONE_DM // 10_000, label, t1))
+            if v >= TOP_SPEED_KMH_X10:
+                top_speed.append((label, t1))
+            if v >= SPRINT_KMH_X10:
+                if run_start is None:
+                    run_start = t0
+            elif run_start is not None:
+                sprints.append((label, run_start, t0))
+                run_start = None
+        if run_start is not None and samples:
+            sprints.append((label, run_start, samples[-1][0]))
+    return top, dist, sprints, top_speed, milestones
+
+
+def triggers_from_samples(player: str, samples: Sequence[tuple[int, int, int]]) -> dict[str, Any]:
+    """Triggers for one player's (t_ms, x_dm, y_dm) samples in time order (rules in `_scan`)."""
+    top, dist, sprints, top_speed, milestones = _scan([(None, samples)])
     return {
         "player": player,
         "source": "tracking_samples",
         "top_speed_kmh_x10": top,
         "distance_dm": dist,
-        "sprints": sprints,
-        "top_speed_triggers_ms": top_speed,
-        "distance_milestones": milestones,
+        "sprints": [{"start_ms": a, "end_ms": b} for _, a, b in sprints],
+        "top_speed_triggers_ms": [t for _, t in top_speed],
+        "distance_milestones": [{"km": km, "t_ms": t} for km, _, t in milestones],
+    }
+
+
+def triggers_from_segments(player: str, segments: Sequence[tuple[int, Sequence[tuple[int, int, int]]]]) -> dict[str, Any]:
+    """Triggers for one player over (segment, samples) streams, for example one per period.
+
+    Times are each stream's own `t_ms` (for a match, the match clock in ms, which repeats across
+    periods), so every trigger carries its `segment`. Distance and milestones count across segments.
+    """
+    top, dist, sprints, top_speed, milestones = _scan(segments)
+    return {
+        "player": player,
+        "source": "tracking_segments",
+        "top_speed_kmh_x10": top,
+        "distance_dm": dist,
+        "sprints": [{"segment": seg, "start_ms": a, "end_ms": b} for seg, a, b in sprints],
+        "top_speed_triggers": [{"segment": seg, "t_ms": t} for seg, t in top_speed],
+        "distance_milestones": [{"km": km, "segment": seg, "t_ms": t} for km, seg, t in milestones],
     }
 
 

@@ -4,10 +4,12 @@ name: determinism
 # Each OS generates seeds 1,2,3 (matches, fixtures manifest, storyline labels) and the full
 # fictional season 1 (30 matches: one hash line per match plus the season sha256, and the
 # season record) plus the held-out M2 record the Data Lab shows (which must also equal the
-# committed src/agon/synth/bands_heldout.json), uploads hash.txt plus that output, and a final job
+# committed src/agon/synth/bands_heldout.json) plus the synthetic kinematics of seeds 1,2,3
+# (hash lines and the exact web kinematics files, after the M9 cap check), uploads hash.txt plus
+# that output, and a final job
 # compares them. A mismatch prints both hash files and the first diverging line and fails.
-# Two negative controls prove the comparator has teeth: one mutates a seed 1 event, one a
-# season match hash. The check is never relaxed; on divergence, fix the generator.
+# Three negative controls prove the comparator has teeth: one mutates a seed 1 event, one a
+# season match hash, one a kinematics hash. The check is never relaxed; on divergence, fix the generator.
 
 on:
   push:
@@ -75,6 +77,18 @@ jobs:
           fi
           python -c "import sys; a = open(sys.argv[1], 'rb').read(); b = open(sys.argv[2], 'rb').read(); sys.exit(0 if a == b else 'the fresh M2 record differs from src/agon/synth/bands_heldout.json: re-measure and commit it')" artifact/out/bands-heldout.json src/agon/synth/bands_heldout.json
           echo "committed M2 record reproduced"
+      # Synthetic kinematics (metric M9): the CLI exits 1 on any cap violation, so this step is the
+      # gate on every OS, and --mutate (one planted teleport) must make it fail. The hash lines and
+      # the exact web kinematics bytes go under out/, so the compare job diffs them across OS too.
+      - name: Synthetic kinematics, M9 cap check and web files
+        run: |
+          python -m agon.synth.kinematics --seeds "$SEEDS" --print-hash --hash-out artifact/out/kinematics/hash.txt
+          python -m agon.webkinematics --seeds "$SEEDS" --out artifact/out/kinematics/web
+          if python -m agon.synth.kinematics --seeds 1 --mutate > /dev/null; then
+            echo "M9 passed a planted teleport: the check has no teeth"
+            exit 1
+          fi
+          echo "M9 refused the planted teleport as required"
       - uses: actions/upload-artifact@v4
         with:
           name: synth-${{ matrix.os }}
@@ -128,10 +142,26 @@ jobs:
             exit 1
           fi
           echo "season negative control failed as required"
-      - name: Season hash on each OS
+      - name: Negative control on the kinematics (one changed hash must fail the comparator)
+        run: |
+          cp -r hashes/synth-ubuntu-latest mutated-kinematics
+          python - <<'PY'
+          path = "mutated-kinematics/out/kinematics/hash.txt"
+          lines = open(path, "rb").read().split(b"\n")
+          i = next(k for k, line in enumerate(lines) if line.startswith(b"seed 2 "))
+          lines[i] = lines[i][:-1] + (b"0" if lines[i][-1:] != b"0" else b"1")
+          open(path, "wb").write(b"\n".join(lines))
+          PY
+          if python -m agon.synth.crosscheck hashes/synth-ubuntu-latest mutated-kinematics; then
+            echo "comparator passed a mutated kinematics hash: the gate has no teeth"
+            exit 1
+          fi
+          echo "kinematics negative control failed as required"
+      - name: Season and kinematics hashes on each OS
         run: |
           for os in ubuntu-latest windows-latest; do
             echo "$os: $(tail -n 1 "hashes/synth-$os/out/season-$SEASON/hash.txt")"
+            grep "^seed " "hashes/synth-$os/out/kinematics/hash.txt" | sed "s/^/$os: kinematics /"
           done
       - name: Compare ubuntu and windows outputs
         run: python -m agon.synth.crosscheck hashes/synth-ubuntu-latest hashes/synth-windows-latest

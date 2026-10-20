@@ -10,7 +10,8 @@
       "/season/*",
       "/match/*",
       "/cues/*",
-      "/intel/*"
+      "/intel/*",
+      "/kinematics/*"
     ]
   },
   "globalHeaders": {
