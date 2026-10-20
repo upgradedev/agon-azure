@@ -38,8 +38,14 @@ only. No other team, chat or company content may be on screen.
    up to 15 seconds). Keep the actions in the first 13 seconds.
 
 3. card-published (first part of beat 6, "published")
-   The same card after the run publishes, updated in place to Published,
-   naming the destinations that received the report.
+   The same card after the run publishes, updated in place: what was
+   published, what was prepared as a preview and not posted, what was recorded
+   for sending while the send flow is not deployed, and what the officer chose
+   not to send (Instagram). Keep its lines readable; the narration vouches only
+   for what the card shows.
+   Narration over it and the Recap that follows: "The same card now says what
+   was published, what was only prepared, and what the officer left out. One
+   approval covers every edition: Greek, Spanish, French and easy-read."
    It fills the first 6 seconds of the beat; the Recap web capture follows.
    Needs at least 7 seconds of picture after its trim point.
 
@@ -76,7 +82,9 @@ THE FINAL CUT, ON THE OWNER'S MACHINE (ffmpeg 8.1.1, Python standard library onl
 Two preconditions, or the cut would show one run in Teams and another on the web:
   a. The run whose approval the Teams clips recorded is the live site's default
      run (the first in runs/index.json). The web beats and the stills follow the
-     default run, and compose refuses a final cut whose --teams-run differs.
+     default run: the Newsroom Wall, Recap and Verify open it by id, the Match
+     Centre picks its seed in Match setup, and the executions still reads its
+     evidence file. compose refuses a final cut whose --teams-run differs.
   b. evidence/<that run>.executions.json is committed on main. Beat 5's still is
      drawn from it, and the enforced capture fails without it.
 

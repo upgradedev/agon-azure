@@ -14,12 +14,14 @@
   2. Before anything is used, the page's body data-commit must equal
      AGON_VIDEO_RELEASE_SHA. The run is the one the sheet names, or with
      run_id "default" the first run in the live runs/index.json, which must be
-     a pipeline run; facts and routes read it from there, so a new recorded
-     run is picked up without an edit.
+     a pipeline run. Its id, seed and clubs come from its run file: routes and
+     facts use them ({run_id}, {seed}, {home}, {away}), and the Match Centre
+     picks that seed in Match setup, so a new recorded run needs no edit.
   3. The lead mark: compose.py trims everything before it.
   4. The beat's script acts on stable hooks (data-view, data-run-id, roles).
-  5. Every fact the beat lists must hold: text on screen, or text in a file the
-     live site serves (runs/<run>/card.json). The narration says it, so with
+  5. Every fact the beat lists must hold: text on screen, text in a file the
+     live site serves (runs/<run>/manifest.json), or text in this repository
+     (src/agon/fleet/steps.py, for a rule the code makes true on every run). The narration says it, so with
      AGON_VIDEO_FACTS=enforce (the default, and video.yml) a false sentence
      fails here instead of reaching a judge; with report (the rehearsal) it is
      written into the clip receipt and the run goes on.
@@ -34,13 +36,21 @@
   AGON_VIDEO_STILLS (the folder stills.py wrote) and AGON_VIDEO_SITE.
 */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { expect, test, type Browser, type Locator, type Page } from "@playwright/test";
 
 interface Fact {
   text: string;
   within?: string;
   file?: string;
+  repo?: string;
+}
+
+interface RunInfo {
+  id: string;
+  seed: number;
+  home: string;
+  away: string;
 }
 
 interface Part {
@@ -94,6 +104,7 @@ function required(name: string): string {
 }
 
 const sheet = JSON.parse(readFileSync(required("AGON_VIDEO_BEATS"), "utf-8")) as Sheet;
+const repoRoot = resolve(dirname(required("AGON_VIDEO_BEATS")), "..");
 const releaseSha = required("AGON_VIDEO_RELEASE_SHA");
 const clipsDir = required("AGON_VIDEO_CLIPS");
 const stillsDir = process.env.AGON_VIDEO_STILLS ?? "";
@@ -125,25 +136,47 @@ function actionBudget(beat: Beat, part: Part): number {
   return beat.min_seconds - parts(beat).reduce((sum, p) => sum + (p.seconds ?? 0), 0);
 }
 
-function fill(text: string, runId: string): string {
-  return text.replaceAll("{run_id}", runId);
+function fill(text: string, run: RunInfo): string {
+  return text
+    .replaceAll("{run_id}", run.id)
+    .replaceAll("{seed}", String(run.seed))
+    .replaceAll("{home}", run.home)
+    .replaceAll("{away}", run.away);
+}
+
+/* A fact's pattern, with the run's values put in as literal text. */
+function pattern(text: string, run: RunInfo): RegExp {
+  const literal = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(
+    text
+      .replaceAll("{run_id}", literal(run.id))
+      .replaceAll("{seed}", String(run.seed))
+      .replaceAll("{home}", literal(run.home))
+      .replaceAll("{away}", literal(run.away)),
+  );
 }
 
 /* The run the video shows, read from the live site (never a hard-coded id when the sheet says default). */
-async function resolveRun(page: Page): Promise<string> {
+async function resolveRun(page: Page): Promise<RunInfo> {
   const index = (await (await page.request.get(`${site}/runs/index.json`)).json()) as {
     runs: { run_id: string; provenance: string }[];
   };
-  if (sheet.run_id !== "default") {
+  let id = sheet.run_id;
+  if (id !== "default") {
     expect(
       index.runs.map((row) => row.run_id),
-      `the live site lists run ${sheet.run_id}`,
-    ).toContain(sheet.run_id);
-    return sheet.run_id;
+      `the live site lists run ${id}`,
+    ).toContain(id);
+  } else {
+    const first = index.runs[0];
+    expect(first?.provenance, `the live site's default run ${first?.run_id} is a pipeline run`).toBe("pipeline");
+    id = first.run_id;
   }
-  const first = index.runs[0];
-  expect(first?.provenance, `the live site's default run ${first?.run_id} is a pipeline run`).toBe("pipeline");
-  return first.run_id;
+  const response = await page.request.get(`${site}/runs/${id}.json`);
+  expect(response.ok(), `the live site serves runs/${id}.json`).toBe(true);
+  const run = (await response.json()) as { run_id: string; seed: number; home: { name: string }; away: { name: string } };
+  expect(run.run_id, `runs/${id}.json names its own run`).toBe(id);
+  return { id, seed: run.seed, home: run.home.name, away: run.away.name };
 }
 
 /* Change the hash route in place, as a click on a nav link would. */
@@ -159,15 +192,19 @@ async function glide(page: Page, target: Locator, block: "start" | "center" = "c
   await page.waitForTimeout(1200);
 }
 
-type Script = (page: Page, runId: string) => Promise<void>;
+type Script = (page: Page, run: RunInfo) => Promise<void>;
 
 /* Steps before the lead mark, trimmed out of the clip: a click scrolls the page
    to its target, so controls are set here and the clip opens where it should. */
 const PREPARE: Record<string, Script> = {
-  "match-centre": async (page) => {
+  "match-centre": async (page, run) => {
     const view = page.locator('[data-view="home"]');
     await expect(view.locator('section[data-state="ready"]')).toBeVisible({ timeout: 30_000 });
-    await view.locator('label:has(> input[type="radio"][value="60"])').first().click();
+    /* The Match Centre opens on the lowest seed; pick the recorded run's match. */
+    await view.getByRole("group", { name: "Seed" }).locator(`label:has(> input[value="${run.seed}"])`).click();
+    await expect(view.getByText(new RegExp(`seed ${run.seed}\\.`)).filter({ visible: true }).first()).toBeVisible({ timeout: 30_000 });
+    await expect(view.locator('section[data-state="ready"]')).toBeVisible({ timeout: 30_000 });
+    await view.getByRole("group", { name: "Replay speed" }).locator('label:has(> input[value="60"])').click();
     await view.getByRole("button", { name: "Play", exact: true }).click();
     await view.locator('[aria-labelledby="h-replay"]').evaluate((element) => {
       element.scrollIntoView({ block: "start" });
@@ -188,15 +225,15 @@ const SCRIPTS: Record<string, Script> = {
     await glide(page, view.getByRole("heading", { name: "Team stats", exact: true }), "start");
     await page.waitForTimeout(1200);
   },
-  newsroom: async (page, runId) => {
-    await go(page, `#/newsroom/${runId}`);
+  newsroom: async (page, run) => {
+    await go(page, `#/newsroom/${run.id}`);
     const view = page.locator('[data-view="newsroom"]');
     await expect(view).toBeVisible();
     await view.getByRole("button", { name: "Replay the run" }).click();
     await expect(view.getByText(/Showing every step, \d+ in all\./)).toBeVisible({ timeout: 20_000 });
   },
-  published: async (page, runId) => {
-    await go(page, `#/recap/${runId}`);
+  published: async (page, run) => {
+    await go(page, `#/recap/${run.id}`);
     const view = page.locator('[data-view="recap"]');
     await expect(view.locator("#recap-label")).toBeVisible({ timeout: 20_000 });
     for (const tab of [/^EL/, /^ES/, /^FR/, /^Easy-read/]) {
@@ -205,13 +242,13 @@ const SCRIPTS: Record<string, Script> = {
     }
     await page.waitForTimeout(600);
   },
-  verify: async (page, runId) => {
+  verify: async (page, run) => {
     await go(page, "#/verify");
     const view = page.locator('[data-view="verify"]');
     await expect(view).toBeVisible();
     await expect(view.locator('[aria-labelledby="h-bundle"]')).toHaveAttribute("data-state", "done", { timeout: 30_000 });
     await page.waitForTimeout(1500);
-    await glide(page, view.locator(`section[data-run-id="${runId}"]`).getByText(/Approved hash and published hash/));
+    await glide(page, view.locator(`section[data-run-id="${run.id}"]`).getByText(/Approved hash and published hash/));
   },
   "data-lab": async (page) => {
     await go(page, "#/data-lab");
@@ -223,20 +260,25 @@ const SCRIPTS: Record<string, Script> = {
   },
 };
 
-/* Every fact of a part, checked on the page or in a served file; returns [held, failed]. */
-async function checkFacts(page: Page, facts: Fact[], runId: string): Promise<[string[], string[]]> {
+/* Every fact of a part, checked on the page, in a served file or in the repository; returns [held, failed]. */
+async function checkFacts(page: Page, facts: Fact[], run: RunInfo): Promise<[string[], string[]]> {
   const held: string[] = [];
   const failed: string[] = [];
   for (const fact of facts) {
-    const label = fact.file ? `${fact.text} (in ${fill(fact.file, runId)})` : fact.within ? `${fact.text} (within ${fill(fact.within, runId)})` : fact.text;
+    const where = fact.file ? ` (in ${fill(fact.file, run)})` : fact.repo ? ` (in the repository, ${fact.repo})` : fact.within ? ` (within ${fill(fact.within, run)})` : "";
+    const label = `${fill(fact.text, run)}${where}`;
+    const re = pattern(fact.text, run);
     let ok = false;
     if (fact.file) {
-      const response = await page.request.get(`${site}/${fill(fact.file, runId)}`);
-      ok = response.ok() && new RegExp(fact.text).test(await response.text());
+      const response = await page.request.get(`${site}/${fill(fact.file, run)}`);
+      ok = response.ok() && re.test(await response.text());
+    } else if (fact.repo) {
+      const path = join(repoRoot, fact.repo);
+      ok = existsSync(path) && re.test(readFileSync(path, "utf-8"));
     } else {
-      const scope = fact.within ? page.locator(fill(fact.within, runId)) : page.locator("body");
+      const scope = fact.within ? page.locator(fill(fact.within, run)) : page.locator("body");
       ok = await scope
-        .getByText(new RegExp(fact.text))
+        .getByText(re)
         .filter({ visible: true })
         .first()
         .waitFor({ state: "visible", timeout: factsMode === "enforce" ? 30_000 : 5_000 })
@@ -303,14 +345,14 @@ for (const beat of chosen.filter((b) => webPart(b))) {
     const served = await page.locator("body").getAttribute("data-commit");
     expect(served, `the live site serves the release SHA ${releaseSha}`).toBe(releaseSha);
     await page.locator('html[data-app="ready"]').waitFor({ state: "attached", timeout: 30_000 });
-    const runId = await resolveRun(page);
-    await PREPARE[beat.id]?.(page, runId);
+    const run = await resolveRun(page);
+    await PREPARE[beat.id]?.(page, run);
     await page.waitForTimeout(SETTLE_MS);
     const lead = (Date.now() - opened) / 1000;
 
-    await script(page, runId);
+    await script(page, run);
     const scripted = (Date.now() - opened) / 1000 - lead;
-    const [held, failed] = await checkFacts(page, part.facts ?? [], runId);
+    const [held, failed] = await checkFacts(page, part.facts ?? [], run);
 
     /* Enforced, every fact must be on screen inside the budget too; reported, a missing fact's wait is not the clip's. */
     const acted = factsMode === "enforce" ? (Date.now() - opened) / 1000 - lead : scripted;
@@ -336,8 +378,9 @@ for (const beat of chosen.filter((b) => webPart(b))) {
           release_sha: releaseSha,
           data_commit: served,
           site,
-          run_id: runId,
-          route: fill(part.source.slice("web:".length), runId),
+          run_id: run.id,
+          seed: run.seed,
+          route: fill(part.source.slice("web:".length), run),
           viewport: part.viewport ?? "desktop",
           framing,
           theme: sheet.theme,

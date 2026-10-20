@@ -51,7 +51,8 @@ CUE_HOLD_MS = 200  # the last cue stays up a little after the voice stops
 CAPTION_MAX_CHARS = 84  # two lines of 42, the usual subtitle limit
 BACKGROUND = "0x0b0f14"  # behind the visual and in the caption band
 CARD_BACKGROUND = "0x16202c"  # placeholder cards
-WORDS_PER_SECOND_ESTIMATE = 2.5  # ESTIMATE for warnings only, never for timing
+WORDS_PER_SECOND_ESTIMATE = 2.7  # ESTIMATE for warnings only, never for timing: en-GB-SoniaNeural read beat 7
+# (20 words) in 7.224 s, 2.77 words a second, in video run 39349399114; 2.7 leaves a little margin
 
 BEATS_FORMAT = "agon.video-beats/1"
 TIMING_FORMAT = "agon.video-timing/1"
@@ -136,6 +137,8 @@ def _text(value: Any, where: str, *, limit: int = 600) -> str:
         raise BeatSheetError(f"{where} must be non-empty text")
     if any(d in value for d in DASHES):
         raise BeatSheetError(f"{where} contains an em or en dash")
+    if any(ord(c) < 32 for c in value):
+        raise BeatSheetError(f"{where} contains a control character")
     if len(value) > limit:
         raise BeatSheetError(f"{where} is longer than {limit} characters")
     return value.strip()
@@ -179,16 +182,19 @@ def _part(raw: Any, where: str, last: bool) -> Part:
         raise BeatSheetError(f"{where}.facts must be a list")
     clean_facts = []
     for n, fact in enumerate(facts):
-        if not isinstance(fact, dict) or set(fact) - {"text", "within", "file"} or {"within", "file"} <= set(fact):
-            raise BeatSheetError(f"{where}.facts[{n}] must be an object with text and at most one of within or file")
+        where_from = set(fact) & {"within", "file", "repo"} if isinstance(fact, dict) else set()
+        if not isinstance(fact, dict) or set(fact) - {"text", "within", "file", "repo"} or len(where_from) > 1:
+            raise BeatSheetError(f"{where}.facts[{n}] must be an object with text and at most one of within, file or repo")
         clean = {"text": _text(fact.get("text"), f"{where}.facts[{n}].text", limit=200)}
         if "within" in fact:
             clean["within"] = _text(fact["within"], f"{where}.facts[{n}].within", limit=200)
-        if "file" in fact:
-            served = _text(fact["file"], f"{where}.facts[{n}].file", limit=200)
-            if not re.fullmatch(r"[a-z0-9{}_.-]+(/[a-z0-9{}_.-]+)*", served) or ".." in served:
-                raise BeatSheetError(f"{where}.facts[{n}].file must be a path the live site serves, such as runs/{{run_id}}/card.json")
-            clean["file"] = served
+        for key, what in (("file", "a path the live site serves, such as runs/{run_id}/card.json"),
+                          ("repo", "a path in this repository, such as src/agon/fleet/steps.py")):
+            if key in fact:
+                path = _text(fact[key], f"{where}.facts[{n}].{key}", limit=200)
+                if not re.fullmatch(r"[A-Za-z0-9{}_.-]+(/[A-Za-z0-9{}_.-]+)*", path) or ".." in path:
+                    raise BeatSheetError(f"{where}.facts[{n}].{key} must be {what}")
+                clean[key] = path
         try:
             re.compile(clean["text"])
         except re.error as exc:

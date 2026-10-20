@@ -379,7 +379,7 @@ def test_architecture_still_names_the_live_url_the_repo_and_the_load_bearing_sen
 def test_a_served_file_fact_needs_a_path_and_cannot_also_scope_to_the_page():
     good = _broken(lambda d: d["beats"][6]["visual"][0]["facts"].append({"file": "runs/{run_id}/card.json", "text": "x"}))
     bs.parse_sheet(good)
-    with pytest.raises(bs.BeatSheetError, match="at most one of within or file"):
+    with pytest.raises(bs.BeatSheetError, match="at most one of within, file or repo"):
         bs.parse_sheet(_broken(lambda d: d["beats"][6]["visual"][0]["facts"].append(
             {"file": "runs/x.json", "within": "body", "text": "x"})))
     with pytest.raises(bs.BeatSheetError, match="a path the live site serves"):
@@ -407,3 +407,30 @@ def test_clip_runs_reads_every_capture_receipt(tmp_path):
     (tmp_path / "still-close.json").write_text(json.dumps({"format": bs.CLIP_FORMAT, "run_id": "run-a"}), encoding="utf-8")
     (tmp_path / "other.json").write_text(json.dumps({"format": "something-else", "run_id": "run-z"}), encoding="utf-8")
     assert compose.clip_runs(tmp_path) == {"run-a"}
+
+
+def test_every_repository_fact_holds_in_this_checkout():
+    repo_facts = [(b.id, f) for b in bs.load_sheet(SHEET_PATH).beats for p in b.parts for f in p.facts if "repo" in f]
+    assert repo_facts, "the Fact Gate rule is checked in the repository"
+    for beat_id, fact in repo_facts:
+        text = (ROOT / fact["repo"]).read_text(encoding="utf-8")
+        assert re.search(fact["text"], text), (beat_id, fact)
+
+
+def test_the_newsroom_beat_narrates_the_gate_rule_not_one_run_s_retry():
+    beat = next(b for b in bs.load_sheet(SHEET_PATH).beats if b.id == "newsroom")
+    assert "goes back to the writer once" in beat.narration
+    assert "sent a wrong score back" not in beat.narration
+    assert not any("card.json" in f.get("file", "") for p in beat.parts for f in p.facts)
+
+
+def test_the_match_centre_beat_checks_the_seed_and_clubs_of_the_run_it_shows():
+    beat = next(b for b in bs.load_sheet(SHEET_PATH).beats if b.id == "match-centre")
+    texts = [f["text"] for f in beat.part("web").facts]
+    assert any("seed {seed}" in t for t in texts) and "{home}" in texts and "{away}" in texts
+
+
+def test_a_repository_fact_names_a_path_inside_the_repository():
+    bs.parse_sheet(_broken(lambda d: d["beats"][6]["visual"][0]["facts"].append({"repo": "src/agon/fleet/steps.py", "text": "x"})))
+    with pytest.raises(bs.BeatSheetError, match="a path in this repository"):
+        bs.parse_sheet(_broken(lambda d: d["beats"][6]["visual"][0]["facts"].append({"repo": "../etc/passwd", "text": "x"})))

@@ -30,10 +30,16 @@
         {
           "source": "web:#/",
           "viewport": "phone",
-          "actions": "Match Centre at 375 px on the recorded run's match: the scoreboard and replay at 60x, then the win probability chart and team stats that agon.interpret computes (lane D4)",
+          "actions": "Match Centre at 375 px on the recorded run's match (its seed picked in Match setup): the scoreboard and replay at 60x, then the win probability chart and team stats that agon.interpret computes (lane D4)",
           "facts": [
             {
-              "text": "Synthetic match, .*seed \\d+"
+              "text": "Synthetic match, .*seed {seed}\\."
+            },
+            {
+              "text": "{home}"
+            },
+            {
+              "text": "{away}"
             },
             {
               "text": "\\(home\\)"
@@ -58,33 +64,41 @@
     },
     {
       "id": "newsroom",
-      "narration": "At the whistle, Microsoft Foundry agents in a Microsoft Agent Framework workflow pick the turning points and write the report. Code checks every number and name; here the Fact Gate sent a wrong score back to the writer, once.",
+      "narration": "At the whistle, Microsoft Foundry agents in a Microsoft Agent Framework workflow pick the turning points and write the report. Code checks every number, name and minute against the event log, and a failing sentence goes back to the writer once before the officer sees anything.",
       "visual": [
         {
           "source": "web:#/newsroom/{run_id}",
-          "actions": "Newsroom Wall at 1920 on the recorded run: Replay the run, so each desk fills step by step",
+          "actions": "Newsroom Wall at 1920 on the recorded run: Replay the run, so each desk fills step by step, to the Fact Gate verdict",
           "facts": [
             {
-              "text": "by a Microsoft Foundry agent",
+              "text": "[1-9]\\d* by a Microsoft Foundry agent",
               "within": "[data-view=\"newsroom\"]"
             },
             {
-              "text": "Checked every number, name and minute",
+              "text": "Checked every number, name and minute in the headline report: pass",
               "within": "[data-view=\"newsroom\"]"
             },
             {
-              "file": "runs/{run_id}/card.json",
-              "text": "\"code\":\\s*\"factgate_retry\""
+              "text": "Fact Gate: pass, as sealed in the bundle manifest",
+              "within": "[data-view=\"newsroom\"]"
             },
             {
-              "file": "runs/{run_id}/card.json",
-              "text": "sent back to the Writer once: s\\d+: score written as"
+              "repo": "src/agon/fleet/steps.py",
+              "text": "a Fact Gate mismatch: one retry through the Writer, then a template line with corrected claims"
+            },
+            {
+              "repo": "src/agon/fleet/steps.py",
+              "text": "add_flag\\(d, \"factgate_retry\", f\"sent back to the Writer once"
+            },
+            {
+              "repo": "src/agon/fleet/contracts.py",
+              "text": "MAX_WRITER_ATTEMPTS = 2[^0-9]"
             }
           ]
         }
       ],
       "min_seconds": 14,
-      "max_seconds": 17
+      "max_seconds": 18.5
     },
     {
       "id": "officer-approves",
@@ -112,12 +126,12 @@
     },
     {
       "id": "published",
-      "narration": "The same card now says where the report went: the club site, the feeds, Greek, Spanish, French, an easy-read edition and audio, from one approval.",
+      "narration": "The same card now says what was published, what was only prepared, and what the officer left out. One approval covers every edition: Greek, Spanish, French and easy-read.",
       "visual": [
         {
           "source": "teams:card-published",
           "seconds": 6,
-          "actions": "the card updated in place to Published, naming the destinations"
+          "actions": "the card updated in place: what was published, what was prepared and not posted or not sent, and what the officer left out"
         },
         {
           "source": "web:#/recap/{run_id}",
@@ -140,16 +154,20 @@
               "within": "[role=\"tablist\"][aria-label=\"Editions\"]"
             },
             {
-              "file": "runs/{run_id}.json",
-              "text": "Club website \\(CMS feed\\) and RSS and JSON Feed received the approved bytes"
+              "file": "runs/{run_id}/manifest.json",
+              "text": "report-el\\.json"
             },
             {
               "file": "runs/{run_id}/manifest.json",
-              "text": "audio-el\\.mp3"
+              "text": "report-es\\.json"
             },
             {
               "file": "runs/{run_id}/manifest.json",
-              "text": "audio-easy\\.mp3"
+              "text": "report-fr\\.json"
+            },
+            {
+              "file": "runs/{run_id}/manifest.json",
+              "text": "report-easy\\.json"
             }
           ]
         }
