@@ -1,0 +1,81 @@
+<!doctype html>
+<!--
+  The closing still of the submission video (beat "close"), 1920 x 930: the picture
+  area above the caption band. Text only, no logos or marks. Rendered to a PNG by
+  console/e2e/video-capture.ts after ci/video/stills.py checks that it carries the
+  live URL, the repo URL and the load-bearing sentence. Every box names a component
+  that runs in the deployed pipeline (STATE.md, "FIRST REAL RUN END TO END").
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Agon architecture</title>
+<style>
+  html, body { margin: 0; width: 1920px; height: 930px; background: #0b0f14; color: #e6edf3;
+    font-family: "DejaVu Sans", "Segoe UI", Arial, sans-serif; overflow: hidden; }
+  .head { position: absolute; left: 110px; top: 44px; }
+  .name { font-size: 64px; font-weight: 700; letter-spacing: .01em; }
+  .tag { font-size: 25px; color: #9aa7b4; margin-top: 6px; }
+  .lane { position: absolute; left: 110px; right: 110px; display: flex; align-items: stretch; gap: 0; }
+  .lane.top { top: 200px; }
+  .lane.bottom { top: 456px; }
+  .box { flex: 1 1 0; min-width: 0; min-height: 118px; background: #111821; border: 1px solid #26303b; border-radius: 14px; padding: 16px 16px; }
+  .box b { display: block; font-size: 21px; line-height: 1.25; }
+  .box span { display: block; font-size: 17px; color: #9aa7b4; margin-top: 8px; line-height: 1.35; }
+  .box.ms b { color: #7ee2b8; }
+  .arrow { flex: 0 0 46px; display: flex; align-items: center; justify-content: center; font-size: 30px; color: #3fb68b; }
+  .turn { position: absolute; right: 150px; top: 408px; font-size: 22px; color: #3fb68b; }
+  .note { position: absolute; left: 110px; top: 408px; font-size: 20px; color: #9aa7b4; }
+  .lb { position: absolute; left: 110px; right: 110px; top: 664px; font-size: 33px; line-height: 1.45; font-weight: 600; }
+  .lb em { font-style: normal; color: #7ee2b8; }
+  .links { position: absolute; left: 110px; right: 110px; top: 800px; font-size: 24px; line-height: 1.6; }
+  .links span { display: inline-block; min-width: 260px; color: #9aa7b4; }
+  .links code { font-family: "DejaVu Sans Mono", Consolas, monospace; font-size: 24px; color: #e6edf3; }
+</style>
+</head>
+<body>
+  <div class="head">
+    <div class="name">Agon</div>
+    <div class="tag">A governed full-time match report for a fictional club media office, on synthetic data</div>
+  </div>
+
+  <div class="lane top">
+    <div class="box"><b>Full-time whistle</b><span>synthetic event log of a seeded fictional match</span></div>
+    <div class="arrow">&#8594;</div>
+    <div class="box ms"><b>Microsoft Agent Framework workflow</b><span>fleet worker job on Azure Container Apps</span></div>
+    <div class="arrow">&#8594;</div>
+    <div class="box ms"><b>Microsoft Foundry agents</b><span>analyst, writer and localiser-editor write the report</span></div>
+    <div class="arrow">&#8594;</div>
+    <div class="box ms"><b>Azure AI Translator and Azure AI Speech</b><span>Greek, Spanish and French editions; audio of every edition</span></div>
+    <div class="arrow">&#8594;</div>
+    <div class="box"><b>Deterministic gates</b><span>the Fact Gate checks every number and name in every language; the Rights Guard</span></div>
+    <div class="arrow">&#8594;</div>
+    <div class="box ms"><b>Sealed bundle, durable checkpoint</b><span>one sha256; the workflow waits in Azure Cosmos DB</span></div>
+  </div>
+
+  <div class="note">The worker process ends while the card waits.</div>
+  <div class="turn">&#8595; card posted</div>
+
+  <div class="lane bottom">
+    <div class="box ms"><b>Public console</b><span>Azure Static Web Apps; Verify recomputes every hash in your browser</span></div>
+    <div class="arrow">&#8592;</div>
+    <div class="box ms"><b>Publisher job</b><span>publishes the approved bytes once, create-only, to Azure Blob Storage</span></div>
+    <div class="arrow">&#8592;</div>
+    <div class="box ms"><b>A new worker process</b><span>resumes from the checkpoint</span></div>
+    <div class="arrow">&#8592;</div>
+    <div class="box ms"><b>Decision intake job</b><span>one verifier checks the decision against the sealed hash</span></div>
+    <div class="arrow">&#8592;</div>
+    <div class="box ms"><b>Microsoft Teams approval card</b><span>Azure Logic Apps; the media officer approves that exact hash</span></div>
+  </div>
+
+  <div class="lb">
+    Take <em>Foundry</em> out and no report exists. Take the <em>checkpoint</em> out and an approval cannot survive a restart.
+    Take <em>Teams</em> out and nothing publishes.
+  </div>
+
+  <div class="links">
+    <div><span>Live demo, no login</span><code>https://jolly-stone-0c9c8a003.4.azurestaticapps.net</code></div>
+    <div><span>Code</span><code>https://github.com/upgradedev/agon-azure</code></div>
+  </div>
+</body>
+</html>
