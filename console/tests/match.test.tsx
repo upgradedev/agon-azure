@@ -158,7 +158,7 @@ describe("every view of the analysis renders", () => {
   });
 });
 
-describe("live cues", () => {
+describe("timed cues", () => {
   const cue: Cue = { at_s: 100, until_s: 108, kind: "goal", text: { en: "Goal", el: "Γκολ" } };
 
   it("are drawn only from a valid file under an approved charter", () => {

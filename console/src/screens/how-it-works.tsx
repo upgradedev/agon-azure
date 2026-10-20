@@ -1,8 +1,9 @@
 /*
-  "How Agon works": the pipeline as built in the repository, stage by stage.
-  Every node is a button; choosing one shows what it does, what exists today
-  and its evidence (a file and line at one commit of main, or a green CI run).
-  On a wide screen the details sit beside the diagram; on a phone they open
+  "How Agon works": the pipeline as built in the repository, stage by stage,
+  and what of it ran in Azure for the recorded run. Every node is a button;
+  choosing one shows what it does, what exists today and its evidence (a file
+  and line at one commit of main, a green CI run, or the recorded run's
+  sealed manifest on the public feed). On a wide screen the details sit beside the diagram; on a phone they open
   in a sheet.
 */
 import { useRef, useState } from "react";
@@ -12,12 +13,23 @@ import { Badge, type BadgeTone } from "../components/ui/badge";
 import { Dialog } from "../components/ui/dialog";
 import { EvidenceList } from "../components/evidence-list";
 import { ScreenHeader, View } from "../components/screen";
-import { EVIDENCE_SHA, PIPELINE, STATUS_WORDS, type NodeStatus, type PipelineNode } from "../lib/evidence";
+import {
+  DRILL_RUN_ID,
+  EVIDENCE_SHA,
+  FEED_URL,
+  PIPELINE,
+  RECORDED_BUNDLE,
+  RECORDED_EXECUTIONS,
+  STATUS_WORDS,
+  type NodeStatus,
+  type PipelineNode,
+} from "../lib/evidence";
 import { REPO_URL } from "../lib/commit";
 import { cn } from "../lib/cn";
 import { useWide } from "../hooks/stores";
 
 const STATUS_TONE: Record<NodeStatus, BadgeTone> = {
+  azure: "success",
   live: "success",
   ci: "info",
   repo: "neutral",
@@ -72,8 +84,8 @@ export function HowItWorks({ active }: { active: boolean }) {
       <ScreenHeader
         view="how-it-works"
         eyebrow="How Agon works"
-        title="From the final whistle to a verified report"
-        lead="The pipeline as it is built in the public repository; choose any step to see what it does, what exists today and the file or CI run that proves it."
+        title="From the event log to a verified report"
+        lead="The pipeline as it is built in the public repository and as it ran in Azure for the recorded run; choose any step to see what it does, what exists today and the file, CI run or published file that proves it."
       />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_26rem]">
@@ -144,6 +156,16 @@ export function HowItWorks({ active }: { active: boolean }) {
           <CardTitle id="h-honest">How to read the status labels</CardTitle>
         </CardHeader>
         <CardBody className="space-y-2 text-sm leading-6 text-muted">
+          <p>
+            "{STATUS_WORDS.azure}" means the step ran in the deployed Azure resources for the recorded run of 2026-10-19: an operator started it
+            with <a href={`${REPO_URL}/actions/runs/${DRILL_RUN_ID}`}>drill run {DRILL_RUN_ID}</a>, the Container Apps job executions, read from
+            Azure, are in{" "}
+            <a href={`${REPO_URL}/blob/${EVIDENCE_SHA}/${RECORDED_EXECUTIONS}`} className="font-mono break-all">
+              {RECORDED_EXECUTIONS}
+            </a>
+            , and the <a href={`${FEED_URL}${RECORDED_BUNDLE}/manifest.json`}>sealed manifest on the public feed</a> names the agents and the gate
+            verdicts.
+          </p>
           <p>
             "Live on this site" means a visitor can see it working here. "In the repo, tested in CI" means the code is public and a green GitHub
             Actions run exercised it; it is not a running service. "Not deployed yet" means exactly that, and this page says it in the same

@@ -1,6 +1,7 @@
 /*
-  Live cues: timed, machine-readable overlay lines for the replay, published
-  per seed as cues/<seed>.json under an approved charter hash. ci/stamp_web.py
+  Timed cues: machine-readable overlay lines timed to the replay (not a live
+  or real-time feed), published per seed as cues/<seed>.json under an
+  approved charter hash. ci/stamp_web.py
   lists the cue files present in cues/manifest.json (an empty list until a
   charter is approved); the console reads the list first and fetches a seed's
   file only when it is listed, re-hashing it against the list. Until a cue file
@@ -68,7 +69,7 @@ export function validateCues(body: unknown, seed: number): string[] {
 
 const NONE = (seed: number): CueLoad => ({
   status: "missing",
-  message: `Live cues: there is no approved charter and no cue file for seed ${seed} yet, so no lower-third is shown.`,
+  message: `Timed cues: there is no approved charter and no cue file for seed ${seed} yet, so no lower-third is shown.`,
 });
 
 export async function loadCues(seed: number): Promise<CueLoad> {
@@ -97,7 +98,7 @@ export async function loadCues(seed: number): Promise<CueLoad> {
     if (/answered 404|returned a web page/.test(text)) {
       return NONE(seed);
     }
-    return { status: "error", message: `Live cues could not be read: ${text}.` };
+    return { status: "error", message: `Timed cues could not be read: ${text}.` };
   }
 }
 

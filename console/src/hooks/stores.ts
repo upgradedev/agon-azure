@@ -3,9 +3,14 @@
 
   Each hook has a server snapshot that the prerender uses and the first client
   render repeats, so hydration sees the same markup; React then re-renders
-  with the real browser value. That is how the hash route, the theme, the
-  stamped commit, a skipped guide and the motion preference reach the page
-  without a hydration mismatch.
+  with the real browser value. That is how the hash route, the theme, a
+  skipped guide and the motion preference reach the page without a hydration
+  mismatch.
+
+  The stamped commit is the exception: ci/stamp_web.py writes it into the
+  prerendered build label at deploy time, so in the browser the hydration
+  snapshot reads <body data-commit> as well (lib/commit.ts). An unstamped
+  page reads as null in both, which is what the prerender wrote.
 */
 import { useSyncExternalStore } from "react";
 import { HOME, parseHash, type Route } from "../lib/router";
@@ -88,12 +93,12 @@ function noSubscribe(): () => void {
   return () => undefined;
 }
 
+function commitSnapshot(): string | null {
+  return stampedCommit(document.body.getAttribute("data-commit"));
+}
+
 export function useCommit(): string | null {
-  return useSyncExternalStore(
-    noSubscribe,
-    () => stampedCommit(document.body.getAttribute("data-commit")),
-    () => null,
-  );
+  return useSyncExternalStore(noSubscribe, commitSnapshot, () => (typeof document === "undefined" ? null : commitSnapshot()));
 }
 
 /* ------------------------------------------------------------- guide */

@@ -2,7 +2,7 @@
   "Your view": the viewer's own way through the match, remembered per browser
   (hooks/preferences). Fan or Analyst mode, a favourite club and player,
   following that player, one metric, and a language for the report editions
-  and the live cues. Every control is a native form control with a visible
+  and any timed cues on the replay. Every control is a native form control with a visible
   label, so it works by keyboard and with a screen reader.
 */
 import { useId } from "react";
@@ -146,7 +146,7 @@ export function YourView({ prefs, file, clubs }: { prefs: Preferences; file: Mat
           options={LANGUAGES.map((l) => ({ value: l, label: LANGUAGE_WORDS[l] }))}
         />
         <p id={ids.lang} className="mt-1.5 text-xs leading-5 text-muted">
-          Opens the report in that edition (English, Greek, Spanish, French or easy-read English) and picks the language of the live cues; the console&apos;s own
+          Opens the report in that edition (English, Greek, Spanish, French or easy-read English) and picks the language of timed cues on the replay, when a cue file exists; the console&apos;s own
           words stay in English.
         </p>
       </div>

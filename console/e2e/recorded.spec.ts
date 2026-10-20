@@ -96,6 +96,6 @@ test("a committed cue file reaches the replay as a lower-third, labelled with it
   await page.getByLabel("Match time").focus();
   await page.keyboard.press("End");
   await expect(page.getByText(/Rehearsal cue: this lower-third comes from a committed test file/)).toBeVisible();
-  await expect(page.getByText("Live cue, charter 000000000000")).toBeVisible();
+  await expect(page.getByText("Timed cue, charter 000000000000")).toBeVisible();
   await page.screenshot({ path: "screenshots/24-recorded-cue-lower-third-1280-light.png" });
 });

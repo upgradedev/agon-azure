@@ -56,8 +56,10 @@ export const STANDIN_HEADER =
   "Stand-in for the Microsoft Teams card. In this public build it sends no decision; the real card is posted in the Microsoft Teams channel of the club media office.";
 export const APPROVED_LABEL_PREFIX =
   "AI-drafted. Numbers and names checked by code. Headline report and flagged sentences approved by the club media office at ";
+/* The stand-in card has no decision channel; the Teams card's decisions reach the one verifier
+   through a queue and the decision intake job (Ran in Azure for the recorded run). */
 export const NOT_DEPLOYED_SENTENCE =
-  "The decision endpoint is not deployed yet, so Approve and Request changes on this stand-in card explain what they would send instead of sending it.";
+  "This public page has no decision channel of its own, so Approve and Request changes on this stand-in card explain what they would send instead of sending it. Decisions on the Teams card reach the verifier through a queue and the decision intake job.";
 
 export const STATES: BundleState[] = ["DRAFT", "CHECKED", "SEALED", "AWAITING_APPROVAL", "APPROVED", "PUBLISHED", "CHANGES_REQUESTED"];
 /* The four states the wall walks through before a person decides. */
@@ -146,8 +148,7 @@ export const PREVIEW_ONLY: DestinationId[] = ["instagram", "youtube"];
 const DESTINATION_STATUSES: DestinationStatus[] = ["delivered", "preview_not_posted", "not_selected", "not_offered"];
 /* The notes agon.publish.webview requires, verbatim. */
 export const PREVIEW_LABEL = "Preview: not posted; posting needs Meta and Google app approval.";
-export const OUTBOX_LABEL =
-  "Not sent yet: the payload and its queue message are recorded; the send is a Logic App step that is not deployed yet.";
+export const OUTBOX_LABEL = "Not sent yet: the payload and its queue message are recorded; no code path sends them yet.";
 export const WAITING_NOTE = "Approved; not written yet: the Publisher job has not published this bundle.";
 const PREVIEW_KEYS = ["kind", "note", "path", "payload_sha256", "text", "title"];
 
@@ -640,7 +641,7 @@ export function approveAttempt(run: Run, tickedRowIds: string[], destinationLabe
 
 export function destinationsSentence(labels: string[]): string {
   if (!labels.length) {
-    return "No destination is ticked, so even a deployed endpoint would have published to none of the club's channels.";
+    return "No destination is ticked, and the verifier refuses an approval that ticks none of the destinations the bundle offers.";
   }
   return `It would have gone to ${labels.length === 1 ? "one destination" : `${labels.length} destinations`}: ${joinLabels(labels)}. None of them received anything.`;
 }
@@ -649,15 +650,14 @@ export function notDeployedMessage(action: "approve" | "changes", run: Run, dest
   const hash = shortHash(run.bundle.sha256);
   if (action === "approve") {
     return (
-      "Nothing was approved or published. The decision endpoint is not deployed yet, so this stand-in card " +
-      `could not send your approval of bundle ${hash}. Once the decision endpoint is deployed, Approve sends ` +
-      `that exact hash to the same endpoint the Teams card calls. ${destinationsSentence(destinationLabels)}`
+      "Nothing was approved or published. This stand-in card has no decision channel, so it could not send your " +
+      `approval of bundle ${hash}. On the Teams card, the same approval goes through a queue to the decision intake ` +
+      `job, which checks it with the one verifier before anything is published. ${destinationsSentence(destinationLabels)}`
     );
   }
   return (
-    "Nothing was sent. The decision endpoint is not deployed yet, so this stand-in card could not send a " +
-    `change request for bundle ${hash}. Once the decision endpoint is deployed, Request changes goes to ` +
-    "the same endpoint the Teams card calls."
+    "Nothing was sent. This stand-in card has no decision channel, so it could not send a change request for " +
+    `bundle ${hash}. On the Teams card, a change request takes the same queue to the decision intake job.`
   );
 }
 

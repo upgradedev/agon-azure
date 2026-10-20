@@ -86,7 +86,7 @@ test("the scoreboard and timeline say whose phase it is in words, not colour alo
 /* Before a charter is approved the page says so. Once web/cues/1.json is exported, the replay is
    moved to the first listed cue's window (real cues last a few seconds around their trigger) and
    its lower-third must show there, labelled with the charter hash. */
-test("live cues show inside a listed cue's window, or the page says none is approved", async ({ page }) => {
+test("timed cues show inside a listed cue's window, or the page says none is approved", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.emulateMedia({ colorScheme: "light", reducedMotion: "reduce" });
   await page.goto("/");
@@ -95,7 +95,7 @@ test("live cues show inside a listed cue's window, or the page says none is appr
   const list = await (await page.request.get("/cues/manifest.json")).json();
   const entry = (list.files as { seed: number; name: string }[]).find((f) => f.seed === 1);
   if (!entry) {
-    await expect(page.getByText(/Live cues: there is no approved charter and no cue file for seed 1 yet/)).toBeVisible();
+    await expect(page.getByText(/Timed cues: there is no approved charter and no cue file for seed 1 yet/)).toBeVisible();
     return;
   }
   const cues = (await (await page.request.get(`/cues/${entry.name}`)).json()).cues as { at_s: number; until_s: number }[];
@@ -114,7 +114,7 @@ test("live cues show inside a listed cue's window, or the page says none is appr
   /* The first cue whose window holds an event: the replay can stand on that event, so the cue applies. */
   const pick = cues.map((c) => ({ c, e: events.find((e) => c.at_s <= onAxis(e) && onAxis(e) < c.until_s) })).find((x) => x.e);
   expect(pick, "no listed cue's window holds an event of the replay, so none can be shown").toBeTruthy();
-  const label = page.getByText(/Live cue, charter [0-9a-f]{12}/);
+  const label = page.getByText(/Timed cue, charter [0-9a-f]{12}/);
   await page.getByLabel("Match time").fill(String(onReplay(pick!.e!)));
   await expect(label).toBeVisible();
 });

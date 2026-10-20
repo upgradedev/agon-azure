@@ -61,7 +61,7 @@ for (const viewport of [
       await page.getByLabel(/Confirm the referee sentence/).check();
       await page.getByLabel(/Confirm the injury sentence/).check();
       await approve.click();
-      await expect(page.getByText(/Nothing was approved or published\. The decision endpoint is not deployed yet/)).toBeVisible();
+      await expect(page.getByText(/Nothing was approved or published\. This stand-in card has no decision channel/)).toBeVisible();
       await expect(page.getByText(/None of them received anything\./)).toBeVisible();
     } else {
       await expect(page.getByText(/This run is not waiting for approval: its bundle state is/)).toBeVisible();

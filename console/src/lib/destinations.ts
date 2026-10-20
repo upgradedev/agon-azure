@@ -9,7 +9,7 @@
   key, so the card shows the six registry chips and says in the same sentence
   that they are a design preview.
 */
-import type { DestinationId, Run } from "./types";
+import type { DestinationId, DestinationPreview, Run } from "./types";
 import { DESTINATION_LABELS, OUTBOX_LABEL, PREVIEW_LABEL, PREVIEW_ONLY } from "./runs";
 
 export const PREVIEW_ONLY_SENTENCE = PREVIEW_LABEL;
@@ -43,6 +43,20 @@ export function isPreviewOnly(id: DestinationId): boolean {
   return PREVIEW_ONLY.includes(id);
 }
 
+/* A delivered destination got a rendering of its approved payload, not the payload bytes
+   themselves: the club website gets an HTML page and the feeds a JSON Feed item, each written
+   to the public feed container. The approved bytes are the sealed destination-<id>.json, named
+   by its sha256 in the manifest, which Verify recomputes. */
+export function deliveredSentence(id: DestinationId, preview: DestinationPreview | null): string {
+  if (!preview?.path) {
+    return "Delivered.";
+  }
+  return (
+    `Delivered: rendered from the approved payload destination-${id}.json (sha256 ${preview.payload_sha256.slice(0, 12)}) ` +
+    `and written to ${preview.path} on the public feed.`
+  );
+}
+
 export function chipsFor(run: Run): ChipSet {
   const rows = run.destinations;
   if (Array.isArray(rows) && rows.length === DESTINATION_LABELS.length) {
@@ -51,7 +65,7 @@ export function chipsFor(run: Run): ChipSet {
       chips: rows.map((row) => {
         let status: string;
         if (row.status === "delivered") {
-          status = row.preview?.path ? `Delivered: the approved bytes were written to ${row.preview.path}.` : "Delivered.";
+          status = deliveredSentence(row.id, row.preview);
         } else if (row.status === "preview_not_posted") {
           status = row.preview?.note ?? "Approved and rendered, not posted or sent.";
         } else if (row.status === "not_selected") {

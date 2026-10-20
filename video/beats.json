@@ -75,7 +75,7 @@
               "within": "[data-view=\"newsroom\"]"
             },
             {
-              "text": "Checked every number, name and minute in the headline report: pass",
+              "text": "Recomputed every number, name and minute the headline report claims from the event log, and matched every number written in digits to a claim: pass",
               "within": "[data-view=\"newsroom\"]"
             },
             {

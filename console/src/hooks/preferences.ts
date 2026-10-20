@@ -2,7 +2,7 @@
   The viewer's own view of a match, remembered per browser: Fan or Analyst
   mode, a favourite club and player, following that player through the match,
   one metric to tell the match through, and a language for the report editions
-  and the live cues. Storage can be blocked (private windows), so every access
+  and any timed cues on the replay. Storage can be blocked (private windows), so every access
   goes through lib/storage (try/catch) and the page works the same without it.
   The server renders the defaults; the browser's choices apply after hydration.
 */

@@ -68,7 +68,7 @@ test("How it works opens each node's evidence in a sheet on a phone", async ({ p
   await node.click();
   const sheet = page.getByRole("dialog", { name: "Fact Gate" });
   await expect(sheet).toBeVisible();
-  await expect(sheet.getByRole("link", { name: /src\/agon\/governance\/factgate\.py:276/ })).toBeVisible();
+  await expect(sheet.getByRole("link", { name: /src\/agon\/governance\/factgate\.py:320/})).toBeVisible();
   await expectNoSeriousAxe(page, "evidence sheet");
   await page.screenshot({ path: "screenshots/13-evidence-sheet-375-dark.png" });
   await page.keyboard.press("Escape");

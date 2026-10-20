@@ -6,8 +6,9 @@
   versus what is gate-cleared only, the Desk Editor's flags, the Confirm rows
   that must be ticked, and the destinations that would receive the approved
   bytes. Approve is never disabled: it names any unticked Confirm row, and with
-  all ticked it says in a full sentence that the decision endpoint is not
-  deployed yet, so nothing was approved and nothing was sent.
+  all ticked it says in a full sentence that this card has no decision channel,
+  so nothing was approved and nothing was sent; decisions on the Teams card
+  reach the verifier through a queue and the decision intake job.
 */
 import { useId, useRef, useState } from "react";
 import { ArrowRight, Inbox, ShieldCheck } from "lucide-react";
@@ -343,7 +344,7 @@ export function Approve({ active, loaded, error, blownSeed, onDecided }: Props) 
         <aside className="min-w-0 space-y-6">
           <Card aria-labelledby="h-after">
             <CardHeader>
-              <CardTitle id="h-after">What Approve sends, once the endpoint is deployed</CardTitle>
+              <CardTitle id="h-after">What Approve would send if this card had a decision channel</CardTitle>
             </CardHeader>
             <CardBody>
               <ol className="space-y-3 text-sm leading-6 text-muted">
@@ -352,12 +353,14 @@ export function Approve({ active, loaded, error, blownSeed, onDecided }: Props) 
                   Confirm rows, never the text.
                 </li>
                 <li>
-                  <strong className="text-fg">One verifier.</strong> The same check runs for the Teams card, an Outlook approval email, a signed link
-                  and this card: hash, nonce unused, not expired, approver role, consumed once.
+                  <strong className="text-fg">One verifier.</strong> Today the Teams card&apos;s decision runs through it in the decision intake job:
+                  hash, nonce unused, not expired, approver role, consumed once. The Outlook approval email (built, waiting for the owner&apos;s
+                  consent), a signed link and this card are built to call the same verifier and are not deployed.
                 </li>
                 <li>
-                  <strong className="text-fg">Resume and publish.</strong> The waiting workflow resumes from its checkpoint and publishes those bytes,
-                  and only those, to the ticked destinations.
+                  <strong className="text-fg">Resume and publish.</strong> The waiting workflow resumes from its checkpoint, and the Publisher writes
+                  those bytes, and only those, to the club website and the feeds. Instagram and YouTube get previews that are not posted; the
+                  newsroom and journalist messages are written, not sent.
                 </li>
               </ol>
               <a href={hrefFor("how-it-works")} className="mt-4 inline-flex items-center gap-1.5 text-sm font-medium">
