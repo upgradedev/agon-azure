@@ -24,8 +24,7 @@ test("Listen plays the recorded run's own report per edition, with captions", as
   await expect(page.getByText(/The Greek goal line:/)).toBeVisible();
   await expect(page.locator('audio[src$="audio-el.mp3"]')).toHaveCount(1);
   await expectNoSeriousAxe(page, "listen 1280");
-  await page.getByRole("heading", { name: "Listen to the Greek report" }).scrollIntoViewIfNeeded();
-  await page.screenshot({ path: "screenshots/40-listen-greek-1280-light.png" });
+  await page.locator('section[aria-labelledby="h-listen"]').screenshot({ path: "screenshots/40-listen-greek-1280-light.png" });
 });
 
 test("Pitch Sound starts only on a tap and can be muted", async ({ page }) => {
