@@ -161,15 +161,27 @@ async function glide(page: Page, target: Locator, block: "start" | "center" = "c
 
 type Script = (page: Page, runId: string) => Promise<void>;
 
+/* Steps before the lead mark, trimmed out of the clip: a click scrolls the page
+   to its target, so controls are set here and the clip opens where it should. */
+const PREPARE: Record<string, Script> = {
+  "match-centre": async (page) => {
+    const view = page.locator('[data-view="home"]');
+    await expect(view.locator('section[data-state="ready"]')).toBeVisible({ timeout: 30_000 });
+    await view.locator('label:has(> input[type="radio"][value="60"])').first().click();
+    await view.getByRole("button", { name: "Play", exact: true }).click();
+    await view.locator('[aria-labelledby="h-replay"]').evaluate((element) => {
+      element.scrollIntoView({ block: "start" });
+      window.scrollBy(0, -64);
+    });
+  },
+};
+
 /* One script per beat id; each acts on hooks the console's own tests rely on. */
 const SCRIPTS: Record<string, Script> = {
   "match-centre": async (page) => {
     const view = page.locator('[data-view="home"]');
-    await expect(view.locator('section[data-state="ready"]')).toBeVisible({ timeout: 30_000 });
-    await glide(page, view.locator('[aria-labelledby="h-replay"]'), "start");
-    await view.locator('label:has(> input[type="radio"][value="60"])').first().click();
-    await view.getByRole("button", { name: "Play", exact: true }).click();
-    await page.waitForTimeout(2600);
+    /* Opens on the scoreboard with the replay already running (see PREPARE). */
+    await page.waitForTimeout(3500);
     /* The interpret charts (lane D4): win probability, then team stats with expected goals. */
     await glide(page, view.getByRole("heading", { name: "Win probability", exact: true }), "start");
     await page.waitForTimeout(2200);
@@ -292,6 +304,7 @@ for (const beat of chosen.filter((b) => webPart(b))) {
     expect(served, `the live site serves the release SHA ${releaseSha}`).toBe(releaseSha);
     await page.locator('html[data-app="ready"]').waitFor({ state: "attached", timeout: 30_000 });
     const runId = await resolveRun(page);
+    await PREPARE[beat.id]?.(page, runId);
     await page.waitForTimeout(SETTLE_MS);
     const lead = (Date.now() - opened) / 1000;
 
