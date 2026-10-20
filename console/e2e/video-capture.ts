@@ -266,8 +266,6 @@ if (unknown.length) {
 }
 const chosen = sheet.beats.filter((beat) => only.includes("all") || only.includes(beat.id));
 
-test.describe.configure({ mode: "serial" });
-
 for (const beat of chosen.filter((b) => webPart(b))) {
   test(`capture ${beat.id}`, async ({ browser }) => {
     const part = webPart(beat) as Part;
@@ -293,13 +291,16 @@ for (const beat of chosen.filter((b) => webPart(b))) {
     const lead = (Date.now() - opened) / 1000;
 
     await script(page, runId);
+    const scripted = (Date.now() - opened) / 1000 - lead;
     const [held, failed] = await checkFacts(page, part.facts ?? [], runId);
 
-    const acted = (Date.now() - opened) / 1000 - lead;
+    /* Enforced, every fact must be on screen inside the budget too; reported, a missing fact's wait is not the clip's. */
+    const acted = factsMode === "enforce" ? (Date.now() - opened) / 1000 - lead : scripted;
     const budget = actionBudget(beat, part);
     expect(acted, `beat ${beat.id} finishes its actions and facts inside ${budget} s`).toBeLessThan(budget);
-    if (acted < hold) {
-      await page.waitForTimeout((hold - acted) * 1000);
+    const elapsed = (Date.now() - opened) / 1000 - lead;
+    if (elapsed < hold) {
+      await page.waitForTimeout((hold - elapsed) * 1000);
     }
     const recorded = (Date.now() - opened) / 1000;
     const video = page.video();
