@@ -390,3 +390,43 @@ def test_a_planted_block_carrying_an_extra_field_is_not_projected() -> None:
     """Every field of the consumed block flows into the record, so the block may hold nothing else."""
     store, env = _planted_env(publish_anyway=True)
     _assert_refused_with_no_trace(store, env, govkit.teams_payload(env))
+
+
+def test_a_planted_block_must_match_as_json_not_just_as_python() -> None:
+    """1 == True in Python; the block must say true, as verify() writes it."""
+    store, env = _planted_env()
+    doc = store.read(NONCES, PLANTED)
+    body = {**doc.body, "consumed": {**doc.body["consumed"], "destinations_as_offered": 0}}
+    InMemoryStore.replace(store, NONCES, PLANTED, body, if_match=doc.etag)
+    _assert_refused_with_no_trace(store, env, govkit.teams_payload(env))
+
+
+def test_a_planted_block_without_parseable_times_is_not_projected() -> None:
+    store, env = _planted_env(verified_at="yesterday")
+    _assert_refused_with_no_trace(store, env, govkit.teams_payload(env))
+
+
+def test_recovery_refuses_when_the_approvers_role_was_revoked_between_the_passes() -> None:
+    """The role is read again on recovery: a revoked approver's half-written decision stays unrecorded."""
+    store = CrashAfterNonceWrite()
+    env = govkit.make_env(store=store)
+    q = Queues()
+    mid = _crash_first_pass(store, env, q)
+    doc = store.read(verifier.APPROVERS, govkit.OFFICER)
+    InMemoryStore.replace(store, verifier.APPROVERS, govkit.OFFICER, {"roles": []}, if_match=doc.etag)
+    lines = drain.drain_once(q, store, lambda: govkit.later(90))
+    assert [(line.message_id, line.status, line.code) for line in lines] == [(mid, "refused", "already_consumed")]
+    assert store.keys(APPROVALS) == [] and q.sent == []
+
+
+def test_a_planted_block_identical_to_the_officers_own_decision_projects_only_that_decision() -> None:
+    """The residual, pinned: a pre-consumed nonce can only ever record what its approver really sent
+    and verify() would accept; its stored times are the only thing the planter chose."""
+    planted_time = govkit.later(5).isoformat()
+    store, env = _planted_env(received_at=planted_time, verified_at=planted_time)
+    out = Out()
+    outcome = intake.handle_message("decisions-teams", intake.encode_message(RUN, govkit.teams_payload(env)), store, govkit.later(60), out)
+    assert (outcome.status, outcome.code) == ("verified_replay", "approved")
+    record = store.read(APPROVALS, verifier.approval_id_for(PLANTED)).body
+    assert record["approver"] == govkit.OFFICER and record["decision"] == "approve" and record["channel"] == "teams"
+    assert record["destinations"] == govkit.offered(env) and record["verified_at"] == planted_time

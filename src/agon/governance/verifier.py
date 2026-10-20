@@ -26,10 +26,15 @@ The approval record is a projection of the consumed nonce (`_project_approval`):
 stored nonce document alone, never from `now` or a payload, and created create-only. The nonce
 write and the record are two writes, so a process that dies between them, or a create that fails
 with a transient error, leaves a consumed nonce with no record. The queue then redelivers the same
-decision; it meets the consumed nonce, and when the stored decision names the same channel and the
-same bundle, the record is projected before the usual "already_consumed" refusal, so the intake
-finds it and re-sends the pointer. A decision from another channel or for another bundle writes
-nothing and stays refused.
+decision; it meets the consumed nonce, and the record is projected before the usual
+"already_consumed" refusal, so the intake finds it and re-sends the pointer, but only when the
+stored consumed block is exactly the block this verifier would write for the redelivered decision
+(`_is_this_decision`): steps 3 to 9 run again against the nonce document, the sealed bundle and the
+approver's current role, with expiry judged at the stored verified_at, and every decided field
+(approval id, decision, normalised approver, channel, confirmed rows, destinations, as offered)
+must equal the stored one as JSON, with no other field present; only the two times may differ.
+A stored block proves nothing by itself: the fleet may create nonces, RBAC cannot constrain a
+field, so a nonce can be created already consumed. Anything that does not match writes nothing.
 
 Every refusal before step 10 leaves the nonce unconsumed, so a malformed or forged decision cannot
 burn a nonce. A valid "changes" decision consumes the nonce too, so Teams "changes" followed by an
@@ -43,6 +48,7 @@ says "No destination choice on this bundle" for exactly this case).
 from __future__ import annotations
 
 import hashlib
+import json
 import secrets
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -263,33 +269,45 @@ def _project_approval(store: Store, nonce: str, nonce_doc: Document) -> str:
     return PROJECTED
 
 
-def verify(decision: ApprovalDecision, store: Store, now: datetime) -> VerifyResult:
-    """Turn one channel decision into at most one approval. See the module docstring for order."""
-    problem = _shape_problem(decision, now)
-    if problem:
-        return _refuse("malformed_decision", problem, decision)
+@dataclass(frozen=True)
+class _Checked:
+    """What steps 3 to 9 settle for a decision that passes them."""
 
-    nonce_doc = store.read(NONCES, decision.nonce)
-    if nonce_doc is None:
-        return _refuse("unknown_nonce", "no approval request carries this nonce", decision)
-    record = nonce_doc.body
-    if record.get("status") != "pending":
-        by = record.get("consumed", {})
-        if (
-            isinstance(by, dict)
-            and by.get("channel") == decision.channel
-            and record.get("bundle_sha256") == decision.bundle_sha256
-            and store.read(APPROVALS, approval_id_for(decision.nonce)) is None
-        ):
-            # The same decision redelivered (same channel, same bundle) and no record yet: the
-            # first pass stopped between the nonce write and the approval record, so complete
-            # the record from the stored nonce. The refusal below stands either way; the intake's
-            # _replay then finds the record and re-sends its pointer. Another channel or bundle
-            # writes nothing. The read comes first because a caller that holds only read on
-            # approvals (the fleet worker re-verifies a decision the intake already recorded,
-            # see agon.fleet.steps.decide) must never attempt a write.
-            _project_approval(store, decision.nonce, nonce_doc)
-        return _refuse("already_consumed", f"already decided on {by.get('channel')} at {by.get('verified_at')}", decision)
+    principal: str
+    destinations: tuple[str, ...]
+
+
+# The consumed block's fields that the decision itself settles, and the two times it also holds.
+DECIDED_FIELDS: tuple[str, ...] = (
+    "approval_id", "decision", "approver", "channel", "confirmed_rows", "destinations", "destinations_as_offered",
+)
+TIME_FIELDS: tuple[str, ...] = ("received_at", "verified_at")
+
+
+def _decided(decision: ApprovalDecision, checked: _Checked) -> dict[str, object]:
+    return {
+        "approval_id": approval_id_for(decision.nonce),
+        "decision": decision.decision,
+        "approver": checked.principal,
+        "channel": decision.channel,
+        "confirmed_rows": sorted(decision.confirmed_rows),
+        "destinations": list(checked.destinations),
+        "destinations_as_offered": decision.destinations_as_offered,
+    }
+
+
+def _aware(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        moment = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return moment if moment.tzinfo is not None and moment.tzinfo.utcoffset(moment) is not None else None
+
+
+def _check_decision(decision: ApprovalDecision, store: Store, record: dict, at: datetime) -> VerifyResult | _Checked:
+    """Steps 3 to 9 against a nonce document, with expiry judged at `at`. A refusal or what they settle."""
     if record.get("bundle_sha256") != decision.bundle_sha256:
         return _refuse("hash_mismatch", "the decision names a different bundle than the request", decision)
 
@@ -302,7 +320,7 @@ def verify(decision: ApprovalDecision, store: Store, now: datetime) -> VerifyRes
     if not seal_mod.gates_all_pass(check.manifest):
         return _refuse("bundle_refused_by_gate", "a gate refused this bundle", decision)
 
-    if _epoch(now) >= int(record["expires_at"]):
+    if _epoch(at) >= int(record["expires_at"]):
         return _refuse("expired", "the approval request has expired", decision)
     target = record.get("target")
     if decision.channel not in TARGET_CHANNELS.get(target, frozenset()):
@@ -337,18 +355,68 @@ def verify(decision: ApprovalDecision, store: Store, now: datetime) -> VerifyRes
             if offered and not decision.destinations:
                 return _refuse("no_destination_selected", "tick at least one destination before approving", decision)
             approved_destinations = tuple(d for d in offered if d in decision.destinations)
+    return _Checked(principal, approved_destinations)
+
+
+def _is_this_decision(decision: ApprovalDecision, store: Store, record: dict, block: dict) -> bool:
+    """True only when `block` is the consumed block verify() would have written for `decision`.
+
+    A nonce can be created already consumed (the fleet holds create on nonces, and RBAC cannot
+    constrain a field), so a stored block proves nothing by itself. Every check runs again against
+    the nonce document, the sealed bundle and the approver's current role, with expiry judged at
+    the stored verified_at, and the block must hold exactly the decided fields those checks give,
+    equal as JSON, plus the two times. The times are the only fields that may differ.
+    """
+    if set(block) != set(DECIDED_FIELDS) | set(TIME_FIELDS):
+        return False
+    verified_at = _aware(block.get("verified_at"))
+    if verified_at is None or _aware(block.get("received_at")) is None:
+        return False
+    checked = _check_decision(decision, store, record, verified_at)
+    if isinstance(checked, VerifyResult):
+        return False
+    stored = {name: block[name] for name in DECIDED_FIELDS}
+    return json.dumps(stored, sort_keys=True) == json.dumps(_decided(decision, checked), sort_keys=True)
+
+
+def verify(decision: ApprovalDecision, store: Store, now: datetime) -> VerifyResult:
+    """Turn one channel decision into at most one approval. See the module docstring for order."""
+    problem = _shape_problem(decision, now)
+    if problem:
+        return _refuse("malformed_decision", problem, decision)
+
+    nonce_doc = store.read(NONCES, decision.nonce)
+    if nonce_doc is None:
+        return _refuse("unknown_nonce", "no approval request carries this nonce", decision)
+    record = nonce_doc.body
+    if record.get("status") != "pending":
+        by = record.get("consumed") if isinstance(record.get("consumed"), dict) else {}
+        if (
+            by.get("channel") == decision.channel
+            and record.get("bundle_sha256") == decision.bundle_sha256
+            and store.read(APPROVALS, approval_id_for(decision.nonce)) is None
+            and _is_this_decision(decision, store, record, by)
+        ):
+            # The same decision redelivered and no record yet: the first pass stopped between the
+            # nonce write and the approval record, so complete the record from the stored nonce.
+            # The refusal below stands either way; the intake's _replay then finds the record and
+            # re-sends its pointer. Anything else (another channel, bundle, approver, decision,
+            # destination or row, a failing check, a planted block) writes nothing. The approvals
+            # read comes before the full re-check because a caller that holds only read on
+            # approvals (the fleet worker re-verifies a decision the intake already recorded, see
+            # agon.fleet.steps.decide) must never reach a write.
+            _project_approval(store, decision.nonce, nonce_doc)
+        return _refuse("already_consumed", f"already decided on {by.get('channel')} at {by.get('verified_at')}", decision)
+    checked = _check_decision(decision, store, record, now)
+    if isinstance(checked, VerifyResult):
+        return checked
+    principal = checked.principal
 
     approval_id = approval_id_for(decision.nonce)
     consumed = {
-        "approval_id": approval_id,
-        "decision": decision.decision,
-        "approver": principal,
-        "channel": decision.channel,
+        **_decided(decision, checked),
         "received_at": _iso(decision.received_at),
         "verified_at": _iso(now),
-        "confirmed_rows": sorted(decision.confirmed_rows),
-        "destinations": list(approved_destinations),
-        "destinations_as_offered": decision.destinations_as_offered,
     }
     try:
         stored = store.replace(NONCES, decision.nonce, {**record, "status": "consumed", "consumed": consumed}, if_match=nonce_doc.etag)
