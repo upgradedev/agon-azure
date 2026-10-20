@@ -4,6 +4,11 @@ The generator is pinned (same seed, same mutants, same counts, same sha256 of th
 list), and so are the catch counts, so a green CI run is the evidence behind the M8 numbers. A
 change to the gate or to the generator that moves any number fails here and must update the pin,
 the README row and the command output together.
+
+The headline is check_sentence on every edition. The translation stage is the realistic
+translation fault: el, es and fr prose mutated with the claims copied from English, as
+agon.fleet.steps copies them. The claims-equality line of check_translation is defence in depth
+and never leads.
 """
 
 from __future__ import annotations
@@ -33,23 +38,30 @@ PINNED_MUTANTS = {
     "spelled_out_number_added": 30,
     "decimal_number_added": 30,
 }
-# (caught as the pipeline runs the gate, caught by check_sentence alone, mutants)
-PINNED_BY_EDITION = {
-    "en": (37, 37, 45),
-    "el": (43, 37, 45),
-    "es": (43, 37, 45),
-    "fr": (43, 37, 45),
-    "easy": (43, 37, 45),
-}
+# check_sentence, covered classes: (caught, mutants)
+PINNED_BY_EDITION = {e: (37, 45) for e in M.EDITIONS}
+# with check_translation's claims-equality line added (defence in depth): (caught, mutants)
+PINNED_WITH_CLAIMS_BY_EDITION = {"en": (37, 45), "el": (43, 45), "es": (43, 45), "fr": (43, 45), "easy": (43, 45)}
+# (check_sentence caught, with the claims-equality line caught, mutants)
 PINNED_BY_CLASS = {
     "prose_integer_plus_one": (65, 65, 65),
     "claim_value_plus_one": (50, 50, 50),
     "home_away_swapped": (10, 10, 10),
     "minute_shifted": (15, 15, 15),
-    "roster_name_swapped": (39, 15, 55),
+    "roster_name_swapped": (15, 39, 55),
     "unclaimed_number_added": (30, 30, 30),
     "spelled_out_number_added": (0, 0, 30),
     "decimal_number_added": (30, 30, 30),
+}
+# The translation stage: (caught, staged sentences)
+PINNED_STAGE_BY_EDITION = {"el": (32, 34), "es": (32, 34), "fr": (31, 33)}
+PINNED_STAGE_BY_CLASS = {
+    "prose_integer_plus_one": (39, 39),
+    "claim_value_plus_one": (0, 0),
+    "home_away_swapped": (3, 3),
+    "minute_shifted": (8, 8),
+    "roster_name_swapped": (27, 33),
+    "unclaimed_number_added": (18, 18),
 }
 SEEDED = ("minute_shifted", "roster_name_swapped", "unclaimed_number_added", "spelled_out_number_added", "decimal_number_added")
 
@@ -61,6 +73,10 @@ def report() -> M.Report:
 
 def _by_id(report: M.Report) -> dict[str, M.Mutant]:
     return {m.mutant_id: m for m in report.mutants}
+
+
+def _pair(t: M.Tally) -> tuple[int, int]:
+    return (t.caught, t.total)
 
 
 # ----------------------------------------------------------------- the generator is pinned
@@ -102,6 +118,12 @@ def test_every_mutant_differs_from_its_original(report: M.Report) -> None:
     for m in report.mutants:
         assert (m.sentence.text, m.sentence.claims) != (m.original.text, m.original.claims), m.mutant_id
         assert m.sentence.sentence_id == m.original.sentence_id and m.sentence.language == m.original.language
+
+
+def test_the_easy_read_prose_equals_the_english_prose_in_this_run(report: M.Report) -> None:
+    """Why the easy-read edition is never presented as a separate language result."""
+    en = [s.text for s in report.run.edition("en").sentences]
+    assert [s.text for s in report.run.edition("easy").sentences] == en
 
 
 # ----------------------------------------------------------------- each class plants what it says
@@ -153,43 +175,89 @@ def test_a_one_one_score_swap_is_skipped_as_a_no_op(report: M.Report) -> None:
 # ----------------------------------------------------------------- the measured numbers are pinned
 
 
-def test_catch_counts_are_pinned(report: M.Report) -> None:
-    assert {e: (t.caught, t.caught_alone, t.total) for e, t in report.by_edition().items()} == PINNED_BY_EDITION
-    assert {c: (t.caught, t.caught_alone, t.total) for c, t in report.by_class().items()} == PINNED_BY_CLASS
-    total = report.covered_total()
-    assert (total.caught, total.caught_alone, total.total) == (209, 185, 225)
+def test_check_sentence_counts_are_pinned_and_equal_in_every_edition(report: M.Report) -> None:
+    assert {e: _pair(t) for e, t in report.by_edition().items()} == PINNED_BY_EDITION
+    assert _pair(report.covered_total()) == (185, 225)
+    by_class = report.by_class()
+    with_claims = report.by_class(with_claims=True)
+    assert {c: (by_class[c].caught, with_claims[c].caught, by_class[c].total) for c in M.CLASSES} == PINNED_BY_CLASS
+
+
+def test_the_claims_equality_line_is_reported_apart_as_defence_in_depth(report: M.Report) -> None:
+    assert {e: _pair(t) for e, t in report.by_edition(with_claims=True).items()} == PINNED_WITH_CLAIMS_BY_EDITION
+    assert _pair(report.covered_total(with_claims=True)) == (209, 225)
+    extra = [o for o in report.covered() if o.caught_with_claims_check and not o.caught]
+    assert len(extra) == 24
+    assert all(o.mutant.edition != "en" and o.mutant.sentence.claims != o.mutant.original.claims for o in extra), (
+        "every extra catch is a claim-changed translation, which the pipeline cannot produce"
+    )
+
+
+def test_the_translation_stage_is_pinned(report: M.Report) -> None:
+    assert (len(report.staged), report.staged_repeats) == (101, 34)
+    assert {e: _pair(t) for e, t in report.stage_by_edition().items()} == PINNED_STAGE_BY_EDITION
+    assert {c: _pair(t) for c, t in report.stage_by_class().items()} == PINNED_STAGE_BY_CLASS
+    assert _pair(report.stage_total()) == (95, 101)
+
+
+def test_translation_stage_sentences_carry_the_english_claims(report: M.Report) -> None:
+    sources = {s.sentence_id: s for s in report.run.edition("en").sentences}
+    for s in report.staged:
+        assert s.mutant.edition in M.TRANSLATED
+        assert s.sentence.claims == sources[s.sentence.sentence_id.rsplit("-", 1)[0]].claims
+        assert s.caught == (not factgate.check_sentence(s.sentence, report.run.facts).passed), (
+            "with the claims copied, check_translation decides exactly as check_sentence"
+        )
+
+
+def test_a_wrong_club_in_translated_prose_with_the_copied_claims_is_caught(report: M.Report) -> None:
+    """The realistic version of a claimed club swap in a translation: caught by the name check."""
+    claimed = [s for s in report.staged if s.mutant.mutation == "roster_name_swapped" and "in claim" in s.mutant.detail]
+    clubs = [s for s in claimed if s.mutant.detail.startswith("club ")]
+    assert (len(claimed), len(clubs)) == (27, 18)
+    assert all(s.caught for s in claimed)
+    assert all(any("is claimed but not written" in r for r in s.reasons) for s in claimed)
 
 
 def test_uncovered_classes_are_reported_apart_and_never_counted(report: M.Report) -> None:
-    covered = [o for o in report.outcomes if o.mutant.mutation in M.COVERED]
-    assert report.covered_total().total == len(covered) == 225
+    assert report.covered_total().total == len(report.covered()) == 225
     assert all(o.mutant.mutation in M.COVERED for o in report.missed())
     spelled = [o for o in report.outcomes if o.mutant.mutation == "spelled_out_number_added"]
     assert len(spelled) == 30 and not any(o.caught for o in spelled), "invisible to the gate, by design"
 
 
-def test_every_miss_is_a_club_name_swap(report: M.Report) -> None:
+def test_every_realistic_miss_is_a_club_name_swap(report: M.Report) -> None:
     missed = report.missed()
     assert len(missed) == 16
     assert {o.mutant.mutation for o in missed} == {"roster_name_swapped"}
     assert all(o.mutant.detail.startswith("club ") for o in missed)
+    assert Counter(o.mutant.edition for o in missed) == {"en": 8, "el": 2, "es": 2, "fr": 2, "easy": 2}
+    assert sum(1 for o in missed if "in claim" in o.mutant.detail) == 6, "claimed club names with no cited event, en only"
 
 
 # ----------------------------------------------------------------- the command
 
 
-def test_the_command_prints_counts_and_percentages_per_language_and_class(capsys: pytest.CaptureFixture[str]) -> None:
+def test_the_command_leads_with_check_sentence_per_language_and_class(capsys: pytest.CaptureFixture[str]) -> None:
     assert M.main(["--run", str(RUN)]) == 0
     out = capsys.readouterr().out
     assert "M8 Fact Gate mutation test (self-measured)" in out
-    assert re.search(r"^en +caught +37 of +45 \( 82\.2%\) +check_sentence alone +37 of +45 \( 82\.2%\)$", out, re.M)
-    assert re.search(r"^easy \(en\) +caught +43 of +45 \( 95\.6%\)", out, re.M)
-    assert re.search(r"^all languages +caught 209 of 225 \( 92\.9%\) +check_sentence alone 185 of 225 \( 82\.2%\)$", out, re.M)
-    assert re.search(r"^roster_name_swapped +caught +39 of +55 \( 70\.9%\) +check_sentence alone +15 of +55 \( 27\.3%\)$", out, re.M)
+    assert "gate: check_sentence, the check every sentence of every edition goes through" in out
+    assert "as the pipeline runs it" not in out
+    for language in ("en", "el", "es", "fr"):
+        assert re.search(rf"^{language} +caught +37 of +45 \( 82\.2%\)$", out, re.M), language
+    assert re.search(r"^easy-read edition +caught +37 of +45 \( 82\.2%\) +English; its prose equals the English prose", out, re.M)
+    assert re.search(r"^all editions +caught 185 of 225 \( 82\.2%\)$", out, re.M)
+    assert re.search(r"^roster_name_swapped +caught +15 of +55 \( 27\.3%\)$", out, re.M)
+    assert re.search(r"^el, es and fr +caught +95 of 101 \( 94\.1%\)$", out, re.M)
+    assert re.search(r"^el +caught +32 of +34 \( 94\.1%\)$", out, re.M)
+    assert "it raises the covered total to 209 of 225 (92.9%)" in out
     assert re.search(r"^spelled_out_number_added +uncovered; flagged +0 of +30 \(  0\.0%\)", out, re.M)
     assert re.search(r"^decimal_number_added +uncovered; flagged +30 of +30 \(100\.0%\): incidental", out, re.M)
     assert PINNED_FINGERPRINT in out
-    assert "Missed by the gate as the pipeline runs it: 16" in out
+    assert "Missed by check_sentence among mutants a real run can produce: 16" in out
+    assert "Missed in the translation stage: 6" in out
+    assert out.index("by language (check_sentence)") < out.index("Translation stage") < out.index("Defence in depth")
 
 
 # ----------------------------------------------------------------- refusals

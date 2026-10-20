@@ -35,11 +35,21 @@ written in digits only; see the agon.governance.factgate docstring):
 * `decimal_number_added`: a clause with a decimal. The gate has no decimal rule; it reads the digit
   runs on each side of the decimal mark as integers, so a flag here is incidental.
 
-The gate is run as the pipeline runs it (agon.fleet.steps.factgate and factgate_lang):
-`check_sentence` for the English edition, `check_translation(English source, mutant)` for el, es,
-fr and easy. The translation check also refuses any claim that differs from the English source,
-which alone catches every claim mutation in a translation, so the report also counts
-`check_sentence` alone, the part that reads each language's prose.
+The headline is `check_sentence`, the check every sentence of every edition goes through, on every
+mutant: the same claims against the log, and the same prose against claims, in each language.
+
+Editions carry the English claims by code: agon.fleet.steps copies `s.claims` into every
+translated and easy-read sentence, so in a real run a translation can be wrong only in its prose.
+The translation stage measures exactly that: every covered mutation of an el, es or fr sentence
+keeps its mutated prose, its claims go back to the copied English ones, and it is gated with
+`check_translation(English source, sentence)` as factgate_lang does. A staged sentence whose prose
+repeats another staged sentence of the same edition is counted once.
+
+The claims-equality line of `check_translation` cannot fire in a real run, because the claims are
+copied; it is defence in depth. Its extra catches on claim-changed translation mutants, which the
+pipeline cannot produce, are reported apart and never lead. The easy-read edition's prose equals
+the English prose in this run (easy_read copies it unless a rule needs a template line), so it is
+not a separate language result.
 
     python -m agon.governance.mutation --run web/runs/run-c8a19020c98a [--seed 8]
 """
@@ -66,6 +76,7 @@ from agon.synth.world import build_world
 DEFAULT_SEED = 8
 EDITIONS: tuple[str, ...] = ("en", "el", "es", "fr", "easy")
 SOURCE_EDITION = "en"
+TRANSLATED: tuple[str, ...] = ("el", "es", "fr")  # post-edited by a model; easy-read is rules as code
 COVERED: tuple[str, ...] = (
     "prose_integer_plus_one",
     "claim_value_plus_one",
@@ -487,12 +498,18 @@ def fingerprint(mutants: Sequence[Mutant]) -> str:
 @dataclass(frozen=True)
 class Outcome:
     mutant: Mutant
-    caught: bool  # the gate as the pipeline runs it
-    caught_alone: bool  # check_sentence alone
-    reasons: tuple[str, ...]
+    caught: bool  # check_sentence: the headline
+    caught_with_claims_check: bool  # plus check_translation's claims-equality line (defence in depth)
+    reasons: tuple[str, ...]  # check_sentence's reasons
+
+    @property
+    def realistic(self) -> bool:
+        """A mutant a real run can produce: authored in English, or a translation that kept the copied claims."""
+        return self.mutant.edition == SOURCE_EDITION or self.mutant.sentence.claims == self.mutant.original.claims
 
 
 def _gate(run: RecordedRun, sources: dict[str, Sentence], edition: str, sentence: Sentence) -> factgate.SentenceVerdict:
+    """The gate a sentence of `edition` meets in the pipeline: factgate (en) or factgate_lang (the others)."""
     if edition == SOURCE_EDITION:
         return factgate.check_sentence(sentence, run.facts)
     source = sources[sentence.sentence_id.removesuffix(f"-{edition}")]
@@ -505,19 +522,52 @@ def run_gate(run: RecordedRun, mutants: Sequence[Mutant]) -> list[Outcome]:
     outcomes = []
     for m in mutants:
         alone = factgate.check_sentence(m.sentence, run.facts, by_id)
-        pipeline = alone if m.edition == SOURCE_EDITION else _gate(run, sources, m.edition, m.sentence)
-        outcomes.append(Outcome(m, not pipeline.passed, not alone.passed, pipeline.reasons))
+        with_claims = alone if m.edition == SOURCE_EDITION else _gate(run, sources, m.edition, m.sentence)
+        outcomes.append(Outcome(m, not alone.passed, not with_claims.passed, alone.reasons))
     return outcomes
+
+
+@dataclass(frozen=True)
+class Staged:
+    """A translation-stage sentence: a mutant's prose with the claims copied from English."""
+
+    mutant: Mutant
+    sentence: Sentence
+    caught: bool
+    reasons: tuple[str, ...]
+
+
+def translation_stage(run: RecordedRun, mutants: Sequence[Mutant]) -> tuple[list[Staged], int]:
+    """Every covered el, es and fr mutant's prose, claims reset to the copied English claims, gated as
+    factgate_lang does. Returns the staged sentences and how many repeated an earlier staged prose."""
+    sources = {s.sentence_id: s for s in run.edition(SOURCE_EDITION).sentences}
+    seen: set[tuple[str, str, str]] = set()
+    staged: list[Staged] = []
+    repeated = 0
+    for m in mutants:
+        if m.edition not in TRANSLATED or m.mutation not in COVERED:
+            continue
+        source = sources[m.original.sentence_id.removesuffix(f"-{m.edition}")]
+        if m.original.claims != source.claims:
+            raise MutationError(f"{m.edition}/{m.original.sentence_id} does not carry the English claims")
+        sentence = dataclasses.replace(m.sentence, claims=m.original.claims)
+        key = (m.edition, sentence.sentence_id, sentence.text)
+        if sentence.text == m.original.text or key in seen:
+            repeated += 1
+            continue
+        seen.add(key)
+        verdict = _gate(run, sources, m.edition, sentence)
+        staged.append(Staged(m, sentence, not verdict.passed, verdict.reasons))
+    return staged, repeated
 
 
 @dataclass(frozen=True)
 class Tally:
     caught: int = 0
-    caught_alone: int = 0
     total: int = 0
 
-    def add(self, outcome: Outcome) -> "Tally":
-        return Tally(self.caught + outcome.caught, self.caught_alone + outcome.caught_alone, self.total + 1)
+    def add(self, caught: bool) -> "Tally":
+        return Tally(self.caught + caught, self.total + 1)
 
 
 def pct(part: int, whole: int) -> str:
@@ -531,39 +581,59 @@ class Report:
     mutants: tuple[Mutant, ...]
     skips: tuple[Skip, ...]
     outcomes: tuple[Outcome, ...]
+    staged: tuple[Staged, ...]
+    staged_repeats: int
 
-    def by_edition(self) -> dict[str, Tally]:
-        out = {e: Tally() for e in EDITIONS}
-        for o in self.outcomes:
-            if o.mutant.mutation in COVERED:
-                out[o.mutant.edition] = out[o.mutant.edition].add(o)
+    def _tally(self, outcomes: Sequence[Outcome], with_claims: bool = False) -> Tally:
+        t = Tally()
+        for o in outcomes:
+            t = t.add(o.caught_with_claims_check if with_claims else o.caught)
+        return t
+
+    def covered(self) -> list[Outcome]:
+        return [o for o in self.outcomes if o.mutant.mutation in COVERED]
+
+    def by_edition(self, with_claims: bool = False) -> dict[str, Tally]:
+        return {e: self._tally([o for o in self.covered() if o.mutant.edition == e], with_claims) for e in EDITIONS}
+
+    def by_class(self, with_claims: bool = False) -> dict[str, Tally]:
+        return {c: self._tally([o for o in self.outcomes if o.mutant.mutation == c], with_claims) for c in CLASSES}
+
+    def covered_total(self, with_claims: bool = False) -> Tally:
+        return self._tally(self.covered(), with_claims)
+
+    def stage_by_edition(self) -> dict[str, Tally]:
+        out = {e: Tally() for e in TRANSLATED}
+        for s in self.staged:
+            out[s.mutant.edition] = out[s.mutant.edition].add(s.caught)
         return out
 
-    def by_class(self) -> dict[str, Tally]:
-        out = {c: Tally() for c in CLASSES}
-        for o in self.outcomes:
-            out[o.mutant.mutation] = out[o.mutant.mutation].add(o)
+    def stage_by_class(self) -> dict[str, Tally]:
+        out = {c: Tally() for c in COVERED}
+        for s in self.staged:
+            out[s.mutant.mutation] = out[s.mutant.mutation].add(s.caught)
         return out
 
-    def covered_total(self) -> Tally:
-        total = Tally()
-        for o in self.outcomes:
-            if o.mutant.mutation in COVERED:
-                total = total.add(o)
-        return total
+    def stage_total(self) -> Tally:
+        t = Tally()
+        for s in self.staged:
+            t = t.add(s.caught)
+        return t
 
     def missed(self) -> list[Outcome]:
-        return [o for o in self.outcomes if o.mutant.mutation in COVERED and not o.caught]
+        """Covered mutants check_sentence passes, among those a real run can produce."""
+        return [o for o in self.covered() if o.realistic and not o.caught]
 
 
 def measure(run_dir: Path | str, seed: int = DEFAULT_SEED) -> Report:
     run = load_run(run_dir)
     mutants, skips = generate(run, seed)
-    return Report(seed, run, tuple(mutants), tuple(skips), tuple(run_gate(run, mutants)))
+    staged, repeats = translation_stage(run, mutants)
+    return Report(seed, run, tuple(mutants), tuple(skips), tuple(run_gate(run, mutants)), tuple(staged), repeats)
 
 
 def _row(label: str, t: Tally) -> str:
-    return f"{label:<26} caught {t.caught:>3} of {t.total:>3} ({pct(t.caught, t.total):>6})   check_sentence alone {t.caught_alone:>3} of {t.total:>3} ({pct(t.caught_alone, t.total):>6})"
+    return f"{label:<26} caught {t.caught:>3} of {t.total:>3} ({pct(t.caught, t.total):>6})"
 
 
 def render(report: Report, run_label: str) -> str:
@@ -571,33 +641,56 @@ def render(report: Report, run_label: str) -> str:
     skipped: dict[str, int] = {}
     for sk in report.skips:
         skipped[sk.reason] = skipped.get(sk.reason, 0) + 1
-    languages = {e.edition: e.language for e in run.editions}
+    by_edition = report.by_edition()
     lines = [
         "M8 Fact Gate mutation test (self-measured)",
         f"run {run_label}, bundle {run.bundle_sha256[:12]}, match {run.match_id}, seed {report.seed}",
         f"sentences {run.sentence_count()}; mutants {len(report.mutants)}; skipped {len(report.skips)}"
         f" (no-op {skipped.get('no_op', 0)}, not written in digits {skipped.get('not_placeable', 0)});"
         f" mutant list sha256 {fingerprint(report.mutants)}",
-        "gate: check_sentence for en, check_translation(en source, mutant) for el, es, fr and easy, as the pipeline runs it",
+        "gate: check_sentence, the check every sentence of every edition goes through",
         "",
-        "Covered classes, by language",
+        "Covered classes, by language (check_sentence)",
     ]
-    for edition, tally in report.by_edition().items():
-        label = edition if languages[edition] == edition else f"{edition} ({languages[edition]})"
-        lines.append(_row(label, tally))
-    lines.append(_row("all languages", report.covered_total()))
-    lines += ["", "Covered classes, by class"]
+    for edition in ("en", "el", "es", "fr"):
+        lines.append(_row(edition, by_edition[edition]))
+    lines.append(_row("easy-read edition", by_edition["easy"]) + "   English; its prose equals the English prose in this run, not a separate language result")
+    lines.append(_row("all editions", report.covered_total()))
+    lines += ["", "Covered classes, by class (check_sentence)"]
     by_class = report.by_class()
     for mutation in COVERED:
         lines.append(_row(mutation, by_class[mutation]))
-    lines += ["", "Uncovered by design (reported, never counted in the rates above)"]
+    lines += [
+        "",
+        "Translation stage: el, es and fr prose mutated, claims copied from English as agon.fleet.steps copies them,"
+        " gated with check_translation as factgate_lang does",
+        f"  {len(report.staged)} staged sentences; {report.staged_repeats} repeated an earlier staged prose and are counted once",
+    ]
+    for edition, tally in report.stage_by_edition().items():
+        lines.append(_row(edition, tally))
+    lines.append(_row("el, es and fr", report.stage_total()))
+    for mutation, tally in report.stage_by_class().items():
+        lines.append(_row(f"  {mutation}", tally))
+    with_claims = report.covered_total(with_claims=True)
+    lines += [
+        "",
+        "Defence in depth: check_translation's claims-equality line. Editions carry the English claims by code, so it cannot",
+        f"fire in a real run; on claim-changed translation mutants, which the pipeline cannot produce, it raises the covered total"
+        f" to {with_claims.caught} of {with_claims.total} ({pct(with_claims.caught, with_claims.total)}).",
+        "",
+        "Uncovered by design (reported, never counted in the rates above)",
+    ]
     for mutation in UNCOVERED:
         t = by_class[mutation]
         lines.append(f"{mutation:<26} uncovered; flagged {t.caught:>3} of {t.total:>3} ({pct(t.caught, t.total):>6}): {UNCOVERED_NOTE[mutation]}")
     missed = report.missed()
-    lines += ["", f"Missed by the gate as the pipeline runs it: {len(missed)}"]
+    lines += ["", f"Missed by check_sentence among mutants a real run can produce: {len(missed)}"]
     for o in missed:
         lines.append(f"  {o.mutant.mutant_id}: {o.mutant.detail}: {o.mutant.sentence.text}")
+    missed_stage = [s for s in report.staged if not s.caught]
+    lines += ["", f"Missed in the translation stage: {len(missed_stage)}"]
+    for s in missed_stage:
+        lines.append(f"  {s.mutant.mutant_id}: {s.sentence.text}")
     return "\n".join(lines) + "\n"
 
 
