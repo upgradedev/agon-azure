@@ -85,8 +85,10 @@ test("the tick stops while another seed loads, and Pitch Sound stops when the vi
   await expect(start).toHaveAttribute("aria-pressed", "true");
   await page.getByRole("link", { name: /Verify/ }).first().click();
   await expect(page).toHaveURL(/#\/verify/);
-  await expect(start).toHaveAttribute("aria-pressed", "false");
-  await expect(start).toHaveAttribute("data-ticking", "false");
+  /* The Match Centre is hidden now, so the button is found by its attribute, not its role. */
+  const hidden = page.locator('[data-view="home"] button[data-ticking]');
+  await expect(hidden).toHaveAttribute("aria-pressed", "false");
+  await expect(hidden).toHaveAttribute("data-ticking", "false");
 });
 
 test("the Newsroom Wall stepper shows the whole lifecycle on a phone", async ({ page }) => {
