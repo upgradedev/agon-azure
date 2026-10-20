@@ -291,3 +291,102 @@ def test_a_record_already_there_on_the_normal_path_keeps_the_refusal() -> None:
     result = verifier.verify(teams.parse(govkit.teams_payload(env), received_at=NOW), env.store, NOW)
     assert not result.ok and result.code == "already_consumed"
     assert env.store.read(APPROVALS, approval_id).body == {"approval_id": approval_id, "planted": True}
+
+
+# ----------------------------------------------------------------- planted consumed nonces
+#
+# id-fleet may create nonces (create-only, infra/modules/cosmos-access.bicep), and RBAC cannot
+# constrain a field, so the fleet can create a nonce that already reads "consumed", with a consumed
+# block it wrote itself. A redelivery must never turn that block into an approval record: "the
+# fleet may create a nonce but never consume one" (README). Each case below must be refused with
+# no write, no approval record and no pointer.
+
+PLANTED = "planted-by-fleet"
+FAR_FUTURE = 4_102_444_800  # 2100-01-01
+
+
+def _planted_env(confirm_rows: tuple[str, ...] = (), expires_at: int = FAR_FUTURE, **consumed: Any) -> tuple[CrashAfterNonceWrite, govkit.Env]:
+    """A nonce created straight into the store as already consumed, on a real sealed bundle."""
+    store = CrashAfterNonceWrite()
+    store.armed = False
+    govkit.grant_default_roles(store)
+    bundle, files = govkit.make_bundle()
+    verifier.register_sealed_bundle(store, bundle.manifest_bytes)
+    env = govkit.Env(store=store, bundle=bundle, files=files, nonce=PLANTED)
+    block = {
+        "approval_id": verifier.approval_id_for(PLANTED),
+        "decision": "approve",
+        "approver": govkit.OFFICER,
+        "channel": "teams",
+        "received_at": NOW.isoformat(),
+        "verified_at": NOW.isoformat(),
+        "confirmed_rows": sorted(confirm_rows),
+        "destinations": govkit.offered(env),
+        "destinations_as_offered": False,
+    }
+    block.update(consumed)
+    store.create(NONCES, PLANTED, {
+        "bundle_sha256": bundle.bundle_sha256, "purpose": "fulltime", "target": "feed", "role": verifier.APPROVER_ROLE,
+        "issued_at": int(govkit.T0.timestamp()), "expires_at": expires_at, "confirm_rows": sorted(confirm_rows),
+        "status": "consumed", "consumed": block,
+    })
+    store.writes.clear()
+    return store, env
+
+
+def _assert_refused_with_no_trace(store: CrashAfterNonceWrite, env: govkit.Env, payload: dict[str, Any], queue: str = "decisions-teams") -> None:
+    out = Out()
+    outcome = intake.handle_message(queue, intake.encode_message(RUN, payload), store, govkit.later(60), out)
+    assert (outcome.status, outcome.code) == ("refused", "already_consumed"), outcome
+    assert store.writes == [], "a planted consumed block must never be written anywhere"
+    assert store.keys(APPROVALS) == [] and out.sent == []
+
+
+def test_the_reviewers_forge_a_planted_approve_by_a_stranger_is_never_projected() -> None:
+    """The review's reproduction: approve by mallory, no role, expired, unticked rows, every destination."""
+    store, env = _planted_env(
+        confirm_rows=("never-ticked",), expires_at=1,
+        approver="mallory@nowhere", received_at="1970-01-01T00:00:00+00:00", verified_at="1970-01-01T00:00:00+00:00",
+        confirmed_rows=[],
+    )
+    _assert_refused_with_no_trace(store, env, govkit.teams_payload(env, decision="changes", upn=govkit.OFFICER))
+
+
+def test_a_planted_block_naming_another_approver_is_not_projected() -> None:
+    store, env = _planted_env(approver="mallory@nowhere")
+    _assert_refused_with_no_trace(store, env, govkit.teams_payload(env))
+
+
+def test_a_planted_block_whose_approver_holds_no_role_is_not_projected() -> None:
+    store, env = _planted_env(approver=govkit.INTERN)
+    _assert_refused_with_no_trace(store, env, govkit.teams_payload(env, upn=govkit.INTERN))
+
+
+def test_a_planted_block_verified_after_its_nonce_expired_is_not_projected() -> None:
+    store, env = _planted_env(expires_at=int(govkit.later(10).timestamp()))
+    _assert_refused_with_no_trace(store, env, govkit.teams_payload(env))
+
+
+def test_a_planted_approve_is_not_projected_by_a_changes_decision() -> None:
+    store, env = _planted_env()
+    _assert_refused_with_no_trace(store, env, govkit.teams_payload(env, decision="changes"))
+
+
+def test_a_planted_block_with_a_destination_the_bundle_does_not_offer_is_not_projected() -> None:
+    store, env = _planted_env()
+    store.writes.clear()
+    doc = store.read(NONCES, PLANTED)
+    body = {**doc.body, "consumed": {**doc.body["consumed"], "destinations": [*govkit.offered(env), "not_a_destination"]}}
+    InMemoryStore.replace(store, NONCES, PLANTED, body, if_match=doc.etag)
+    _assert_refused_with_no_trace(store, env, govkit.teams_payload(env))
+
+
+def test_a_planted_approve_with_unconfirmed_rows_is_not_projected() -> None:
+    store, env = _planted_env(confirm_rows=("s3",), confirmed_rows=[])
+    _assert_refused_with_no_trace(store, env, govkit.teams_payload(env))
+
+
+def test_a_planted_block_carrying_an_extra_field_is_not_projected() -> None:
+    """Every field of the consumed block flows into the record, so the block may hold nothing else."""
+    store, env = _planted_env(publish_anyway=True)
+    _assert_refused_with_no_trace(store, env, govkit.teams_payload(env))
