@@ -145,7 +145,7 @@ test("the players appear only when asked for, with name tags from the synthetic 
   expect(asked, "no tracking file is fetched on first paint").toEqual([]);
   await page.getByLabel("Match time").fill("1500");
   await page.getByRole("button", { name: "Show the players" }).click();
-  await expect(page.getByText(/Synthetic tracking, modelled from the event log within speed caps, not measured/)).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/Synthetic tracking, modelled from the event log within speed and acceleration caps, not measured/)).toBeVisible({ timeout: 30_000 });
   expect(asked.some((u) => /kinematics\/1\.kinematics\.json$/.test(u))).toBe(true);
   const pitch = page.locator('[data-view="home"] figure').first();
   await expect.poll(() => pitch.locator("circle[data-player]").count()).toBeGreaterThanOrEqual(20);

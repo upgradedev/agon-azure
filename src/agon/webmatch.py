@@ -76,10 +76,14 @@ RULES: dict[str, str] = {
         "then the lower shirt number. There is no star player when nobody scored or assisted."
     ),
     "speed": (
-        "Speed and sprints are an on-ball carry proxy (carry displacement over the gap to the next event), not running speed: "
-        "the synthetic generator produces no tracking data."
+        "Carry speed and sprint carries are an on-ball proxy (carry displacement over the gap to the next event), not running "
+        "speed: the match engine produces events only. Running speed and distance come only from the separate synthetic tracking "
+        "layer, modelled from the event log within speed and acceleration caps, not measured."
     ),
-    "distance": "Distance covered is not measured: it needs tracking data, which the synthetic generator does not produce.",
+    "distance": (
+        "Distance covered is not in the event log. The separate synthetic tracking layer models it within speed and acceleration "
+        "caps; it is not measured."
+    ),
 }
 
 

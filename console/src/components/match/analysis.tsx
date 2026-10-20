@@ -130,8 +130,8 @@ export function PlayerTable({
       title="Player scorecards"
       sentence={`Every player who appeared. ${file.rules.speed} ${
         kinematics
-          ? "Top running speed and distance come from the synthetic tracking (agon.synth.kinematics), modelled from the event log within speed caps, not measured."
-          : file.rules.distance
+          ? "The synthetic tracking is loaded, so its top running speed and distance are in the table."
+          : "Show the players on the replay to add the synthetic tracking's running speed and distance."
       }`}
       label="Player scorecards"
       className="lg:col-span-2"
@@ -410,7 +410,7 @@ export function PlayerFocus({
       </h3>
       <p className="mt-1 text-xs leading-5 text-muted">
         Their scorecard, pass quality and where they had the ball; on the charts above everyone else is dimmed. Pass difficulty is agon.interpret&apos;s modelled
-        chance that a pass like it fails, from 0 (easy) to 100. <SourceNote />
+        chance that a pass like it fails, from 0 (easy) to 100. {file.rules.speed} <SourceNote />
       </p>
       <div className="mt-3 grid gap-4 md:grid-cols-2">
         <dl className="grid grid-cols-2 gap-2">

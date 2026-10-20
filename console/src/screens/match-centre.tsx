@@ -283,6 +283,10 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
       setKin({ status: "off" });
       return undefined;
     }
+    if (manifestError || match.status === "error") {
+      setKin({ status: "error", message: "The synthetic tracking needs the match file, which could not be read, so the players cannot be shown." });
+      return undefined;
+    }
     if (match.status !== "ready") {
       setKin({ status: "loading" });
       return undefined;
@@ -297,7 +301,7 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [tracking, match]);
+  }, [tracking, match, manifestError]);
 
   /* Live cues for the seed, when a cue file exists under an approved charter. */
   useEffect(() => {
@@ -542,7 +546,7 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
     side: ready && p.team === ready.derived.home ? "home" : "away",
     focus: p.player_id === focusPlayer,
   }));
-  /* Name tags for the player on the ball and the followed player, with the tracking's trigger indicators. */
+  /* Name tags for the player in the latest event and the followed player, with the tracking's trigger indicators. */
   const nameTags: NameTag[] = [];
   if (kinFile && view && ready && names) {
     for (const id of new Set([view.event?.player ?? null, focusPlayer].filter((v): v is string => Boolean(v)))) {
@@ -749,19 +753,34 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
                     : "Pitch Sound plays the replay as sound, made in this browser: a tick that pans with the ball and speeds up with the pressing, a tone for each shot and a rising figure for each goal. It starts only when you press it."}
               </p>
               <div className="flex flex-wrap items-center gap-2">
-                <Button variant="secondary" size="sm" onClick={() => setTracking((v) => !v)} aria-pressed={tracking} aria-describedby={ids.trackingHint}>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => setTracking((v) => !v)}
+                  aria-pressed={tracking}
+                  disabled={Boolean(manifestError) || match.status === "error"}
+                  aria-describedby={ids.trackingHint}
+                >
                   <Users aria-hidden="true" />
                   Show the players
                 </Button>
               </div>
               <p id={ids.trackingHint} className="text-xs leading-5 text-muted" aria-live="polite">
-                {kin.status === "off"
-                  ? "Shows all 22 players with name tags for the player on the ball and the one you follow. The tracks are synthetic, modelled from the event log within speed caps, not measured; about 1.3 MB, loaded only when you ask."
-                  : kin.status === "loading"
-                    ? "Loading the synthetic tracking for this match."
-                    : kin.status === "ready"
-                      ? "Synthetic tracking, modelled from the event log within speed caps, not measured: a tag shows a sprint (25.2 km/h or more), a top-speed burst (30 km/h or more) or a 2 km milestone as it happens."
-                      : kin.message}
+                {manifestError || match.status === "error"
+                  ? "The synthetic tracking needs the match file, which could not be read, so the players cannot be shown."
+                  : kin.status === "off"
+                    ? "Shows all 22 players, with name tags for the player in the latest event and the one you follow. The tracks are synthetic, modelled from the event log within speed and acceleration caps, not measured; about 1.3 MB, loaded only when you ask."
+                    : kin.status === "loading"
+                      ? "Loading the synthetic tracking for this match."
+                      : kin.status === "ready"
+                        ? "Synthetic tracking, modelled from the event log within speed and acceleration caps, not measured: a tag shows a sprint (25.2 km/h or more), a top-speed burst (30 km/h or more) or a 2 km milestone as it happens."
+                        : kin.message}
+                {kin.status === "ready" ? (
+                  <>
+                    {" "}
+                    Positions are modelled and can miss the event spot; <a href="kinematics/README.txt">kinematics/README.txt</a> counts the misses.
+                  </>
+                ) : null}
               </p>
               {playReason ? (
                 <p id={ids.playReason} className="text-sm text-muted">

@@ -31,7 +31,7 @@ const WHY_BUY: [string, string][] = [
   ],
   [
     "The residual gaps",
-    "This build runs on synthetic data only. Posting to Instagram and YouTube needs Meta and Google app approval; the Teams newsroom and journalist email sends are not deployed; there is no tracking data, so no running speed or distance; cost per match is not measured yet.",
+    "This build runs on synthetic data only. Posting to Instagram and YouTube needs Meta and Google app approval; the Teams newsroom and journalist email sends are not deployed; player tracking is synthetic: modelled from the event log within speed and acceleration caps, not measured, with the misses against the event spots counted; cost per match is not measured yet.",
   ],
   ["Where to look", "The Media office view shows the recorded run as a head of department reads it: status, timings from Azure, what went out where, the checks and the approval audit trail."],
 ];
