@@ -9,6 +9,8 @@
 * `PublishQueue` stands in for the `publish-requests` Storage queue. It is create-only keyed by
   the approval id, a second line of defence behind the verifier's consume-once.
 * `RunLedger` records the run's status with etag compare-and-set and an explicit transition table.
+  Every history entry carries `at`, and every noted field `<field>_at`: UTC to the second, ending
+  in Z, read from an injected clock (the fleet passes `FleetDeps.clock`).
 """
 
 from __future__ import annotations
@@ -21,8 +23,9 @@ import threading
 import time
 import uuid
 from dataclasses import asdict
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
 
 from agon.fleet.contracts import PublishRequest
 from agon.governance.store import Conflict, Document, NotFound, PreconditionFailed, Store
@@ -283,16 +286,34 @@ class LedgerError(RuntimeError):
     """A status change the transition table does not allow."""
 
 
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def utc_stamp(moment: datetime) -> str:
+    """`moment` as UTC ISO 8601 to the second, ending in Z (the form `webrun.ISO_TIME` accepts)."""
+    if not isinstance(moment, datetime) or moment.tzinfo is None or moment.tzinfo.utcoffset(moment) is None:
+        raise LedgerError("the ledger clock must return a timezone-aware datetime")
+    return moment.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 class RunLedger:
     """Run status, moved only along `TRANSITIONS` and only by etag compare-and-set.
 
     Moving to the status a run already has is a no-op, so a step that runs again after a resume
     does not fail; moving anywhere else from a later status raises.
+
+    Times come from `clock` and nowhere else: each history entry `advance` appends carries `at`, and
+    each field `note` changes gets `<field>_at` beside it. A no-op writes nothing and stamps nothing.
     """
 
-    def __init__(self, store: Store, container: str = RUNS) -> None:
+    def __init__(self, store: Store, container: str = RUNS, clock: Callable[[], datetime] = utc_now) -> None:
         self.store = store
         self.container = container
+        self.clock = clock
+
+    def _stamp(self) -> str:
+        return utc_stamp(self.clock())
 
     def status(self, run_id: str) -> str | None:
         doc = self.store.read(self.container, run_id)
@@ -334,17 +355,26 @@ class RunLedger:
         """Record facts about a run (a card posted, a publish request sent) without moving its status.
 
         Compare-and-set like `advance`; the status, the history and the run id cannot be set here.
+        Each field whose value changes gets `<field>_at` beside it (for example `cards_posted_at`).
+        A field noted again with the value it already holds keeps its first stamp, and a note that
+        changes nothing writes nothing. A caller cannot set a `*_at` field itself.
         """
         reserved = sorted({"run_id", "status", "history"}.intersection(fields))
         if reserved:
             raise LedgerError(f"note cannot set {reserved}; use advance")
+        stamps = sorted(name for name in fields if name.endswith("_at"))
+        if stamps:
+            raise LedgerError(f"note cannot set {stamps}; the ledger stamps <field>_at from its clock")
+        noted = _snapshot(fields)
         for _ in range(3):
             doc = self.store.read(self.container, run_id)
             if doc is None:
                 raise LedgerError(f"run {run_id}: no ledger record to note on")
-            body = {**doc.body, **fields}
-            if body == doc.body:
+            changed = sorted(name for name, value in noted.items() if name not in doc.body or doc.body[name] != value)
+            if not changed:
                 return
+            at = self._stamp()
+            body = {**doc.body, **noted, **{f"{name}_at": at for name in changed}}
             try:
                 self.store.replace(self.container, run_id, body, if_match=doc.etag)
                 return
@@ -363,7 +393,7 @@ class RunLedger:
             if to not in TRANSITIONS.get(current, frozenset()):
                 raise LedgerError(f"run {run_id}: {current} -> {to} is not an allowed transition")
             history = [] if doc is None else list(doc.body.get("history", []))
-            history.append({"status": to, "detail": detail})
+            history.append({"status": to, "detail": detail, "at": self._stamp()})
             body = {**({} if doc is None else doc.body), **fields, "run_id": run_id, "status": to, "history": history}
             try:
                 if doc is None:
