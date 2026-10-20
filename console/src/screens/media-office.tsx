@@ -41,9 +41,9 @@ function Tile({ label, value, note }: { label: string; value: string; note: stri
 }
 
 function ExecutionChart({ rows, approvedAt }: { rows: Execution[]; approvedAt: string | null }) {
-  const W = 640;
-  const L = 150;
-  const R = 628;
+  const W = 900;
+  const L = 170;
+  const R = 886;
   const rowH = 34;
   const top = 26;
   const H = top + rows.length * rowH + 30;
@@ -228,7 +228,7 @@ export function MediaOffice({ active, runs }: { active: boolean; runs: RunsData 
                     {publisher ? `; the publisher finished at ${clockUtc(publisher.end)}.` : "."}
                   </p>
                   <div className="relative overflow-x-auto" tabIndex={0} role="region" aria-label="Job executions chart, scrolls sideways on a narrow screen">
-                    <div className="min-w-[36rem]">
+                    <div className="min-w-[40rem]">
                       <ExecutionChart rows={rows} approvedAt={approval?.approved_at ?? null} />
                     </div>
                   </div>
@@ -307,7 +307,8 @@ export function MediaOffice({ active, runs }: { active: boolean; runs: RunsData 
                         <CircleX className="mt-0.5 size-4 shrink-0 text-danger" aria-hidden="true" />
                       )}
                       <span className="min-w-0">
-                        <span className="font-medium text-fg">{g.name}</span> <span className="text-muted">{g.detail}</span>
+                        <span className="font-medium text-fg">{g.name}</span>{" "}
+                        <span className="text-muted">{g.detail.startsWith(g.name) ? g.detail.slice(g.name.length).replace(/^:\s*/, "") : g.detail}</span>
                       </span>
                     </li>
                   ))}
