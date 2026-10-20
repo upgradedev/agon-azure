@@ -48,7 +48,8 @@ manifest.json
                   the brief would be, for example "The What-If Lab is not available for this
                   match in this build ..."), detail (the technical cause, for the log)}.
                   A What-If file is withheld when it no longer matches the served log, the
-                  generator or the interpret model; a brief when it fails its number check.
+                  generator, the interpret version or model, or the code fingerprint, or is
+                  malformed; a brief when it fails its number check or is malformed.
                   The deploy goes on; the determinism workflow fails the pull request that
                   made the set stale.
 Fetch only the files the manifest lists under files. Any other file in intel/ fails the deploy,
@@ -168,8 +169,10 @@ K times with and without the change from the scenario minute (python -m agon.wha
 is the committed set under src/agon/whatif/scenario_set, regenerated and compared byte for byte on
 ubuntu and windows by the determinism workflow). Show the label beside every number.
 
-Header: kind, schema, seed, match_id, generator, interpret, model_sha256, events_sha256 (the
-served data/<seed>.ndjson, as for metrics), label ("Synthetic engine, paired replays, not a
+Header: kind, schema, seed, match_id, generator, interpret, model_sha256, code_sha256 and
+code_files (a fingerprint of the lab, engine and definition modules the numbers depend on, and the
+list of those files; a file whose fingerprint differs from the deployed code is withheld),
+events_sha256 (the served data/<seed>.ndjson, as for metrics), label ("Synthetic engine, paired replays, not a
 prediction about real football."), method (list of plain sentences: how the replays are paired
 and what they share), k (replays per arm), home, away, clubs, actual_score,
 timeline_marks (["5", "10", ..., "45", "45+", "50", ..., "90", "90+"]: cumulative cut-offs; "45+"
@@ -177,7 +180,7 @@ is the end of the first half with its added time, "90+" full time).
 
 scenarios     list, one per scenario, each with:
                 scenario_id   red_home_30, red_away_30, press_up_home_60, press_down_home_60,
-                              collapse_home_60, heroics_away_60, red_low_block_home_55
+                              collapse_home_60, heroics_away_60, red_press_down_home_55
                 title, question, engine_note   plain text; engine_note says what the engine
                               really changes (show it, it is the honest limit)
                 side, club_id the side the scenario changes; every share and delta is told from

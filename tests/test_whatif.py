@@ -176,6 +176,10 @@ def test_fixed_set_names_seven_scenarios_with_notes():
     assert [s.scenario_id for s in scs] == list(SCENARIO_IDS) and len(scs) == 7
     assert all(s.title and s.question.startswith("What if") and s.engine_note for s in scs)
     assert all("central" not in s.engine_note for s in scs)  # the engine cannot pick a position
+    # The press knob changes how often a side presses; the engine has no defensive line.
+    texts = " ".join(f"{s.title} {s.question} {s.engine_note}" for s in scs).lower()
+    for word in ("low block", "sit deep", "stopped pressing", "line height"):
+        assert word not in texts, word
 
 
 def test_cli_reproduces_a_scenario_from_parameters(tmp_path, capsysbinary):
@@ -212,6 +216,9 @@ def test_committed_scenario_set_matches_the_served_match_and_the_contract(seed):
     assert body["k"] == DEFAULT_K and [s["scenario_id"] for s in body["scenarios"]] == list(SCENARIO_IDS)
     assert body["events_sha256"] == sha256_hex(ndjson_bytes(build_bundle(seed).events))
     assert all(s["prefix"]["differing_events"] == 0 for s in body["scenarios"])
+    from agon.whatif.scenarios import code_sha256
+
+    assert body["code_sha256"] == code_sha256(), "the lab, engine or definitions changed: regenerate the set"
 
 
 def test_committed_hash_file_lists_the_committed_files():

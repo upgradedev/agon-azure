@@ -6,7 +6,8 @@
 # a model reply is not deterministic, so it is drafted once, uploaded as an artifact with its
 # provenance (deployment, reported model, prompt sha256, the What-If file sha256 it was drafted
 # from), and a person decides whether to commit it under src/agon/whatif/briefs/. agon.webintel
-# re-checks every number of a committed brief at deploy and stops the deploy on a mismatch.
+# re-checks every number of a committed brief at deploy and withholds the brief from the site on a
+# mismatch (the manifest lists it as withheld with the reason); the deploy goes on.
 #
 # Identity: the CI app agon-azure-ci through the environment azure subject, which holds Cognitive
 # Services OpenAI User on the Foundry account (infra/rbac.bicep). No key exists.

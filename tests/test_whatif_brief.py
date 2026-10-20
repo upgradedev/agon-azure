@@ -47,6 +47,19 @@ def test_a_number_that_is_not_the_scenarios_is_refused(red):
     assert any("the number 4321 " in r for r in check_brief(text, red))
 
 
+def test_a_bare_number_never_passes_as_a_percentage(red):
+    # The scenario minute (60 for collapse, 30 here) and K (200) are allowed as numbers, never as percents.
+    n = numbers(red)
+    minute, k = n["scenario_minute"], n["replays_per_arm"]
+    assert minute in allowed(red) and k in allowed(red)
+    for fake in (f"{minute}%", f"{k}%"):
+        assert fake not in allowed(red)
+        text = _good(red).replace(n["scenario_win_pct"], fake, 1)
+        assert any(f"the number {fake} " in r for r in check_brief(text, red)), fake
+    # A real percent written without its sign still passes.
+    assert check_brief(_good(red).replace(n["scenario_win_pct"], n["scenario_win_pct"][:-1] + " percent", 1), red) == []
+
+
 def test_a_dropped_minus_sign_is_refused(red):
     delta = numbers(red)["points_for_delta_mean"]
     assert delta.startswith("-"), "fixture expects a negative points change for a red card"
@@ -142,6 +155,25 @@ def test_a_failing_brief_is_withheld_and_the_deploy_goes_on(tmp_path, whatif):
     _committed(good, whatif, _good)
     manifest, files = webintel.build_intel_web(str(data), [1], brief_dir=str(good))
     assert "brief-1.json" in files and manifest["withheld"] == []
+
+
+@pytest.mark.parametrize("payload", [
+    b"[]\n",
+    b'{"briefs": [null], "whatif_sha256": "WHATIF"}\n',
+    b'{"briefs": [{"scenario_id": "red_home_30", "status": "accepted", "text": 5}], "whatif_sha256": "WHATIF"}\n',
+    b'{"briefs": "nope", "whatif_sha256": "WHATIF"}\n',
+])
+def test_a_malformed_brief_is_withheld_not_a_stopped_deploy(tmp_path, payload):
+    from agon.webdata import write_web_data
+
+    data = tmp_path / "data"
+    write_web_data(str(data), [1])
+    briefs = tmp_path / "briefs"
+    briefs.mkdir()
+    (briefs / "brief-1.json").write_bytes(payload.replace(b"WHATIF", sha256_hex(SET_FILE.read_bytes()).encode("ascii")))
+    manifest, files = webintel.build_intel_web(str(data), [1], brief_dir=str(briefs))
+    assert "brief-1.json" not in files and "whatif-1.json" in files
+    assert [w["name"] for w in manifest["withheld"]] == ["brief-1.json"]
 
 
 def test_webintel_refuses_a_brief_with_an_unchecked_number_or_another_set(tmp_path, whatif):

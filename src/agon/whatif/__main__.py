@@ -72,7 +72,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--side", choices=("home", "away"), help="the side the custom change applies to")
     parser.add_argument("--minute", type=int, help="custom scenario start, engine minute 0..89")
     parser.add_argument("--red-card", action="store_true")
-    parser.add_argument("--press-shift", type=int, default=0, help="per mille, negative to sit deeper")
+    parser.add_argument("--press-shift", type=int, default=0, help="press-height knob, per mille; negative presses less often")
     parser.add_argument("--collapse", type=int, default=0, help="late_collapse magnitude after the side's next goal (1200..4000)")
     parser.add_argument("--heroics", type=int, default=0, help="goalkeeper_heroics magnitude (100..900)")
     parser.add_argument("--set", action="store_true", help="the whole fixed set for --seeds")

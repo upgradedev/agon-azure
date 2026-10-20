@@ -34,8 +34,9 @@ no floats, plus a final LF):
                                main-only workflow whatif-brief.yml): the accepted analyst briefs, every
                                number re-checked here against the What-If file
 
-A What-If file that no longer describes the served log, this generator and this interpret model (or a
-brief that fails its re-check) is WITHHELD, not shipped: the file is left out of intel/ and the manifest
+A What-If file that no longer describes the served log, this generator, this interpret version and
+model, and this lab, engine and definition code (its code_sha256), or that is malformed in any way (or a
+brief that fails its re-check or is malformed) is WITHHELD, not shipped: the file is left out of intel/ and the manifest
 lists it under `withheld` with a plain reason the page shows. The deploy goes on, so a fix to recompute
 or interpret can ship; the determinism workflow stays strict and fails the pull request that made the
 set stale.
@@ -439,21 +440,31 @@ def file_bytes(payload: Any) -> bytes:
 
 
 def committed_whatif(seed: int, served_sha256: str, set_dir: str | None = None) -> tuple[dict[str, Any], bytes]:
-    """The committed What-If file of a published seed, refused unless it describes this log, generator and model."""
-    from agon.whatif.scenarios import REGENERATE, SET_DIR
+    """The committed What-If file of a published seed, refused unless it describes this log and this code.
+
+    "This code" is the generator version, the interpret version, the frozen model and the fingerprint of
+    the lab, engine and definition modules (agon.whatif.scenarios.code_sha256). Raises ValueError.
+    """
+    from agon.whatif.scenarios import REGENERATE, SET_DIR, code_sha256
 
     path = os.path.join(set_dir or SET_DIR, f"whatif-{seed}.json")
     if not os.path.isfile(path):
         raise ValueError(f"no committed What-If set for seed {seed}: {REGENERATE}")
     raw = _read_bytes(path)
     body = json.loads(raw.decode("ascii"))
+    if not isinstance(body, dict):
+        raise ValueError(f"the committed What-If set for seed {seed} is not a JSON object")
     stale = []
     if body.get("events_sha256") != served_sha256:
         stale.append("the served event log")
     if body.get("generator") != GENERATOR_VERSION:
         stale.append("the generator version")
+    if body.get("interpret") != INTERPRET_VERSION:
+        stale.append("the interpret version")
     if body.get("model_sha256") != model_sha256():
         stale.append("the interpret model")
+    if body.get("code_sha256") != code_sha256():
+        stale.append("the lab, engine or definition code")
     if stale:
         raise ValueError(f"the committed What-If set for seed {seed} does not match {', '.join(stale)}: {REGENERATE}")
     if raw != file_bytes(body):
@@ -465,8 +476,9 @@ def committed_brief(seed: int, whatif_raw: bytes, brief_dir: str | None = None) 
     """The web brief of a published seed, or None when no brief is committed for it.
 
     A committed brief must name the sha256 of the What-If file it was drafted from, and every accepted
-    text must pass agon.whatif.brief.check_brief again against that file; otherwise the deploy stops.
-    Refused drafts stay in the repo as evidence and are never published.
+    text must pass agon.whatif.brief.check_brief again against that file; otherwise this raises
+    ValueError and build_intel_web withholds the brief (the deploy goes on). Refused drafts stay in the
+    repo as evidence and are never published.
     """
     from agon.whatif.brief import BRIEF_LABEL, check_brief
     from agon.whatif.scenarios import BRIEF_DIR
@@ -475,18 +487,24 @@ def committed_brief(seed: int, whatif_raw: bytes, brief_dir: str | None = None) 
     if not os.path.isfile(path):
         return None
     committed = json.loads(_read_bytes(path).decode("ascii"))
+    if not isinstance(committed, dict) or not isinstance(committed.get("briefs", []), list):
+        raise ValueError(f"brief-{seed}.json is not an object with a list of briefs")
     if committed.get("whatif_sha256") != sha256_hex(whatif_raw):
         raise ValueError(f"brief-{seed}.json was drafted from another What-If file; draft it again with whatif-brief.yml")
     whatif = json.loads(whatif_raw.decode("ascii"))
     scenarios = {sc["scenario_id"]: sc for sc in whatif["scenarios"]}
     briefs = []
     for row in committed.get("briefs", []):
+        if not isinstance(row, dict):
+            raise ValueError(f"brief-{seed}.json holds a brief that is not an object")
         if row.get("status") != "accepted":
             continue
         sc = scenarios.get(row.get("scenario_id"))
         if sc is None:
             raise ValueError(f"brief-{seed}.json names a scenario the What-If file does not hold: {row.get('scenario_id')}")
-        reasons = check_brief(row.get("text") or "", sc)
+        if not isinstance(row.get("text"), str):
+            raise ValueError(f"brief-{seed}.json {row.get('scenario_id')}: an accepted brief needs its text as a string")
+        reasons = check_brief(row["text"], sc)
         if reasons:
             raise ValueError(f"brief-{seed}.json {row['scenario_id']}: " + "; ".join(reasons))
         briefs.append({"scenario_id": row["scenario_id"], "text": row["text"], "model": row.get("model", ""),
@@ -505,9 +523,11 @@ def committed_brief(seed: int, whatif_raw: bytes, brief_dir: str | None = None) 
 
 WHATIF_WITHHELD = (
     "The What-If Lab is not available for this match in this build: its precomputed replays no longer "
-    "match the served match, the generator or the interpret model, so they are not shown. They return "
-    "when the set is regenerated."
+    "match the served match or the code that reads it, so they are not shown. They return when the set "
+    "is regenerated."
 )
+# Everything a malformed committed file can raise on the way in: it is withheld, never a stopped deploy.
+WITHHOLD_ERRORS = (ValueError, OSError, UnicodeDecodeError, json.JSONDecodeError, AttributeError, KeyError, TypeError)
 BRIEF_WITHHELD = (
     "The analyst brief is not available for this match in this build: it no longer passes the number "
     "check against the What-If file, so it is not shown."
@@ -542,14 +562,14 @@ def build_intel_web(
             problems = validate_payload(name, body)
             if problems:
                 raise ValueError("it breaks the What-If contract: " + "; ".join(problems))
-        except (ValueError, OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        except WITHHOLD_ERRORS as exc:
             withheld.append(_withheld(name, "whatif", seed, WHATIF_WITHHELD, str(exc)))
             continue
         payloads[name] = body
         raw_files[name] = raw
         try:
             brief = committed_brief(seed, raw, brief_dir)
-        except (ValueError, OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        except WITHHOLD_ERRORS as exc:
             withheld.append(_withheld(f"brief-{seed}.json", "brief", seed, BRIEF_WITHHELD, str(exc)))
             brief = None
         if brief is not None:
@@ -823,8 +843,8 @@ def _validate_milestones(body: Mapping[str, Any]) -> list[str]:
 
 
 WHATIF_KEYS = frozenset({
-    "kind", "schema", "seed", "match_id", "generator", "interpret", "model_sha256", "events_sha256", "label",
-    "method", "k", "home", "away", "clubs", "actual_score", "timeline_marks", "scenarios",
+    "kind", "schema", "seed", "match_id", "generator", "interpret", "model_sha256", "code_sha256", "code_files",
+    "events_sha256", "label", "method", "k", "home", "away", "clubs", "actual_score", "timeline_marks", "scenarios",
 })
 SCENARIO_KEYS = frozenset({
     "scenario_id", "title", "question", "engine_note", "side", "club_id", "params", "k", "prefix", "triggered",

@@ -110,6 +110,45 @@ def test_a_missing_or_invalid_whatif_file_is_withheld_too(site, tmp_path):
     assert "whatif-1.json" not in files and "What-If contract" in manifest["withheld"][0]["detail"]
 
 
+@pytest.mark.parametrize("payload", [b"[]\n", b'"text"\n', b"null\n", b"{}\n"])
+def test_a_malformed_whatif_file_is_withheld_not_a_stopped_deploy(site, tmp_path, payload):
+    data, _ = site
+    bad = tmp_path / "bad"
+    bad.mkdir()
+    (bad / "whatif-1.json").write_bytes(payload)
+    manifest, files = webintel.build_intel_web(str(data), [1], set_dir=str(bad))
+    assert "whatif-1.json" not in files and [w["name"] for w in manifest["withheld"]] == ["whatif-1.json"]
+
+
+@pytest.mark.parametrize(("field", "value", "cause"), [
+    ("code_sha256", "0" * 64, "the lab, engine or definition code"),
+    ("interpret", "interpret-v0", "the interpret version"),
+])
+def test_a_whatif_file_for_other_code_is_withheld(site, tmp_path, field, value, cause):
+    from agon.whatif.scenarios import SET_DIR
+
+    data, _ = site
+    other = tmp_path / "other"
+    other.mkdir()
+    body = json.loads(Path(SET_DIR, "whatif-1.json").read_bytes())
+    (other / "whatif-1.json").write_bytes(canonical_bytes(dict(body, **{field: value})) + b"\n")
+    manifest, files = webintel.build_intel_web(str(data), [1], set_dir=str(other))
+    assert "whatif-1.json" not in files and cause in manifest["withheld"][0]["detail"]
+
+
+def test_the_code_fingerprint_ignores_line_endings_and_sees_a_change(tmp_path):
+    from agon.whatif.scenarios import AGON_DIR, CODE_FILES, code_sha256
+
+    for rel in CODE_FILES:
+        target = tmp_path.joinpath(*rel.split("/"))
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(Path(AGON_DIR, *rel.split("/")).read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
+    assert code_sha256(str(tmp_path)) == code_sha256()
+    metrics = tmp_path / "interpret" / "metrics.py"
+    metrics.write_bytes(metrics.read_bytes() + b"# a changed definition\r\n")
+    assert code_sha256(str(tmp_path)) != code_sha256()
+
+
 def test_manifest_refuses_a_file_both_shipped_and_withheld(site):
     _, intel = site
     manifest = _load(intel, "manifest.json")

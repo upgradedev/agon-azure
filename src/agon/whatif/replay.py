@@ -19,15 +19,18 @@ plus three things, all inside this subclass so engine.py stays untouched:
    Replicate 0 is the published match itself.
 
 What stays shared across replicates (stated, not hidden): the added time of each half and the
-substitution minutes are drawn at kick-off (STOPPAGE and SUBS streams), and the choice of who is
-substituted is keyed by the substitution count (PERSONNEL stream). Only the match play after the
-scenario minute varies between replicates.
+planned substitution times are drawn at kick-off (STOPPAGE and SUBS streams), and the draw behind each
+substitution is keyed by the side's substitution count (PERSONNEL stream), not by the replicate. What
+can still differ between the two arms of a pair: a substitution happens at the first chain after its
+planned time, so its minute follows each replay's clock, and the draw picks from the outfield players
+on the pitch at that moment, so after a red card it can take off a different player.
 
 Scenario changes available here, on top of the engine's own interventions (red_card,
 goalkeeper_heroics and the rest, applied by the engine exactly as storylines apply them):
 - a press-height knob shift for one side from the fork on: the side's effective `press_height`
-  (read by the engine's `_press_ppm`) moves by `press_shift` per mille after the engine's own
-  clamp, and is clamped again to 50..950. Up or down, the same knob tactical_shift moves.
+  (read by the engine's `_press_ppm`, the chance that a side presses) moves by `press_shift` per mille
+  after the engine's own clamp, and is clamped again to 50..950. Up or down, the same knob
+  tactical_shift moves. It changes how often the side presses; the engine has no defensive line.
 - a line that drops after the side scores: from the fork on, the first goal by the side switches on
   the engine's `late_collapse` for that side from the next chain (the opponent's chances against it
   are multiplied by the magnitude per mille, and the opponent shoots more often).

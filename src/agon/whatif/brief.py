@@ -74,7 +74,7 @@ def check_brief(text: str, scenario: Mapping[str, Any]) -> list[str]:
     reasons = []
     ok = allowed(scenario)
     for token in written_numbers(text):
-        if token not in ok and token.rstrip("%") not in ok:
+        if token not in ok:
             reasons.append(f"the number {token} is not one of the scenario's numbers")
     sentences = [s for s in re.split(r"(?<=[.!?])\s+", text.strip()) if s]
     if len(sentences) != BRIEF_SENTENCES:
