@@ -22,13 +22,6 @@ async function openAtFullTime(page: Page, width: number, height: number): Promis
 test("fan mode tells the story in words, with the scoreboard, timeline and star player", async ({ page }) => {
   await openAtFullTime(page, 375, 812);
   await expect(page.getByRole("heading", { name: "The match, told for a fan" })).toBeVisible();
-  /* Before a charter is approved the page says so; once web/cues/1.json is exported, its lower-third shows instead. */
-  const cues = await (await page.request.get("/cues/manifest.json")).json();
-  if ((cues.files as { seed: number }[]).some((f) => f.seed === 1)) {
-    await expect(page.getByText(/Live cue, charter [0-9a-f]{12}/)).toBeVisible();
-  } else {
-    await expect(page.getByText(/Live cues: there is no approved charter and no cue file for seed 1 yet/)).toBeVisible();
-  }
   await expect(page.getByRole("heading", { name: "The story so far" })).toBeVisible();
   await expect(page.getByText(/Goal for Pellmoor Harriers \(home\): Arno Quenrick scores\./)).toBeVisible();
   await page.getByRole("button", { name: /Show all \d+ moments so far/ }).click();
@@ -88,4 +81,36 @@ test("the scoreboard and timeline say whose phase it is in words, not colour alo
   await expect(replay.getByText(/above the line/)).toBeVisible();
   await expectNoSeriousAxe(page, "replay dark 1280");
   await page.screenshot({ path: "screenshots/34-replay-dark-1280.png" });
+});
+
+/* Before a charter is approved the page says so. Once web/cues/1.json is exported, the replay is
+   moved to the first listed cue's window (real cues last a few seconds around their trigger) and
+   its lower-third must show there, labelled with the charter hash. */
+test("live cues show inside a listed cue's window, or the page says none is approved", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.emulateMedia({ colorScheme: "light", reducedMotion: "reduce" });
+  await page.goto("/");
+  await appReady(page);
+  await expect(page.locator('[data-view="home"] section[data-analysis="ready"]')).toBeAttached({ timeout: 30_000 });
+  const list = await (await page.request.get("/cues/manifest.json")).json();
+  const entry = (list.files as { seed: number; name: string }[]).find((f) => f.seed === 1);
+  if (!entry) {
+    await expect(page.getByText(/Live cues: there is no approved charter and no cue file for seed 1 yet/)).toBeVisible();
+    return;
+  }
+  const cue = (await (await page.request.get(`/cues/${entry.name}`)).json()).cues[0] as { at_s: number; until_s: number };
+  const axis = (await (await page.request.get("/match/1.json")).json()).axis as { half_offset_s: number; half_time_s: number };
+  const events = (await (await page.request.get("/data/1.ndjson")).text())
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as { period: number; minute: number; second: number });
+  /* The replay clock of lib/core.ts buildTimeline: the second half follows the first half's last event. */
+  const p1End = Math.max(...events.filter((e) => e.period === 1).map((e) => e.minute * 60 + e.second)) + 1;
+  const toReplay = (s: number) => (s < axis.half_time_s ? s : p1End + (s - axis.half_offset_s - 2700));
+  const slider = page.getByLabel("Match time");
+  const label = page.getByText(/Live cue, charter [0-9a-f]{12}/);
+  for (let s = cue.at_s; s < cue.until_s && !(await label.isVisible()); s += 1) {
+    await slider.fill(String(Math.max(0, Math.floor(toReplay(s)))));
+  }
+  await expect(label).toBeVisible();
 });

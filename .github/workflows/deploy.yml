@@ -53,6 +53,7 @@ on:
       - "infra/**"
       - "web/**"
       - "console/**"
+      - "evidence/**"
       - "src/agon/**"
       - "requirements/**"
       - "Dockerfile"

@@ -18,8 +18,10 @@ for (const viewport of [
     await expect(page.locator('[data-view="media-office"] [data-ops="done"]')).toBeAttached({ timeout: 30_000 });
     await expect(page.getByRole("heading", { name: "What the newsroom did for this match" })).toBeVisible();
     await expect(page.getByRole("heading", { name: "The approval survived the process ending" })).toBeVisible();
-    await expect(page.getByText(/The worker that posted the approval card ended at 21:21:36 UTC\./)).toBeVisible();
-    await expect(page.getByText(/a new worker process started at 21:25:06 UTC/)).toBeVisible();
+    await expect(page.getByText(/The fleet worker that posted the approval card ended at 21:21:36 UTC\./)).toBeVisible();
+    await expect(page.getByText(/was verified and recorded at 21:24:58 UTC \(the intake job, which verified it, ran from 21:24:36 UTC to 21:25:27 UTC\)/)).toBeVisible();
+    await expect(page.getByText(/A new fleet worker process started at 21:25:06 UTC/)).toBeVisible();
+    await expect(page.getByText("Decision verified to published")).toBeVisible();
     await expect(page.getByText("Approved hash equals published hash")).toBeVisible();
     await expect(page.getByText("not measured yet", { exact: true })).toBeVisible();
     await expectNoHorizontalScroll(page);

@@ -66,7 +66,7 @@ function ExecutionChart({ rows, approvedAt }: { rows: Execution[]; approvedAt: s
         <g>
           <rect x={x(gap.from)} y={top - 8} width={Math.max(0, x(gap.to) - x(gap.from))} height={rows.length * rowH + 8} className="fill-preview-bg" />
           <text x={(x(gap.from) + x(gap.to)) / 2} y={top - 12} textAnchor="middle" className="fill-preview text-[10px] font-semibold">
-            no process running
+            no fleet worker held the run
           </text>
         </g>
       ) : null}
@@ -100,7 +100,7 @@ function ExecutionChart({ rows, approvedAt }: { rows: Execution[]; approvedAt: s
         <g>
           <line x1={x(approvedAt)} y1={top - 8} x2={x(approvedAt)} y2={top + rows.length * rowH} className="stroke-fg" strokeWidth="2" strokeDasharray="4 3" />
           <text x={x(approvedAt) + 4} y={top + rows.length * rowH + 26} className="fill-fg text-[10px] font-semibold">
-            approved {clockUtc(approvedAt).replace(" UTC", "")}
+            decision verified {clockUtc(approvedAt).replace(" UTC", "")}
           </text>
         </g>
       ) : null}
@@ -186,9 +186,13 @@ export function MediaOffice({ active, runs }: { active: boolean; runs: RunsData 
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <Tile
-              label="Approval to published"
+              label="Decision verified to published"
               value={approval?.approved_at && publisher ? span(approval.approved_at, publisher.end) : "not in the files"}
-              note={publisher ? `From the officer's approval in the run file to the publisher job ending (executions evidence).` : "Needs the executions evidence of the publisher job."}
+              note={
+                publisher
+                  ? "From the time the verifier recorded the officer's decision (the run file) to the publisher job ending (executions evidence); the tap on the card came earlier."
+                  : "Needs the executions evidence of the publisher job."
+              }
             />
             <Tile
               label="Worker run to the approval pause"
@@ -196,14 +200,14 @@ export function MediaOffice({ active, runs }: { active: boolean; runs: RunsData 
               note="The fleet worker ran the full-time workflow, posted the approval card and ended its process inside this span."
             />
             <Tile
-              label="No process held the run"
+              label="No fleet worker held the run"
               value={fleet.length >= 2 ? span(fleet[0].end, fleet[1].start) : "not in the files"}
-              note="Between the worker that paused and the new worker that resumed from the durable checkpoint."
+              note="Between the fleet worker that paused and the new fleet worker that resumed from the durable checkpoint; the decision intake job ran inside this gap."
             />
             <Tile
-              label="Editions delivered"
+              label="Editions sealed"
               value={String(recorded.editions.length)}
-              note={recorded.editions.map((e) => EDITION_LANGUAGE[e.edition] ?? e.name).join(", ")}
+              note={`${recorded.editions.map((e) => EDITION_LANGUAGE[e.edition] ?? e.name).join(", ")}, all in the bundle hash; the destinations carry the English edition (what went out, and where, is below).`}
             />
             <Tile label="Checks passed" value={`${passed} of ${gates.length}`} note={gates.map((g) => g.name).join(", ")} />
             <Tile label="Cost per match" value="not measured yet" note="No cost figure has been measured for a run, so none is shown." />
@@ -220,12 +224,15 @@ export function MediaOffice({ active, runs }: { active: boolean; runs: RunsData 
               {evidence && fleet.length ? (
                 <>
                   <p className="text-sm leading-6 text-fg">
-                    The worker that posted the approval card ended at {clockUtc(fleet[0].end)}.
-                    {fleet[1] ? ` No process held the run for ${span(fleet[0].end, fleet[1].start)}.` : ""}
-                    {approval?.approved_at ? ` The ${approval.approver_role ?? "approver"} approved on ${CHANNEL_WORDS[approval.channel ?? ""] ?? "an approval channel"} at ${clockUtc(approval.approved_at)}` : ""}
-                    {intake ? `, the decision intake verified it at ${clockUtc(intake.end)}` : ""}
-                    {fleet[1] ? `, and a new worker process started at ${clockUtc(fleet[1].start)} and resumed from the durable checkpoint` : ""}
-                    {publisher ? `; the publisher finished at ${clockUtc(publisher.end)}.` : "."}
+                    The fleet worker that posted the approval card ended at {clockUtc(fleet[0].end)}.
+                    {fleet[1] ? ` No fleet worker held the run for ${span(fleet[0].end, fleet[1].start)}.` : ""}
+                    {approval?.approved_at
+                      ? ` The decision the ${approval.approver_role ?? "approver"} took on ${CHANNEL_WORDS[approval.channel ?? ""] ?? "an approval channel"} was verified and recorded at ${clockUtc(approval.approved_at)}${
+                          intake ? ` (the intake job, which verified it, ran from ${clockUtc(intake.start)} to ${clockUtc(intake.end)})` : ""
+                        }.`
+                      : ""}
+                    {fleet[1] ? ` A new fleet worker process started at ${clockUtc(fleet[1].start)} and resumed from the durable checkpoint.` : ""}
+                    {publisher ? ` The publisher finished at ${clockUtc(publisher.end)}.` : ""}
                   </p>
                   <div className="relative overflow-x-auto" tabIndex={0} role="region" aria-label="Job executions chart, scrolls sideways on a narrow screen">
                     <div className="min-w-[40rem]">
@@ -247,7 +254,7 @@ export function MediaOffice({ active, runs }: { active: boolean; runs: RunsData 
                     </li>
                     <li className="flex items-center gap-1.5">
                       <Swatch className="fill-preview-bg stroke-preview" />
-                      No process running
+                      No fleet worker held the run
                     </li>
                   </ul>
                   <ol className="space-y-1.5 text-sm">
@@ -333,7 +340,7 @@ export function MediaOffice({ active, runs }: { active: boolean; runs: RunsData 
                 {[
                   ["Who", `The ${approval?.approver_role ?? "approver"} role (one verifier for every channel)`],
                   ["Channel", CHANNEL_WORDS[approval?.channel ?? ""] ?? "not recorded"],
-                  ["When", approval?.approved_at ? formatUtc(approval.approved_at) : "not recorded"],
+                  ["Decision verified and recorded", approval?.approved_at ? formatUtc(approval.approved_at) : "not recorded"],
                   ["Approved hash", approval?.approved_bundle_sha256 ? shortHash(approval.approved_bundle_sha256) : "none"],
                   ["Published hash, computed on this page", published === null ? "computing" : published ? shortHash(published) : "could not be computed"],
                   ["Result", equal ? "The officer approved exactly the bytes that are published." : published === null ? "Recomputing." : "The published bytes are not the approved ones."],
