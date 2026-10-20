@@ -86,8 +86,8 @@ simple, documented motion model, not a physics or biomechanics simulation and no
 - **Ball.** Every pass and shot gets a drawn speed inside bounds of 15 to 115 km/h for passes and
   30 to 135 km/h for shots. A pass speed reads the pass distance and whether it was played under
   pressure. A shot speed does not read distance: it is a base per shot type (open play 70, header
-  42, penalty 88, free kick 82 km/h), plus 0.4 km/h per point of the shooter's finishing above 60,
-  minus 6 km/h under pressure. Both carry uniform noise (constants in the module). The flight is
+  42, penalty 88, free kick 82 km/h), plus 0.4 km/h per finishing point above or below 60 (signed:
+  a finisher at 20 loses 16 km/h), minus 6 km/h under pressure. Both carry uniform noise (constants in the module). The flight is
   distance over speed and always ends before the next event; when it would not, the flight is
   shortened and the published speed is the faster average, so speed always equals distance over
   flight time.
@@ -107,8 +107,8 @@ simple, documented motion model, not a physics or biomechanics simulation and no
   milestone every 2 km across the match. At 1 Hz every speed is a 1-second average.
 
 **Metric M9 and anchors.** Self-measured, Windows 11, Python 3.11, branch `b/kinematics`, command
-`python -m agon.synth.kinematics --seeds 1,2,3` (exit 0, about 30 s total wall time) for the cap
-violations and the misses, and `python -m agon.webkinematics --seeds 1,2,3 --out build/kinematics`
+`python -m agon.synth.kinematics --seeds 1,2,3` (exit 0; 15.9 s total wall time in one run on the
+local Windows 11 machine with Python 3.11) for the cap violations and the misses, and `python -m agon.webkinematics --seeds 1,2,3 --out build/kinematics`
 for the rest:
 
 | Seed | Cap violations | Actors not at their event location (under 1 m; 1 m or more next to an action beyond the speed cap; 1 m or more, model limit) | Largest actor miss | Receivers not at the pass end on arrival (no position then) | Largest receiver miss | Outfield players on all match: mean distance, mean sprints, top speeds |
@@ -123,9 +123,15 @@ difference), positions within 10 m of the lines, ball speeds in bounds and fligh
 `python -m agon.synth.kinematics --seeds 1 --mutate` plants one 15 m teleport and must exit 1; the
 determinism workflow runs both. Most actor misses are under 1 m. A miss of 1 m or more counts as
 next to an action beyond the speed cap when the player needed an average speed above 9.5 m/s from
-his action at the previous second or to his action at the next second (the engine picks some
-actors at random). The look forward matters because a player carries his velocity toward his next
-action through an anchor: the two largest misses are corner takers pulled off the corner flag by a
+his nearest action at an earlier second or to his nearest action at a later second, however far
+apart in time (the engine picks some actors at random). The split counts events, so one impossible
+movement can be counted at both of its end events, or twice at one spot: seed 3's 2 are one corner
+kick and its pass. The look forward matters because a player carries his velocity toward his next
+action through an anchor (`LEAD_HORIZON_S`, 10 s). That carried velocity keeps players from
+stopping dead between actions and cuts the model-limit misses: on seeds 1 to 3 they are 67 with it
+and 147 without it (self-measured, same machine, command
+`python -c "import agon.synth.kinematics as k; k.LEAD_HORIZON_S = -1; print([k.miss_summary(k.anchor_misses(*k.for_seed(s)))['model_limit'] for s in (1, 2, 3)])"`,
+which prints [61, 47, 39]). It can also pull a player off a reachable anchor: the two largest misses are corner takers pulled off the corner flag by a
 press the engine gives them right after the corner, 40.0 m away 3 s later (seed 1, event
 b9d1b782ee765d99, 19.4 m) and 36.3 m away 2 s later (seed 3, event e8c62c818678cf34, 30.0 m), which
 no capped path reaches. The remaining misses of 1 m or more are limits of this simple motion model.
@@ -442,8 +448,8 @@ https://github.com/upgradedev/agon-azure/actions/runs/39277712146 (ubuntu season
 - Engine constants fitted by hand on calibration seeds; M2 held-out is 18 of 22 (section 4).
 - No measured tracking and no video. Positions come from the synthetic kinematics layer (section
   2): a simple motion model, 1 Hz published. About 6% of actors miss their event location on seeds 1
-  to 3 (two thirds of those misses are under 1 m; a few sit next to an action no capped path
-  reaches; the rest are the model's own limits), and about 1.5% of pass receivers are not at the
+  to 3 (280 of 4856; 206 of those misses are under 1 m, about three quarters; 7 sit next to an
+  action no capped path reaches; the other 67 are the model's own limits), and about 1.5% of pass receivers are not at the
   pass end when the ball arrives. The sprint and distance bands stay NOT
   MEASURABLE in M2, and on seeds 1 to 3 the layer's distances are below the distance band.
 - Storyline labels cover injected interventions only; counterfactual twins are not built.
