@@ -15,8 +15,9 @@ Rules, each a hard failure:
   and every file it lists must exist with the stated sha256 and event count (the web data contract in agon.webdata);
   every world file it lists must exist with the stated sha256 and pass agon.webdata.validate_world;
   every file under the data directory other than manifest.json must be listed;
-  then the season files (agon.webseason) and the match analysis files (agon.webmatch, computed
-  by agon.interpret from the exact event logs just verified) are written and re-checked.
+  then the season files (agon.webseason), the match analysis files (agon.webmatch, computed
+  by agon.interpret from the exact event logs just verified) and the intel files (agon.webintel:
+  the metrics pack, rhythm and milestones, from the same logs) are written and re-checked.
 
 * when the web directory holds runs/: every run listed in runs/index.json must
   pass agon.webrun.validate_run and its sealed bundle must recompute to the
@@ -228,6 +229,19 @@ def stamp_cues(web_dir: Path) -> str:
     return f"listed {len(files)} cue files under {cues_dir.as_posix()}"
 
 
+def stamp_intel(web_dir: Path, data_dir: Path, seeds: list[int]) -> str:
+    """Write web_dir/intel (the files agon.webintel defines) from the verified data, then re-check them."""
+    from agon.webintel import INTEL_DIR, verify_intel_dir, write_intel_web
+
+    intel_dir = web_dir / INTEL_DIR
+    try:
+        write_intel_web(str(intel_dir), str(data_dir), seeds)
+        count = verify_intel_dir(intel_dir, data_dir)
+    except (ValueError, OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise StampError(f"intel: {exc}") from exc
+    return f"wrote and verified {count} intel files under {intel_dir.as_posix()}"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("web_dir", type=Path)
@@ -244,6 +258,7 @@ def main(argv: list[str] | None = None) -> int:
             print(stamp_season(args.web_dir))
             print(stamp_match(args.web_dir, args.data_dir))
             print(stamp_cues(args.web_dir))
+            print(stamp_intel(args.web_dir, args.data_dir, parse_seeds(args.seeds)))
         runs = verify_runs(args.web_dir)
         print(f"verified {len(runs)} runs under {args.web_dir.as_posix()}/runs" + (f": {', '.join(runs)}" if runs else ""))
     except (StampError, KeyError, TypeError, ValueError) as exc:

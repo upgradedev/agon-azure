@@ -460,7 +460,7 @@ FALLBACK_EXCLUDED = {"css", "js", "svg", "json", "ndjson"}
 # root glob such as /*.json is not relied on to reach into folders: a missing
 # runs/<id>/edition-en.json, season/<file>.json or match/<seed>.json must be a 404, never index.html
 # with a 200.
-FALLBACK_JSON_DIRS = ("/data/", "/data-fixture/", "/runs/", "/runs/*/", "/season/", "/match/", "/cues/")
+FALLBACK_JSON_DIRS = ("/data/", "/data-fixture/", "/runs/", "/runs/*/", "/season/", "/match/", "/cues/", "/intel/")
 
 
 def _excluded_dirs(patterns: list[str]) -> set[str]:
