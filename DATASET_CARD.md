@@ -5,8 +5,8 @@ player or match data was used to build, seed or calibrate it.
 
 Sections that describe parts not built yet say so. Nothing below is a claim about real football:
 the realism bands in section 4 are ranges we chose as sanity checks, and every number is
-self-measured with the command printed beside it, except one count in section 5 that says it has
-no command on the current code.
+self-measured with the command printed beside it, except two counts in section 5 (52 of 161) that
+say they have no command on the current code.
 
 Run every command in this card from the repository root with `src` on the import path: prefix it
 with `PYTHONPATH=src` in bash, or run `$env:PYTHONPATH = 'src'` once in PowerShell.
