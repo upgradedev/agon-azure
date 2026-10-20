@@ -22,16 +22,16 @@ const LIBRARIES = [
 ];
 
 const WHY_BUY: [string, string][] = [
-  ["The segment", "A small club media office: one to three people who publish every match in several languages and cannot afford a factual slip."],
+  ["The segment", "A small club media office: one to three people (ESTIMATE, our assumption) who publish every match in several languages and cannot afford a factual slip."],
   ["The trigger", "Full time. The report has to be out in minutes, in every language the club serves, on the website, the feed and the social channels."],
   ["What it replaces", "Writing the report by hand, translating it, and pasting it into each channel one by one, with nobody checking the numbers but the writer."],
   [
     "The controls",
-    "Code checks every number, name and minute against the event log (Fact Gate) and screens names (Rights Guard). Nothing is published until one person approves one sealed hash, the published bytes are recomputed against it, and social posts stay previews.",
+    "Code recomputes every number, name and minute a sentence claims from the event log and matches every number written in digits to a claim (Fact Gate; numbers spelled out in words are out of scope), and screens names (Rights Guard). Nothing is published until one person approves one sealed hash, the published bytes are recomputed against it, and social posts stay previews.",
   ],
   [
     "The residual gaps",
-    "This build runs on synthetic data only. Posting to Instagram and YouTube needs Meta and Google app approval; the Teams newsroom and journalist email sends are not deployed; player tracking is synthetic: modelled from the event log within speed and acceleration caps, not measured, with the misses against the event spots counted; cost per match is not measured yet.",
+    "This build runs on synthetic data only. Posting to Instagram and YouTube needs Meta and Google app approval; the newsroom Teams post and the journalist email are written, not sent; player tracking is synthetic: modelled from the event log within speed and acceleration caps, not measured, with the misses against the event spots counted; cost per match is not measured yet.",
   ],
   ["Where to look", "The Media office view shows the recorded run as a head of department reads it: status, timings from Azure, what went out where, the checks and the approval audit trail."],
 ];
@@ -53,7 +53,7 @@ export function About({ active, runs }: { active: boolean; runs: RunsData | null
             <CardTitle id="h-who">Who it is for</CardTitle>
           </CardHeader>
           <CardBody className="text-sm leading-6 text-muted">
-            The media and supporter office of a professional football club. In the hour after the whistle, a team of one to three people must
+            The media and supporter office of a professional football club. In the hour after the whistle, a team of one to three people (ESTIMATE) must
             publish the match report, bulletins for supporters abroad, accessible versions and an item for the club website.
           </CardBody>
         </Card>
@@ -66,13 +66,15 @@ export function About({ active, runs }: { active: boolean; runs: RunsData | null
           <CardBody className="space-y-2 text-sm leading-6 text-muted">
             <p>
               This is a static site. The Match Centre replays synthetic matches from the generator's event files, with fictional names from each
-              seed's names file, and Verify recomputes every published hash in your browser.
+              seed's names file. Verify recomputes in your browser each run's bundle hash and every sealed file its manifest lists, plus each
+              match's event and names files, from this site's copy.
             </p>
             {recorded && shown ? (
               <p>
                 The Newsroom Wall, the stand-in approval card and the recap open on a recorded run, labelled on every screen: {shown.label}.
-                It was exported from the bundle the pipeline sealed and the club media office approved, and Verify recomputes its hash and every
-                file the Publisher published. The hand-written sample stays listed after it, labelled: {DESIGN_PREVIEW_LABEL} No agent runs on
+                It was exported from the bundle the pipeline sealed, the club media office approved and the Publisher published to the public
+                feed. Verify recomputes its bundle hash and every sealed file its manifest lists, from this site&apos;s copy of those published
+                bytes; the recap page, JSON Feed and RSS the Publisher rendered from them are not rehashed here. The hand-written sample stays listed after it, labelled: {DESIGN_PREVIEW_LABEL} No agent runs on
                 this site, this site publishes nothing and no account is needed.
               </p>
             ) : (

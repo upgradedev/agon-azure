@@ -69,6 +69,9 @@ const TRAIL = 8;
 const SPEEDS: Record<Speed, number> = { "1": 1, "8": 8, "60": 60 };
 const BAND_WIDTH_M = 17;
 const MAX_STEP_SECONDS = 0.25;
+/* Measured on the live site, 2026-10-20: curl -sS -o /dev/null -w "%{size_download}"
+   .../kinematics/<seed>.kinematics.json gave 1287728, 1260667 and 1265783 bytes for seeds 1 to 3. */
+const TRACKING_SIZE = "1.26 to 1.29 MB a match before compression (curl size_download on the live site, 2026-10-20)";
 
 const TYPE_WORDS: Record<string, string> = {
   pass: "pass",
@@ -277,7 +280,7 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
     };
   }, [match]);
 
-  /* Synthetic tracking (about 1.3 MB a match): fetched only once the viewer asks for the players. */
+  /* Synthetic tracking (1.26 to 1.29 MB a match, see TRACKING_SIZE): fetched only once the viewer asks for the players. */
   useEffect(() => {
     if (!tracking) {
       setKin({ status: "off" });
@@ -303,7 +306,7 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
     };
   }, [tracking, match, manifestError]);
 
-  /* Live cues for the seed, when a cue file exists under an approved charter. */
+  /* Timed cues for the seed, when a cue file exists under an approved charter. */
   useEffect(() => {
     if (seed === null) {
       return undefined;
@@ -664,7 +667,7 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
                   <div className="pointer-events-none absolute inset-x-2 bottom-2 motion-safe:animate-rise sm:inset-x-4 sm:bottom-4" aria-live="polite">
                     <div className="max-w-xl rounded-lg border border-line bg-surface/95 px-3 py-2 shadow-raised backdrop-blur" lang={cueLine.language === "easy" ? "en" : cueLine.language}>
                       <p className="text-sm font-semibold text-fg">{cueLine.text}</p>
-                      <p className="mt-0.5 font-mono text-[0.6875rem] text-muted">Live cue, charter {cues.charter.slice(0, 12)}</p>
+                      <p className="mt-0.5 font-mono text-[0.6875rem] text-muted">Timed cue, charter {cues.charter.slice(0, 12)}</p>
                     </div>
                   </div>
                 ) : null
@@ -769,7 +772,7 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
                 {manifestError || match.status === "error"
                   ? "The synthetic tracking needs the match file, which could not be read, so the players cannot be shown."
                   : kin.status === "off"
-                    ? "Shows all 22 players, with name tags for the player in the latest event and the one you follow. The tracks are synthetic, modelled from the event log within speed and acceleration caps, not measured; about 1.3 MB, loaded only when you ask."
+                    ? `Shows all 22 players, with name tags for the player in the latest event and the one you follow. The tracks are synthetic, modelled from the event log within speed and acceleration caps, not measured; ${TRACKING_SIZE}, loaded only when you ask.`
                     : kin.status === "loading"
                       ? "Loading the synthetic tracking for this match."
                       : kin.status === "ready"
@@ -986,8 +989,10 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
         </CardHeader>
         <CardBody>
           <p className="text-sm leading-6 text-muted">
-            Before anyone writes, plain code turns the event log into a few numbers the writers must cite instead of guess. Choose a term to see
-            what it means.
+            Before anyone writes, plain code turns the event log into a few numbers the writers must cite instead of guess. The fleet calls this
+            code now, but no published run has used it yet: the recorded run on this site predates the switch, so its writers read a stand-in
+            that ranks only goals and red cards, as the interpret entry of its manifest&apos;s deployment_ids shows. Choose a term to see what it
+            means.
           </p>
           <ul className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
             {GLOSSARY_ORDER.map((id) => (

@@ -90,7 +90,11 @@
   "extra_forbidden_terms": [
     "It calls the same decision endpoint",
     "nothing deployed yet",
-    "Only the CI skeleton"
+    "Only the CI skeleton",
+    "without anyone asking",
+    "Every channel calls the same verifier",
+    "only through a read-only Model Context Protocol server",
+    "Nothing has been published from this site"
   ],
   "user_gated": [
     {

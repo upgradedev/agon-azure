@@ -299,7 +299,8 @@ class PreviewAdapter(_Base):
 
 class OutboxAdapter(_Base):
     """Newsroom Teams and journalist email: the exact payload plus the queue message a send flow
-    reads. The send is a Logic App step that is not deployed yet, so the receipt says not sent."""
+    reads. No code path sends them yet (the newsroom post flow is deployed but nothing calls it; the
+    journalist email send flow is not built), so the receipt says not sent."""
 
     def __init__(self, destination: str, base_url: str = "") -> None:
         if destination not in OUTBOX_QUEUES:

@@ -16,8 +16,9 @@ Labels are plain text, never logos or platform marks. How each destination recei
 bytes in this build (`DELIVERY`):
 
 * "written": the bytes land in the public container (club website files, the feeds);
-* "outbox": the exact payload and its queue message are recorded; the send itself is a Logic App
-  that is not deployed yet, so nothing has reached the newsroom or a journalist;
+* "outbox": the exact payload and its queue message are recorded; no code path sends them yet (the
+  newsroom Teams post flow is deployed but nothing calls it, and the journalist email send flow is
+  not built), so nothing has reached the newsroom or a journalist;
 * "preview": the exact platform payload, validated against the platform's published limits and
   never posted, because posting needs Meta and Google app approval.
 
@@ -52,7 +53,7 @@ DELIVERY: dict[str, str] = {
 # The one sentence every Instagram and YouTube preview carries, wherever it is shown.
 PREVIEW_LABEL = "Preview: not posted; posting needs Meta and Google app approval."
 # The one sentence every newsroom and journalist payload carries until the send flow exists.
-OUTBOX_LABEL = "Not sent yet: the payload and its queue message are recorded; the send is a Logic App step that is not deployed yet."
+OUTBOX_LABEL = "Not sent yet: the payload and its queue message are recorded; no code path sends them yet."
 
 ROLE = "destination"
 PAYLOAD_SCHEMA = "agon.destination/1"

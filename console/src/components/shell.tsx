@@ -9,7 +9,7 @@ import { Dialog } from "./ui/dialog";
 import { Tip } from "./ui/tooltip";
 import { Badge } from "./ui/badge";
 import { cn } from "../lib/cn";
-import { REPO_URL } from "../lib/commit";
+import { REPO_URL, STAMPED_LABEL_PREFIX, UNSTAMPED_LABEL } from "../lib/commit";
 import { hrefFor, type ViewKey } from "../lib/router";
 import { setGuideSkipped, setTheme, useCommit, useGuideSkipped, useTheme } from "../hooks/stores";
 
@@ -170,22 +170,27 @@ function MobileMenu({ view }: { view: ViewKey }) {
   );
 }
 
-function BuildLabel() {
-  const commit = useCommit();
+/* One text node before the link, so the markup ci/stamp_web.py writes into the
+   prerendered page hydrates without a mismatch (lib/commit.ts). */
+export function BuildLabelView({ commit }: { commit: string | null }) {
   return (
     <p className="text-xs text-muted" id="run-label">
       {commit ? (
         <>
-          Preview build, commit{" "}
+          {STAMPED_LABEL_PREFIX}
           <a href={`${REPO_URL}/commit/${commit}`} aria-label={`commit ${commit}`} className="font-mono text-link">
             {commit.slice(0, 7)}
           </a>
         </>
       ) : (
-        "Preview build, commit not stamped (local build)"
+        UNSTAMPED_LABEL
       )}
     </p>
   );
+}
+
+function BuildLabel() {
+  return <BuildLabelView commit={useCommit()} />;
 }
 
 export function Shell({ view, children }: { view: ViewKey; children: ReactNode }) {

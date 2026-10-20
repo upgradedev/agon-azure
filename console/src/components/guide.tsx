@@ -19,7 +19,7 @@ const STEPS: { key: keyof Progress; title: string; text: string }[] = [
   {
     key: "blown",
     title: "Pick a match, blow full time",
-    text: "Choose a seeded fictional match, replay it if you like, then press Blow full time to start the newsroom run.",
+    text: "Choose a seeded fictional match, replay it if you like, then press Blow full time to replay its newsroom run.",
   },
   {
     key: "decided",
@@ -29,7 +29,7 @@ const STEPS: { key: keyof Progress; title: string; text: string }[] = [
   {
     key: "verified",
     title: "Read the editions, verify the hash",
-    text: "Open any sentence to see its evidence, then let Verify recompute every hash in your own browser.",
+    text: "Open any sentence to see its evidence, then let Verify recompute the bundle hash and every sealed file in your own browser.",
   },
 ];
 
@@ -47,7 +47,7 @@ export function GuideCard({ progress }: { progress: Progress }) {
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <h2 id="guide-title" className="text-[0.9375rem] font-semibold tracking-tight text-fg">
-            New here? Three steps, about 90 seconds
+            New here? Three steps
           </h2>
           <p className="mt-0.5 text-sm text-muted">Everything runs in this page; nothing you do here is sent anywhere.</p>
         </div>

@@ -11,6 +11,12 @@ Rules, each a hard failure:
 * the sha must be a full 40-character lowercase hex commit id;
 * index.html must hold the placeholder __AGON_COMMIT__ exactly once, and after
   stamping no file under the web directory may still hold it;
+* the prerendered build label (id="run-label", at most one) is rewritten from
+  "Preview build, commit not stamped (local build)" to the stamped label with
+  the commit link, exactly as console/src/components/shell.tsx BuildLabelView
+  renders it, so the served HTML names the commit before any script runs and
+  the console hydrates it without a mismatch; after stamping index.html may not
+  say "not stamped" anywhere;
 * with --data-dir: manifest.json must exist, list exactly the --seeds given,
   and every file it lists must exist with the stated sha256 and event count (the web data contract in agon.webdata);
   every world file it lists must exist with the stated sha256 and pass agon.webdata.validate_world;
@@ -42,14 +48,30 @@ from pathlib import Path
 PLACEHOLDER = "__AGON_COMMIT__"
 FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
 TEXT_SUFFIXES = (".html", ".js", ".css", ".json", ".svg", ".txt", ".xml", ".webmanifest")
+# The build label, pinned with console/src/lib/commit.ts (UNSTAMPED_LABEL, STAMPED_LABEL_PREFIX,
+# REPO_URL) and BuildLabelView; console/tests/ssr.test.tsx and tests/test_stamp_web.py hold both
+# sides to one string.
+REPO_URL = "https://github.com/upgradedev/agon-azure"
+UNSTAMPED_LABEL = "Preview build, commit not stamped (local build)"
+STAMPED_LABEL_PREFIX = "Preview build, commit "
+RUN_LABEL = re.compile(rb'(<p\b[^>]*\bid="run-label"[^>]*>)' + re.escape(UNSTAMPED_LABEL.encode("ascii")) + rb"(</p>)")
 
 
 class StampError(Exception):
     """A rule was broken; the message says which."""
 
 
+def stamped_label(sha: str) -> str:
+    """The inner markup of the build label for a stamped commit, as BuildLabelView renders it."""
+    return (
+        f'{STAMPED_LABEL_PREFIX}<a href="{REPO_URL}/commit/{sha}" aria-label="commit {sha}" '
+        f'class="font-mono text-link">{sha[:7]}</a>'
+    )
+
+
 def stamp_commit(web_dir: Path, sha: str) -> None:
-    """Replace the single placeholder in index.html with sha, then prove none is left."""
+    """Replace the single placeholder in index.html with sha and stamp the build label, then prove
+    neither the placeholder nor the unstamped label is left."""
     if not FULL_SHA.match(sha):
         raise StampError(f"commit sha must be 40 lowercase hex characters, got {sha!r}")
     index = web_dir / "index.html"
@@ -59,7 +81,15 @@ def stamp_commit(web_dir: Path, sha: str) -> None:
     count = raw.count(PLACEHOLDER.encode("ascii"))
     if count != 1:
         raise StampError(f"index.html holds the placeholder {count} times; exactly 1 is required")
-    index.write_bytes(raw.replace(PLACEHOLDER.encode("ascii"), sha.encode("ascii")))
+    stamped = raw.replace(PLACEHOLDER.encode("ascii"), sha.encode("ascii"))
+    labels = len(RUN_LABEL.findall(stamped))
+    if labels > 1:
+        raise StampError(f"index.html holds the unstamped build label {labels} times; at most 1 is allowed")
+    label = stamped_label(sha).encode("ascii")
+    stamped = RUN_LABEL.sub(lambda m: m.group(1) + label + m.group(2), stamped)
+    if b"not stamped" in stamped:
+        raise StampError("index.html still says the build is not stamped after stamping; the build label must be the prerendered one")
+    index.write_bytes(stamped)
     leftovers = [
         p.relative_to(web_dir).as_posix()
         for p in sorted(web_dir.rglob("*"))

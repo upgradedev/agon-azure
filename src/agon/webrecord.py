@@ -422,7 +422,10 @@ def build_run(
                                 f"{by_template} from templates."},
         ]},
         {"desk": "factgate", "name": "Fact Gate", "lines": [
-            {"step": 3, "text": f"Checked every number, name and minute in the headline report: {verdicts['factgate']}."},
+            # What agon.governance.factgate checks: the claims, recomputed from the log, and the
+            # numbers written in digits; a number spelled out in words is out of its scope.
+            {"step": 3, "text": "Recomputed every number, name and minute the headline report claims from the event log, "
+                                f"and matched every number written in digits to a claim: {verdicts['factgate']}."},
             {"step": 5, "text": f"Checked every translated and easy-read sentence: {verdicts['factgate_lang']}."},
         ]},
         {"desk": "desk_editor", "name": "Desk Editor", "lines": [
@@ -431,7 +434,7 @@ def build_run(
                                 + f"{len(confirm_rows)} Confirm row{'' if len(confirm_rows) == 1 else 's'} on the card."},
         ]},
         {"desk": "localise", "name": "Localisers", "lines": [
-            {"step": 4, "text": f"Wrote the {_join(languages)} editions." if languages else "Wrote no other edition."},
+            {"step": 4, "text": _localise_line(languages)},
         ]},
         {"desk": "rights", "name": "Rights Guard", "lines": [
             {"step": 5, "text": f"Screened every name in {len(all_ids)} sentences: {verdicts['rights']}."},
@@ -440,7 +443,7 @@ def build_run(
             {"step": 6, "text": f"Sealed {len(p.manifest['artifacts'])} artifacts under one hash, {p.sha[:12]}."},
             {"step": 7, "text": "Waited for the club media officer to approve that exact hash."},
             {"step": 8, "text": f"Approved on {CHANNEL_WORDS[channel]} by the {approver_role} at {webrun_utc(approved_at)}."},
-            {"step": 9, "text": ("Published: " + _join(delivered) + " received the approved bytes" if delivered else "Published")
+            {"step": 9, "text": ("Published: " + _join(delivered) + " received renderings of the approved payloads" if delivered else "Published")
                                 + ("; " + _join(prepared) + " were prepared and not posted or sent." if prepared else ".")},
         ]},
     ]
@@ -492,6 +495,20 @@ def build_run(
 def webrun_utc(iso: str) -> str:
     """2026-10-21T18:05:00Z as 18:05 UTC on 2026-10-21, the console's wording."""
     return f"{iso[11:16]} UTC on {iso[:10]}"
+
+
+def _localise_line(languages: list[str]) -> str:
+    """The Localisers desk line: the translated editions, and the easy-read edition apart, because
+    agon.fleet.steps.easy_read makes it by rules in code, not by a localiser."""
+    easy = EDITION_NAMES["easy"]
+    translated = [name for name in languages if name != easy]
+    parts = [f"Wrote the {_join(translated)} edition{'' if len(translated) == 1 else 's'}"] if translated else []
+    if easy in languages:
+        parts.append("the easy-read edition was made by rules in code")
+    if not parts:
+        return "Wrote no other edition."
+    text = "; ".join(parts) + "."
+    return text[0].upper() + text[1:]
 
 
 # ----------------------------------------------------------------- the repository's own text rules

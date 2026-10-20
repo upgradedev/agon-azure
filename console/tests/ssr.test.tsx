@@ -16,8 +16,10 @@
 */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { renderToString } from "react-dom/server";
 import { beforeAll, describe, expect, it } from "vitest";
 import { prerender } from "../src/entry-server";
+import { BuildLabelView } from "../src/components/shell";
 import { loadRunsData, type FetchText } from "../src/lib/loader";
 import { DECIDED_CARD_SENTENCE, NOT_DEPLOYED_SENTENCE, STANDIN_HEADER, decidedMessage, editionLabel } from "../src/lib/runs";
 import { PREVIEW_ONLY_SENTENCE } from "../src/lib/destinations";
@@ -110,5 +112,25 @@ describe.each(SOURCES)("prerendered markup, %s", (_name, fetchText, committed) =
   it("uses no dash characters", () => {
     const dashes = new RegExp(`[${String.fromCharCode(0x2013, 0x2014, 0x2015)}]`);
     expect(html).not.toMatch(dashes);
+  });
+
+  it("prerenders the unstamped build label once, in the exact form ci/stamp_web.py rewrites", () => {
+    expect(html.split(UNSTAMPED_P).length - 1).toBe(1);
+  });
+});
+
+/* ci/stamp_web.py rewrites UNSTAMPED_P into STAMPED_P at deploy time, and the browser hydrates
+   that markup with the commit read from <body data-commit>, so both must be exactly what
+   BuildLabelView renders. tests/test_stamp_web.py holds the Python side to the same strings. */
+const SHA = "0123456789abcdef0123456789abcdef01234567";
+const UNSTAMPED_P = '<p class="text-xs text-muted" id="run-label">Preview build, commit not stamped (local build)</p>';
+const STAMPED_P =
+  '<p class="text-xs text-muted" id="run-label">Preview build, commit ' +
+  `<a href="https://github.com/upgradedev/agon-azure/commit/${SHA}" aria-label="commit ${SHA}" class="font-mono text-link">0123456</a></p>`;
+
+describe("the build label", () => {
+  it("renders the markup ci/stamp_web.py writes, for a stamped commit and for none", () => {
+    expect(renderToString(<BuildLabelView commit={SHA} />)).toBe(STAMPED_P);
+    expect(renderToString(<BuildLabelView commit={null} />)).toBe(UNSTAMPED_P);
   });
 });

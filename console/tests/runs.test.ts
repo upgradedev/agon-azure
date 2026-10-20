@@ -173,6 +173,17 @@ describe("destinations, held to agon.publish.webview", () => {
     expect(fromRun.chips.find((c) => c.id === "journalist_email")?.offered).toBe(false);
     expect(fromRun.chips.every((c) => !c.ticked)).toBe(true);
   });
+
+  it("says a delivered destination got a rendering of the approved payload, which it names by its sealed file and hash", () => {
+    const published = chipsFor({ ...sampleRun(), state: "PUBLISHED", destinations: publishedRows() });
+    const site = published.chips.find((c) => c.id === "club_site");
+    expect(site?.status).toBe(
+      `Delivered: rendered from the approved payload destination-club_site.json (sha256 ${"a".repeat(12)}) and written to feed/club_site.json on the public feed.`,
+    );
+    expect(published.chips.map((c) => c.status ?? "").join(" ")).not.toContain("the approved bytes were written to");
+    expect(published.chips.find((c) => c.id === "newsroom_teams")?.status).toBe(OUTBOX_LABEL);
+    expect(OUTBOX_LABEL).not.toMatch(/not deployed/);
+  });
 });
 
 describe("approval and labels", () => {
@@ -184,7 +195,9 @@ describe("approval and labels", () => {
     const all = approveAttempt(run, run.confirm_rows.map((r) => r.row_id), ["Club website (CMS feed)", "RSS and JSON Feed"]);
     expect(all.ok).toBe(true);
     expect(all.message).toContain("Nothing was approved or published.");
-    expect(all.message).toContain("The decision endpoint is not deployed yet");
+    expect(all.message).toContain("This stand-in card has no decision channel");
+    expect(all.message).toContain("On the Teams card, the same approval goes through a queue to the decision intake job");
+    expect(all.message).not.toMatch(/endpoint|not deployed/);
     expect(all.message).toContain("2 destinations: Club website (CMS feed) and RSS and JSON Feed. None of them received anything.");
     const zero = approveAttempt(run, run.confirm_rows.map((r) => r.row_id), []);
     expect(zero.message).toContain("No destination is ticked");

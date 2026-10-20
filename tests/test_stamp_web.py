@@ -58,6 +58,38 @@ def test_placeholder_must_appear_exactly_once(tmp_path: Path, html: str, count: 
         stamp_web.stamp_commit(web, SHA)
 
 
+# The prerendered build label, as console/src/components/shell.tsx BuildLabelView renders it with no
+# commit, and the exact markup it renders for SHA (console/tests/ssr.test.tsx holds the same string).
+UNSTAMPED_P = '<p class="text-xs text-muted" id="run-label">Preview build, commit not stamped (local build)</p>'
+STAMPED_P = (
+    '<p class="text-xs text-muted" id="run-label">Preview build, commit '
+    '<a href="https://github.com/upgradedev/agon-azure/commit/0123456789abcdef0123456789abcdef01234567" '
+    'aria-label="commit 0123456789abcdef0123456789abcdef01234567" class="font-mono text-link">0123456</a></p>'
+)
+LABELLED_SHELL = f'<!doctype html><html><body data-commit="__AGON_COMMIT__"><div id="root">{UNSTAMPED_P}</div></body></html>'
+
+
+def test_the_prerendered_build_label_names_the_commit_after_stamping(tmp_path: Path) -> None:
+    web = make_web(tmp_path, LABELLED_SHELL)
+    stamp_web.stamp_commit(web, SHA)
+    html = (web / "index.html").read_text(encoding="utf-8")
+    assert STAMPED_P in html
+    assert "not stamped" not in html and f'data-commit="{SHA}"' in html
+
+
+def test_two_unstamped_build_labels_are_refused(tmp_path: Path) -> None:
+    web = make_web(tmp_path, LABELLED_SHELL.replace("</div>", UNSTAMPED_P + "</div>"))
+    with pytest.raises(stamp_web.StampError, match="unstamped build label 2 times"):
+        stamp_web.stamp_commit(web, SHA)
+    assert "__AGON_COMMIT__" in (web / "index.html").read_text(encoding="utf-8")
+
+
+def test_a_not_stamped_sentence_outside_the_build_label_is_refused(tmp_path: Path) -> None:
+    web = make_web(tmp_path, SHELL.replace("<p>Agon</p>", "<p>Preview build, commit not stamped (local build)</p>"))
+    with pytest.raises(stamp_web.StampError, match="still says the build is not stamped"):
+        stamp_web.stamp_commit(web, SHA)
+
+
 def test_placeholder_left_in_another_file_fails(tmp_path: Path) -> None:
     web = make_web(tmp_path)
     (web / "app.js").write_bytes(b"var c = '__AGON_COMMIT__';\n")
