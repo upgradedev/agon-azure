@@ -1,4 +1,4 @@
-"""Agon fleet: the W-fulltime Microsoft Agent Framework workflow and the worker that runs it.
+"""Agon fleet: the W-fulltime and W-charter Microsoft Agent Framework workflows and the worker that runs them.
 
 Layout:
 
@@ -7,7 +7,9 @@ Layout:
 * `workflow`: the Agent Framework `WorkflowBuilder` graph wrapping those steps.
 * `checkpoints`: file and Cosmos DB checkpoint storage, with a guard for silent save failures.
 * `runner`: start a run to its approval pause, or resume it from a checkpoint in a new process.
+* `kinds`: which workflow a RunInput's kind starts (fulltime, charter), and the card channels.
+* `charter_contracts`, `charter_steps`, `charter_workflow`: W-charter, the Match-Day Charter.
 
-Importing this package does not import Agent Framework; only `workflow`, `checkpoints` and
+Importing this package does not import Agent Framework; only `workflow`, `charter_workflow`, `checkpoints` and
 `runner` do, so the gates and steps stay testable on a machine without it.
 """

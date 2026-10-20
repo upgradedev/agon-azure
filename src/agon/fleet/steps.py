@@ -144,12 +144,18 @@ async def ingest(deps: FleetDeps, run: RunInput) -> Draft | RunOutcome:
       so a re-entered run seals the same bundle a clean run would;
     * SEALED or later: a RunOutcome, and no step runs again. No second nonce is ever issued.
 
-    A run id that the ledger already holds for a different match is refused.
+    A run id that the ledger already holds for a different match, or for another run kind (a
+    charter run notes kind "charter"; a full-time run notes none), is refused. A RunInput of any
+    kind other than "fulltime" is refused before anything runs: the worker routes it to its own
+    workflow (agon.fleet.kinds), so it can only reach this graph by mistake.
     """
 
     def refuse(code: str, detail: str) -> RunOutcome:
         return RunOutcome(run_id=run.run_id, status=REFUSED_AT_INGEST, bundle_sha256=None, code=code, detail=detail)
 
+    kind = getattr(run, "kind", "fulltime")
+    if kind != "fulltime":
+        return refuse("wrong_workflow", f"W-fulltime runs kind 'fulltime', not {kind!r}")
     if run.target not in verifier.TARGETS:
         return refuse("unknown_target", f"target {run.target!r} is not one of {list(verifier.TARGETS)}")
     try:
@@ -172,6 +178,8 @@ async def ingest(deps: FleetDeps, run: RunInput) -> Draft | RunOutcome:
     if known is not None:
         if known.get("match_id") != record.match_id:
             return refuse("run_id_reused", f"run {run.run_id} belongs to match {known.get('match_id')}, not {record.match_id}")
+        if known.get("kind", "fulltime") != "fulltime":
+            return refuse("run_id_reused", f"run {run.run_id} is a {known.get('kind')} run, not a full-time report")
         status = known.get("status")
         if status in (stores.DRAFT, stores.CHECKED):
             return draft

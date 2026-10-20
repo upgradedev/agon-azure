@@ -1,11 +1,14 @@
 # Fleet drill: put one synthetic RunInput on the runs queue, so job-agon-fleet runs W-fulltime
-# end to end in Azure (spec 3.4 steps 2 to 4) before any api exists to start a run.
+# end to end in Azure (spec 3.4 steps 2 to 4) before any api exists to start a run. With kind
+# charter it runs W-charter instead: the Match-Day Charter card reaches Teams, and an approval
+# publishes the charter to the club feed archive (agon.charter, agon.fleet.charter_workflow).
 #
 # Manual and main only (workflow_dispatch, environment azure). It runs as the CI identity, which
 # holds Storage Queue Data Message Sender on the runs queue and nothing else on storage
 # (infra/rbac.bicep, "beyond spec 7.1"): it can start a run, never read, delete or decide one.
-# The inputs are numbers and a target chosen from a list; they reach the script through env,
-# never through ${{ }} inside a shell line.
+# The inputs are numbers, a target and a kind chosen from lists; they reach the script through env,
+# never through ${{ }} inside a shell line. The message carries "kind" only for a charter, so a
+# full-time drill sends exactly the message it sent before the input existed.
 name: fleet-run
 
 on:
@@ -27,6 +30,14 @@ on:
         options:
           - feed
           - sandbox
+      kind:
+        description: "fulltime runs W-fulltime (the report); charter runs W-charter (the live cue rules)"
+        required: true
+        type: choice
+        default: fulltime
+        options:
+          - fulltime
+          - charter
 
 permissions:
   contents: read
@@ -49,12 +60,14 @@ jobs:
       SEED: ${{ inputs.seed }}
       MATCH_INDEX: ${{ inputs.match_index }}
       TARGET: ${{ inputs.target }}
+      KIND: ${{ inputs.kind }}
     steps:
       - name: Check the inputs
         run: |
           case "$SEED" in ''|*[!0-9]*) echo "seed must be a non-negative integer"; exit 1;; esac
           case "$MATCH_INDEX" in ''|*[!0-9]*) echo "match_index must be a non-negative integer"; exit 1;; esac
           case "$TARGET" in feed|sandbox) ;; *) echo "target must be feed or sandbox"; exit 1;; esac
+          case "$KIND" in fulltime|charter) ;; *) echo "kind must be fulltime or charter"; exit 1;; esac
       - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0 (peeled tag, git ls-remote 2026-10-19)
         with:
           client-id: ${{ vars.AZURE_CLIENT_ID }}
@@ -70,12 +83,12 @@ jobs:
       - name: Send one RunInput to runs (Entra auth, no key)
         run: |
           run_id="drill-$(date -u +%Y%m%dT%H%M%SZ)-${GITHUB_RUN_ID}"
-          body="$(RUN_ID="$run_id" python3 -c 'import json, os; print(json.dumps({"run_id": os.environ["RUN_ID"], "match_ref": {"source": "synth", "seed": int(os.environ["SEED"]), "match_index": int(os.environ["MATCH_INDEX"])}, "target": os.environ["TARGET"]}, separators=(",", ":")))')"
+          body="$(RUN_ID="$run_id" python3 -c 'import json, os; m = {"run_id": os.environ["RUN_ID"], "match_ref": {"source": "synth", "seed": int(os.environ["SEED"]), "match_index": int(os.environ["MATCH_INDEX"])}, "target": os.environ["TARGET"]}; m.update({"kind": "charter"} if os.environ["KIND"] == "charter" else {}); print(json.dumps(m, separators=(",", ":")))')"
           az storage message put --auth-mode login --account-name "$STORAGE_ACCOUNT" --queue-name runs --content "$body" --output none
           {
             echo "### fleet-run: $run_id"
             echo
-            echo "RunInput sent to runs: seed $SEED, match $MATCH_INDEX, target $TARGET."
+            echo "RunInput sent to runs: seed $SEED, match $MATCH_INDEX, target $TARGET, kind $KIND."
             echo "Follow it in the job-agon-fleet executions (Log Analytics, ContainerAppConsoleLogs_CL, lines with \"agon\": \"fleet\")."
           } >> "$GITHUB_STEP_SUMMARY"
           echo "sent $run_id"

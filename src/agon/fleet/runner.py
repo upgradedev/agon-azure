@@ -1,4 +1,4 @@
-"""Run W-fulltime to its approval pause, or resume it from a checkpoint in a fresh process.
+"""Run a fleet workflow (W-fulltime or W-charter) to its approval pause, or resume it in a fresh process.
 
 `start_run` drives the workflow until `approval` has asked for a decision, then PROVES the pause
 before reporting it: no checkpoint save failed (the framework only logs those), the pause
@@ -12,10 +12,17 @@ restore-and-respond path of Agent Framework 1.22.0 (``_workflow.py`` ``_restore_
 A checkpoint is not consumed by a resume, so exactly-once comes from the verifier's consume-once
 write and the create-only publish queue, not from the framework.
 
+Which graph: `start_run` builds the workflow of the run's kind (`RunInput.kind`, see
+agon.fleet.kinds), and `resume_run` builds the workflow named in the handoff (`workflow_name`, which
+`start_run` writes and the fleet worker reads from the pause checkpoint itself). A handoff without
+the name is W-fulltime, as every handoff was before W-charter existed. Building the wrong graph
+cannot resume anything: Agent Framework refuses a checkpoint whose graph signature differs.
+
 Command line (fake ports only; the Container Apps worker wires the real ports from its
 environment). This is what the kill-and-resume tests and the live Cosmos job drive:
 
     python -m agon.fleet.runner start  --run-dir DIR --seed 1 --grant-approver officer@media.example --mode hang
+    python -m agon.fleet.runner start  --run-dir DIR --seed 1 --kind charter --grant-approver officer@media.example
     python -m agon.fleet.runner resume --run-dir DIR --decision approve --approver officer@media.example --confirm-all
 
     python -m agon.fleet.runner delete-checkpoint --run-dir DIR   (negative control only)
@@ -40,7 +47,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from importlib import metadata
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Callable
 
 from agon.fleet.checkpoints import (
     CheckpointSaveFailed,
@@ -50,6 +57,7 @@ from agon.fleet.checkpoints import (
     open_cosmos_storage,
 )
 from agon.fleet.contracts import WORKFLOW_NAME, ApprovalRequest, DecisionEnvelope, RunInput, RunOutcome
+from agon.fleet.kinds import CHARTER, FULLTIME, RUN_KINDS, WORKFLOW_NAMES, kind_for_workflow
 from agon.fleet.deps import FleetDeps
 from agon.fleet.local import fake_deps
 from agon.fleet.stores import AWAITING_APPROVAL
@@ -62,6 +70,26 @@ CHECKPOINT_DIR = "checkpoints"
 
 class PauseNotProven(RuntimeError):
     """The workflow asked for a decision, but its pause is not safely persisted."""
+
+
+def workflow_builders() -> dict[str, Callable[[FleetDeps, Any], Any]]:
+    """Run kind -> graph builder. A new kind adds one row here and one in agon.fleet.kinds."""
+    from agon.fleet.charter_workflow import build_charter_workflow
+
+    builders: dict[str, Callable[[FleetDeps, Any], Any]] = {FULLTIME: build_workflow, CHARTER: build_charter_workflow}
+    if set(builders) != set(RUN_KINDS):
+        raise RuntimeError(f"workflow builders {sorted(builders)} differ from the run kinds {sorted(RUN_KINDS)}")
+    return builders
+
+
+def build_for_kind(kind: str, deps: FleetDeps, storage: Any) -> Any:
+    builders = workflow_builders()
+    if kind not in builders:
+        raise ValueError(f"unknown run kind {kind!r}; known: {list(RUN_KINDS)}")
+    workflow = builders[kind](deps, storage)
+    if workflow.name != WORKFLOW_NAMES[kind]:
+        raise RuntimeError(f"the {kind} builder made workflow {workflow.name!r}, expected {WORKFLOW_NAMES[kind]!r}")
+    return workflow
 
 
 def _af_version() -> str:
@@ -77,7 +105,7 @@ def _outcomes(result: Any) -> list[dict[str, Any]]:
 
 async def start_run(deps: FleetDeps, storage: GuardedCheckpointStorage, run: RunInput) -> dict[str, Any]:
     started = time.perf_counter()
-    workflow = build_workflow(deps, storage)
+    workflow = build_for_kind(getattr(run, "kind", FULLTIME), deps, storage)
     result = await workflow.run(run)
     outcomes = _outcomes(result)
     requests = result.get_request_info_events()
@@ -116,7 +144,7 @@ async def resume_run(
     deps: FleetDeps, storage: GuardedCheckpointStorage, handoff: dict[str, Any], envelope: DecisionEnvelope
 ) -> dict[str, Any]:
     started = time.perf_counter()
-    workflow = build_workflow(deps, storage)
+    workflow = build_for_kind(kind_for_workflow(handoff.get("workflow_name", WORKFLOW_NAME)), deps, storage)
     result = await workflow.run(checkpoint_id=handoff["checkpoint_id"], responses={handoff["request_id"]: envelope})
     reemitted = [e.request_id for e in result.get_request_info_events() if e.request_id == handoff["request_id"]]
     return {
@@ -205,6 +233,7 @@ async def _start(args: argparse.Namespace) -> int:
         run_id=args.run_id or f"run-{uuid.uuid4().hex[:12]}",
         match_ref={"source": "synth", "seed": args.seed, "match_index": args.match_index},
         target=args.target,
+        kind=args.kind,
     )
     async with _storage(args) as storage:
         try:
@@ -270,7 +299,7 @@ async def _probe(args: argparse.Namespace) -> int:
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Start or resume a W-fulltime run with fake ports.")
+    parser = argparse.ArgumentParser(description="Start or resume a fleet workflow run (W-fulltime or W-charter) with fake ports.")
     sub = parser.add_subparsers(dest="command", required=True)
     for name in ("start", "resume", "delete-checkpoint"):
         p = sub.add_parser(name)
@@ -282,6 +311,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     start.add_argument("--seed", type=int, default=1)
     start.add_argument("--match-index", type=int, default=0)
     start.add_argument("--target", choices=verifier.TARGETS, default="feed")
+    start.add_argument("--kind", choices=RUN_KINDS, default=FULLTIME)
     start.add_argument("--run-id", default="")
     start.add_argument("--mode", choices=("exit", "hang"), default="exit")
     start.add_argument("--grant-approver", default="", help="test setup: grant this principal the target's approver role")

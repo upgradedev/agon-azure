@@ -3,7 +3,9 @@
 //
 // la-agon-teams-approval: the Teams card lifecycle in one channel thread.
 //   1. HTTP trigger (Entra-authenticated: only id-fleet and the CI identity may
-//      call it; see accessControl) carries the sealed bundle's card fields.
+//      call it; see accessControl) carries the sealed bundle's card fields. The
+//      Match-Day Charter card uses the same flow; its optional report_label and
+//      footer replace the full-time wording, which stays the default.
 //   2. Optional erratum: a threaded reply under the parent report's card names
 //      the correction before the new card is posted (ReplyWithCardToConversation).
 //   3. Post adaptive card and wait for a response (gate T settled that this works
@@ -298,6 +300,12 @@ resource teamsFlow 'Microsoft.Logic/workflows@2019-05-01' = {
                 erratum_note: {
                   type: 'string'
                 }
+                report_label: {
+                  type: 'string'
+                }
+                footer: {
+                  type: 'string'
+                }
               }
             }
           }
@@ -472,7 +480,7 @@ resource teamsFlow 'Microsoft.Logic/workflows@2019-05-01' = {
                     wrap: true
                     isSubtle: true
                     size: 'Small'
-                    text: 'The English headline report, exactly as sealed:'
+                    text: '@{coalesce(triggerBody()?[\'report_label\'], \'The English headline report, exactly as sealed:\')}'
                   }
                   {
                     type: 'TextBlock'
@@ -522,7 +530,7 @@ resource teamsFlow 'Microsoft.Logic/workflows@2019-05-01' = {
                 wrap: true
                 isSubtle: true
                 size: 'Small'
-                text: 'AI-drafted. Numbers and names checked by code. Nothing is published until you approve this exact hash.'
+                text: '@{coalesce(triggerBody()?[\'footer\'], \'AI-drafted. Numbers and names checked by code. Nothing is published until you approve this exact hash.\')}'
               }
             ]
             actions: [
