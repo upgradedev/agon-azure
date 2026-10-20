@@ -51,7 +51,9 @@ class FleetDeps:
     ledger: RunLedger = field(init=False)
 
     def __post_init__(self) -> None:
-        self.ledger = RunLedger(self.store)
+        # The ledger stamps history entries and notes from this clock, read at each write, so a
+        # test that pins `clock` pins every `at` too.
+        self.ledger = RunLedger(self.store, clock=lambda: self.clock())
 
 
 def file_tracer(path: Path) -> Callable[[str, str], None]:
