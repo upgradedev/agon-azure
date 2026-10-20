@@ -30,16 +30,25 @@
         {
           "source": "web:#/",
           "viewport": "phone",
-          "actions": "Match Centre at 375 px on the recorded run's match: the scoreboard with home and away, the replay at 60x, then what the newsroom reads (and the interpret charts once lane D4 ships them)",
+          "actions": "Match Centre at 375 px on the recorded run's match: the scoreboard and replay at 60x, then the win probability chart and team stats that agon.interpret computes (lane D4)",
           "facts": [
             {
               "text": "Synthetic match, .*seed \\d+"
             },
             {
-              "text": "\\(home\\) attack"
+              "text": "\\(home\\)"
             },
             {
-              "text": "computed by agon\\.interpret from the synthetic event log"
+              "text": "\\(away\\)"
+            },
+            {
+              "text": "Under pressure"
+            },
+            {
+              "text": "Expected goals \\(xG\\)"
+            },
+            {
+              "text": "[Cc]omputed by agon\\.interpret from the synthetic event log"
             }
           ]
         }

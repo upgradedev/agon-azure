@@ -169,9 +169,12 @@ const SCRIPTS: Record<string, Script> = {
     await glide(page, view.locator('[aria-labelledby="h-replay"]'), "start");
     await view.locator('label:has(> input[type="radio"][value="60"])').first().click();
     await view.getByRole("button", { name: "Play", exact: true }).click();
-    await page.waitForTimeout(4000);
-    await glide(page, view.locator('[aria-labelledby="h-reads"]'), "start");
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(2600);
+    /* The interpret charts (lane D4): win probability, then team stats with expected goals. */
+    await glide(page, view.getByRole("heading", { name: "Win probability", exact: true }), "start");
+    await page.waitForTimeout(2200);
+    await glide(page, view.getByRole("heading", { name: "Team stats", exact: true }), "start");
+    await page.waitForTimeout(1200);
   },
   newsroom: async (page, runId) => {
     await go(page, `#/newsroom/${runId}`);
@@ -222,6 +225,7 @@ async function checkFacts(page: Page, facts: Fact[], runId: string): Promise<[st
       const scope = fact.within ? page.locator(fill(fact.within, runId)) : page.locator("body");
       ok = await scope
         .getByText(new RegExp(fact.text))
+        .filter({ visible: true })
         .first()
         .waitFor({ state: "visible", timeout: factsMode === "enforce" ? 30_000 : 5_000 })
         .then(() => true)
