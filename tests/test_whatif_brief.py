@@ -56,8 +56,13 @@ def test_a_bare_number_never_passes_as_a_percentage(red):
         assert fake not in allowed(red)
         text = _good(red).replace(n["scenario_win_pct"], fake, 1)
         assert any(f"the number {fake} " in r for r in check_brief(text, red)), fake
-    # A real percent written without its sign still passes.
-    assert check_brief(_good(red).replace(n["scenario_win_pct"], n["scenario_win_pct"][:-1] + " percent", 1), red) == []
+    # Written in words or with a spaced sign, a bare number is still a percentage and is refused.
+    for fake in (f"{k} percent", f"{minute} percent", f"{minute} %", f"{k} per cent"):
+        text = _good(red).replace(n["scenario_win_pct"], fake, 1)
+        assert check_brief(text, red), fake
+    # The same words around a share the scenario really has read as that share, so they pass.
+    share = n["scenario_win_pct"][:-1]
+    assert check_brief(_good(red).replace(n["scenario_win_pct"], f"{share} percent", 1), red) == []
 
 
 def test_a_dropped_minus_sign_is_refused(red):
@@ -174,6 +179,44 @@ def test_a_malformed_brief_is_withheld_not_a_stopped_deploy(tmp_path, payload):
     manifest, files = webintel.build_intel_web(str(data), [1], brief_dir=str(briefs))
     assert "brief-1.json" not in files and "whatif-1.json" in files
     assert [w["name"] for w in manifest["withheld"]] == ["brief-1.json"]
+
+
+@pytest.mark.parametrize("field", ["deployment", "model", "prompt_sha256"])
+def test_a_brief_with_a_float_field_is_withheld(tmp_path, whatif, field):
+    from agon.webdata import write_web_data
+
+    data = tmp_path / "data"
+    write_web_data(str(data), [1])
+    briefs = tmp_path / "briefs"
+    briefs.mkdir()
+    _committed(briefs, whatif, _good)
+    path = briefs / "brief-1.json"
+    body = json.loads(path.read_bytes())
+    if field == "deployment":
+        body["deployment"] = 1.5
+    else:
+        body["briefs"][0][field] = 1.5
+    path.write_bytes(json.dumps(body).encode("ascii"))
+    manifest, files = webintel.build_intel_web(str(data), [1], brief_dir=str(briefs))
+    assert "brief-1.json" not in files and [w["name"] for w in manifest["withheld"]] == ["brief-1.json"]
+
+
+def test_deeply_nested_files_are_withheld_not_a_crash(tmp_path):
+    from agon.webdata import write_web_data
+
+    data = tmp_path / "data"
+    write_web_data(str(data), [1])
+    deep = b"[" * 100000 + b"]" * 100000
+    briefs = tmp_path / "briefs"
+    briefs.mkdir()
+    (briefs / "brief-1.json").write_bytes(deep)
+    manifest, files = webintel.build_intel_web(str(data), [1], brief_dir=str(briefs))
+    assert "brief-1.json" not in files and manifest["withheld"][0]["name"] == "brief-1.json"
+    sets = tmp_path / "set"
+    sets.mkdir()
+    (sets / "whatif-1.json").write_bytes(deep)
+    manifest, files = webintel.build_intel_web(str(data), [1], set_dir=str(sets))
+    assert "whatif-1.json" not in files and manifest["withheld"][0]["name"] == "whatif-1.json"
 
 
 def test_webintel_refuses_a_brief_with_an_unchecked_number_or_another_set(tmp_path, whatif):

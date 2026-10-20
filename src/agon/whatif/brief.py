@@ -65,8 +65,16 @@ def allowed(scenario: Mapping[str, Any]) -> set[str]:
     return values
 
 
+_PERCENT_WORDS = re.compile(r"([0-9])\s*(?:%|per\s*cent\b|percent\b)", re.IGNORECASE)
+
+
+def normalise_percents(text: str) -> str:
+    """'60 percent', '60 per cent' and '60 %' read as '60%', so a number cannot pass as a share in words."""
+    return _PERCENT_WORDS.sub(r"\1%", text)
+
+
 def written_numbers(text: str) -> list[str]:
-    return _NUMBER.findall(text)
+    return _NUMBER.findall(normalise_percents(text))
 
 
 def check_brief(text: str, scenario: Mapping[str, Any]) -> list[str]:

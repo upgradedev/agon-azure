@@ -170,7 +170,7 @@ is the committed set under src/agon/whatif/scenario_set, regenerated and compare
 ubuntu and windows by the determinism workflow). Show the label beside every number.
 
 Header: kind, schema, seed, match_id, generator, interpret, model_sha256, code_sha256 and
-code_files (a fingerprint of the lab, engine and definition modules the numbers depend on, and the
+code_files (a fingerprint of every module the What-If CLI imports, its whole import closure, and the
 list of those files; a file whose fingerprint differs from the deployed code is withheld),
 events_sha256 (the served data/<seed>.ndjson, as for metrics), label ("Synthetic engine, paired replays, not a
 prediction about real football."), method (list of plain sentences: how the replays are paired

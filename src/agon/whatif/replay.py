@@ -23,7 +23,7 @@ planned substitution times are drawn at kick-off (STOPPAGE and SUBS streams), an
 substitution is keyed by the side's substitution count (PERSONNEL stream), not by the replicate. What
 can still differ between the two arms of a pair: a substitution happens at the first chain after its
 planned time, so its minute follows each replay's clock, and the draw picks from the outfield players
-on the pitch at that moment, so after a red card it can take off a different player.
+on the pitch at that moment, so after a red card it can take off, and bring on, a different player.
 
 Scenario changes available here, on top of the engine's own interventions (red_card,
 goalkeeper_heroics and the rest, applied by the engine exactly as storylines apply them):
@@ -31,9 +31,10 @@ goalkeeper_heroics and the rest, applied by the engine exactly as storylines app
   (read by the engine's `_press_ppm`, the chance that a side presses) moves by `press_shift` per mille
   after the engine's own clamp, and is clamped again to 50..950. Up or down, the same knob
   tactical_shift moves. It changes how often the side presses; the engine has no defensive line.
-- a line that drops after the side scores: from the fork on, the first goal by the side switches on
-  the engine's `late_collapse` for that side from the next chain (the opponent's chances against it
-  are multiplied by the magnitude per mille, and the opponent shoots more often).
+- a late collapse after the side scores: from the fork on, the first goal by the side switches on
+  the engine's `late_collapse` for that side from the next chain. The engine raises the opponent's
+  scoring chance against the side (times the magnitude per mille) and how often the opponent shoots;
+  it moves no defensive line, because the engine has none.
 
 Nothing here reads the referee package or any label; outputs are aggregates over replays.
 """

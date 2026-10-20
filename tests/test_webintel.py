@@ -121,7 +121,7 @@ def test_a_malformed_whatif_file_is_withheld_not_a_stopped_deploy(site, tmp_path
 
 
 @pytest.mark.parametrize(("field", "value", "cause"), [
-    ("code_sha256", "0" * 64, "the lab, engine or definition code"),
+    ("code_sha256", "0" * 64, "the code of python -m agon.whatif"),
     ("interpret", "interpret-v0", "the interpret version"),
 ])
 def test_a_whatif_file_for_other_code_is_withheld(site, tmp_path, field, value, cause):
@@ -192,6 +192,17 @@ def test_whatif_validator_refuses_a_changed_past_and_broken_numbers():
     dash = json.loads(json.dumps(good))
     dash["scenarios"][0]["summary"] += chr(0x2014)
     assert webintel.validate_payload("whatif-1.json", dash)
+    for field, value in (("title", 7), ("question", None), ("engine_note", ["x"]), ("summary", {}), ("scenario_id", 1)):
+        typed = json.loads(json.dumps(good))
+        typed["scenarios"][0][field] = value
+        assert any(field in p for p in webintel.validate_payload("whatif-1.json", typed)), field
+    deltas = json.loads(json.dumps(good))
+    deltas["scenarios"][0]["deltas"] = "none"
+    assert webintel.validate_payload("whatif-1.json", deltas)
+    for field, value in (("clubs", [{"club_id": 1}]), ("method", "one sentence"), ("schema", "other/1")):
+        top = json.loads(json.dumps(good))
+        top[field] = value
+        assert any(field in p for p in webintel.validate_payload("whatif-1.json", top)), field
 
 
 def test_files_are_canonical_with_a_final_lf(site):

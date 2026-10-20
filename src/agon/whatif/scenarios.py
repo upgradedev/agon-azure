@@ -6,7 +6,7 @@ Every published seed gets the same seven scenarios, told from the side they chan
     red_away_30            a red card for the away side from 30:00
     press_up_home_60       the home side presses more often from 60:00 (press-height knob +300 per mille)
     press_down_home_60     the home side presses less often from 60:00 (press-height knob -300 per mille)
-    collapse_home_60       the home side's line drops after its next goal from 60:00 (late_collapse)
+    collapse_home_60       the home side concedes more after its next goal from 60:00 (late_collapse)
     heroics_away_60        the away goalkeeper concedes half the usual chance from 60:00
     red_press_down_home_55 a home red card at 55:00 and the press knob -300 from 55:00
 
@@ -33,17 +33,37 @@ SET_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scenario_set
 BRIEF_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "briefs")
 AGON_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # The code whose behaviour the numbers in a What-If file depend on, beyond the generator version and the
-# frozen interpret model that the file names separately: the lab itself, the engine paths it drives, and
-# the analyst-facing definitions it reads every replay with (xG, box entries, PPDA).
+# frozen interpret model that the file names separately.
+# The whole import closure of `python -m agon.whatif` (agon.whatif.__main__), paths under src/agon:
+# a test imports that module in a fresh interpreter and requires this list to equal what it loaded,
+# so the list cannot drift from the code. rng.py matters most: a change to how the replicate enters a
+# key changes every replay r >= 1 and leaves replay 0, and so the published log, untouched.
 CODE_FILES: tuple[str, ...] = (
-    "whatif/lab.py",
-    "whatif/stats.py",
-    "whatif/replay.py",
+    "__init__.py",
+    "governance/__init__.py",
     "governance/recompute.py",
+    "interpret/__init__.py",
+    "interpret/_fixed.py",
     "interpret/features.py",
+    "interpret/frame.py",
+    "interpret/kinematics.py",
     "interpret/metrics.py",
+    "interpret/model.py",
+    "interpret/wp.py",
+    "synth/__init__.py",
+    "synth/blocklist.py",
     "synth/engine.py",
     "synth/interventions.py",
+    "synth/manifest.py",
+    "synth/rng.py",
+    "synth/schema.py",
+    "synth/world.py",
+    "whatif/__init__.py",
+    "whatif/__main__.py",
+    "whatif/lab.py",
+    "whatif/replay.py",
+    "whatif/scenarios.py",
+    "whatif/stats.py",
 )
 REGENERATE = "python -m agon.whatif --set --seeds 1,2,3 --out src/agon/whatif/scenario_set --hash-out src/agon/whatif/scenario_set/hash.txt"
 DEFAULT_K = 200
@@ -59,7 +79,7 @@ METHOD: tuple[str, ...] = (
     "Each scenario replays the published match once up to the scenario minute, then forks K pairs of replays from that exact moment: one without the change (baseline) and one with it.",
     "Replay r of both arms draws the same random numbers, possession by possession (common random numbers), so the two arms differ only by the change and by where it leads the play.",
     "The play before the scenario minute is the published match itself in every replay; prefix.differing_events counts any difference and is 0.",
-    "Shared by every replay: the added time of each half and the planned substitution times, both drawn at kick-off, and the random draw behind each substitution (keyed by how many substitutions the side has made). What can still differ between the two replays of a pair: a substitution happens at the first possession after its planned time, so its minute follows that replay's own clock, and the draw chooses among the outfield players on the pitch at that moment, so after a red card it can take off a different player.",
+    "Shared by every replay: the added time of each half and the planned substitution times, both drawn at kick-off, and the random draw behind each substitution (keyed by how many substitutions the side has made). What can still differ between the two replays of a pair: a substitution happens at the first possession after its planned time, so its minute follows that replay's own clock, and the draw chooses among the outfield players on the pitch at that moment, so after a red card it can take off, and bring on, a different player (the player coming on is picked for the position of the one going off).",
     "The press-height knob sets how often a side presses (the engine's pressure chance); the engine has no defensive line, so no scenario moves a line.",
     "Win, draw and loss shares carry Wilson 95% intervals. Differences are paired means (with the change minus without) with normal-approximation 95% intervals; unpaired_half is the half-width the same replays would give without the pairing.",
     "xG comes from the frozen interpret model, box entries from the Fact Gate's definitions and PPDA from agon.interpret; box entries and PPDA count the play after the scenario minute.",
@@ -102,8 +122,8 @@ def scenario_set(home: str, away: str) -> list[Scenario]:
         ),
         Scenario(
             "collapse_home_60", "home", 2, 60, Change(collapse_side="home", collapse_magnitude=COLLAPSE_MAGNITUDE),
-            title=f"{home}'s line drops after they score",
-            question=f"What if {home}'s line dropped after their next goal from 60:00?",
+            title=f"{home} concede more chances after they score",
+            question=f"What if {home} let the opponent in more after their next goal from 60:00?",
             engine_note=(f"From the first {home} goal after 60:00, the engine's late collapse applies to {home}: the opponent's "
                          f"chances against them are multiplied by {COLLAPSE_MAGNITUDE // 1000} and the opponent shoots more often. "
                          f"Replays in which {home} do not score are unchanged; `triggered` counts the others."),

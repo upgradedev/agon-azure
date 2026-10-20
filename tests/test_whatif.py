@@ -176,10 +176,14 @@ def test_fixed_set_names_seven_scenarios_with_notes():
     assert [s.scenario_id for s in scs] == list(SCENARIO_IDS) and len(scs) == 7
     assert all(s.title and s.question.startswith("What if") and s.engine_note for s in scs)
     assert all("central" not in s.engine_note for s in scs)  # the engine cannot pick a position
-    # The press knob changes how often a side presses; the engine has no defensive line.
-    texts = " ".join(f"{s.title} {s.question} {s.engine_note}" for s in scs).lower()
-    for word in ("low block", "sit deep", "stopped pressing", "line height"):
-        assert word not in texts, word
+    # The press knob changes how often a side presses, late_collapse raises the opponent's chance and
+    # shot rate; the engine has no defensive line, so no text may say a line moves or a side sits deep.
+    from agon.whatif.scenarios import METHOD
+
+    texts = " ".join([*(f"{s.title} {s.question} {s.engine_note}" for s in scs), *METHOD]).lower()
+    for phrase in ("low block", "sit deep", "sat deep", "sits deeper", "stopped pressing", "line height",
+                   "line drop", "press higher", "pressed harder"):
+        assert phrase not in texts, phrase
 
 
 def test_cli_reproduces_a_scenario_from_parameters(tmp_path, capsysbinary):
@@ -218,7 +222,29 @@ def test_committed_scenario_set_matches_the_served_match_and_the_contract(seed):
     assert all(s["prefix"]["differing_events"] == 0 for s in body["scenarios"])
     from agon.whatif.scenarios import code_sha256
 
-    assert body["code_sha256"] == code_sha256(), "the lab, engine or definitions changed: regenerate the set"
+    assert body["code_sha256"] == code_sha256(), "the What-If code (its import closure) changed: regenerate the set"
+
+
+def test_the_code_fingerprint_covers_the_whole_import_closure_of_the_cli():
+    # Import the CLI in a fresh interpreter and list every agon module it loaded: that is the code the
+    # numbers depend on, and CODE_FILES must be exactly it.
+    import subprocess
+    import sys
+
+    from agon.whatif.scenarios import CODE_FILES
+
+    src = os.path.dirname(os.path.dirname(os.path.dirname(cli.__file__)))
+    probe = (
+        "import os, sys; import agon.whatif.__main__; "
+        "root = os.path.dirname(os.path.abspath(sys.modules['agon'].__file__)); "
+        "print('\\n'.join(sorted(os.path.relpath(m.__file__, root).replace(os.sep, '/') "
+        "for n, m in sys.modules.items() if (n == 'agon' or n.startswith('agon.')) and getattr(m, '__file__', None))))"
+    )
+    env = dict(os.environ, PYTHONPATH=src)
+    out = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, env=env, check=True).stdout
+    loaded = [line for line in out.splitlines() if line]
+    assert sorted(CODE_FILES) == loaded
+    assert "synth/rng.py" in CODE_FILES and "interpret/frame.py" in CODE_FILES
 
 
 def test_committed_hash_file_lists_the_committed_files():
