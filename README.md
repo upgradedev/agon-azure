@@ -93,7 +93,8 @@ Each job has its own managed identity and only the grants it needs: the fleet ma
 | 50 concurrent approvals of one nonce (M15) | 1 approval; an etag-blind store, the negative control, lets several through | `pytest tests/approval_concurrency -q`; [governance run](https://github.com/upgradedev/agon-azure/actions/runs/39330327770) |
 | Approval across process death | the 2026-10-19 run resumed in a new Container Apps execution; the CI spike kills the waiting process, resumes in another, and proves a deleted checkpoint cannot resume | [spike run](https://github.com/upgradedev/agon-azure/actions/runs/39229376155) |
 | Foundry model call from CI (gate C2) | HTTP 200 from the luna deployment, 1409 ms, 35 tokens | [foundry-smoke run](https://github.com/upgradedev/agon-azure/actions/runs/39276078687) |
-| Turning-point recall (M7) and Fact Gate catch rate by language (M8) | not built yet | none |
+| Turning-point recall (M7) | not built yet | none |
+| Fact Gate catch rate by language (M8), seeded mutants of every sentence of the recorded run | self-measured: 209 of 225 caught (92.9%) as the pipeline runs the gate; en 37 of 45 (82.2%), el, es, fr and easy-read 43 of 45 (95.6%) each. The gap is the translation claims check: the sentence check alone catches 37 of 45 (82.2%) in every language. All 16 misses are a club name swapped where no cited event binds the name. Spelled-out numbers (0 of 30 flagged) and decimals are uncovered by design and not counted | `python -m agon.governance.mutation --run web/runs/run-c8a19020c98a` (seed 8), pinned by `tests/governance/test_mutation.py`, branch `f/factgate-mutation`; [governance run](https://github.com/upgradedev/agon-azure/actions/runs/39352701814) |
 
 These numbers come from our own runs and are labelled as such; nobody else has measured them.
 
