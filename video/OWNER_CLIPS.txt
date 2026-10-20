@@ -73,6 +73,13 @@ The blur covers the whole clip at that position, so keep the window still.
 
 THE FINAL CUT, ON THE OWNER'S MACHINE (ffmpeg 8.1.1, Python standard library only)
 
+Two preconditions, or the cut would show one run in Teams and another on the web:
+  a. The run whose approval the Teams clips recorded is the live site's default
+     run (the first in runs/index.json). The web beats and the stills follow the
+     default run, and compose refuses a final cut whose --teams-run differs.
+  b. evidence/<that run>.executions.json is committed on main. Beat 5's still is
+     drawn from it, and the enforced capture fails without it.
+
 1. Dispatch the video workflow on main with the commit the live site serves:
      sha="$(curl -fsS https://jolly-stone-0c9c8a003.4.azurestaticapps.net/ | grep -o 'data-commit="[0-9a-f]\{40\}"' | cut -d'"' -f2)"
      gh workflow run video.yml --repo upgradedev/agon-azure --ref main -f release_sha="$sha" -f beats=all
@@ -81,7 +88,8 @@ THE FINAL CUT, ON THE OWNER'S MACHINE (ffmpeg 8.1.1, Python standard library onl
      gh run download <run-id> --repo upgradedev/agon-azure -n video-clips -D <work>/clips
 3. Compose with the Teams clips:
      python ci/video/compose.py --beats video/beats.json --narration <work>/narration \
-       --clips <work>/clips --teams-dir <your teams folder> --release-sha <sha> --out <work>/final
+       --clips <work>/clips --teams-dir <your teams folder> --teams-run <run id of the clips> \
+       --release-sha <sha> --out <work>/final
    (add --trim and --blur as above)
 4. Run the gate on the file you will upload:
      python ci/video/sync_gate.py <work>/final/agon-video-final.mp4 --receipt <work>/final/receipt.json \

@@ -101,6 +101,11 @@ jobs:
           retention-days: 14
 
   rehearsal:
+    # Pull requests only. A merge to main that touches console/ also starts
+    # deploy.yml, which changes the live data-commit partway through a capture,
+    # and the commit check then fails the run (main run 39344161942). On main the
+    # real render is video.yml, dispatched once the deploy queue is empty.
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:

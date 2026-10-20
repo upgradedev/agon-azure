@@ -375,6 +375,34 @@ def build_audio(timing: dict[str, Any], narration: Path, work: Path) -> dict[str
 # --------------------------------------------------------------------- main
 
 
+def clip_runs(clips: Path) -> set[str]:
+    """Every run id the capture receipts in the clips folder name."""
+    runs = set()
+    for path in clips.glob("*.json"):
+        try:
+            meta = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(meta, dict) and meta.get("format") == bs.CLIP_FORMAT and meta.get("run_id"):
+            runs.add(str(meta["run_id"]))
+    return runs
+
+
+def check_teams_run(final: bool, teams_run: str | None, runs: set[str]) -> None:
+    """The owner's Teams clips must show the run the web clips and stills show; a final cut names it."""
+    if len(runs) > 1:
+        raise ComposeError(f"the capture receipts show different runs: {', '.join(sorted(runs))}; capture them again together")
+    if not final:
+        return
+    if not teams_run or not bs.RUN_ID.match(teams_run):
+        raise ComposeError("--teams-dir needs --teams-run RUN_ID: the run whose approval the Teams clips recorded")
+    if runs and teams_run not in runs:
+        raise ComposeError(
+            f"the Teams clips record run {teams_run}, the web clips and stills show {', '.join(sorted(runs))}; "
+            "make that run the live site's default run and capture again before the final cut (video/OWNER_CLIPS.txt)"
+        )
+
+
 def compose(args: argparse.Namespace) -> dict[str, Any]:
     if not bs.SHA40.match(args.release_sha):
         raise ComposeError("--release-sha must be the 40-hex commit the live site serves")
@@ -387,6 +415,7 @@ def compose(args: argparse.Namespace) -> dict[str, Any]:
         if row["id"] not in by_id or by_id[row["id"]].narration != row["narration"]:
             raise ComposeError(f"timing.json beat {row['id']} does not match the beat sheet's narration; narrate again")
     mode = "final" if args.teams_dir else "preview"
+    check_teams_run(args.teams_dir is not None, args.teams_run, clip_runs(args.clips))
     out: Path = args.out
     seg_dir = out / "segments"
     seg_dir.mkdir(parents=True, exist_ok=True)
@@ -437,6 +466,7 @@ def compose(args: argparse.Namespace) -> dict[str, Any]:
         "mode": mode,
         "release_sha": args.release_sha,
         "run_id": run_id,
+        "teams_run": args.teams_run,
         "rehearsal": bool(args.rehearsal),
         "facts_failed": [f"{b['id']}: {f}" for b in beats_out for f in b["facts_failed"]],
         "site": sheet.site,
@@ -466,6 +496,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--clips", type=Path, required=True, help="folder with <beat>.webm and <beat>.json from the capture")
     parser.add_argument("--stills", type=Path, default=Path("video/stills"))
     parser.add_argument("--teams-dir", type=Path, help="local folder with the owner's Teams clips (final cut); never committed")
+    parser.add_argument("--teams-run", help="the run whose approval the Teams clips recorded; required with --teams-dir")
     parser.add_argument("--release-sha", required=True)
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--blur", action="append", default=[], help="CLIP:X,Y,W,H, repeatable")

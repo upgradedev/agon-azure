@@ -389,3 +389,21 @@ def test_a_served_file_fact_needs_a_path_and_cannot_also_scope_to_the_page():
 def test_the_closing_narration_says_the_sentence_the_still_shows():
     close = next(b for b in bs.load_sheet(SHEET_PATH).beats if b.id == "close")
     assert close.narration.startswith(stills.LOAD_BEARING)
+
+
+def test_a_final_cut_names_the_run_its_teams_clips_recorded_and_it_must_be_the_captured_run():
+    compose.check_teams_run(False, None, {"run-c8a19020c98a"})  # the CI preview has no Teams clips
+    compose.check_teams_run(True, "run-c8a19020c98a", {"run-c8a19020c98a"})
+    with pytest.raises(compose.ComposeError, match="needs --teams-run"):
+        compose.check_teams_run(True, None, {"run-c8a19020c98a"})
+    with pytest.raises(compose.ComposeError, match="make that run the live site's default run"):
+        compose.check_teams_run(True, "run-second", {"run-c8a19020c98a"})
+    with pytest.raises(compose.ComposeError, match="different runs"):
+        compose.check_teams_run(False, None, {"run-a", "run-b"})
+
+
+def test_clip_runs_reads_every_capture_receipt(tmp_path):
+    (tmp_path / "verify.json").write_text(json.dumps({"format": bs.CLIP_FORMAT, "run_id": "run-a"}), encoding="utf-8")
+    (tmp_path / "still-close.json").write_text(json.dumps({"format": bs.CLIP_FORMAT, "run_id": "run-a"}), encoding="utf-8")
+    (tmp_path / "other.json").write_text(json.dumps({"format": "something-else", "run_id": "run-z"}), encoding="utf-8")
+    assert compose.clip_runs(tmp_path) == {"run-a"}
