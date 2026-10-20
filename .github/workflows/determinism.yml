@@ -82,11 +82,7 @@ jobs:
       # the exact web kinematics bytes go under out/, so the compare job diffs them across OS too.
       - name: Synthetic kinematics, M9 cap check and web files
         run: |
-          # TEMPORARY, reverted in the next commit: windows derives kinematics for match index 1, a
-          # deliberate divergence that must turn the compare job red.
-          extra=""
-          if [ "$RUNNER_OS" = "Windows" ]; then extra="--match-index 1"; fi
-          python -m agon.synth.kinematics --seeds "$SEEDS" $extra --print-hash --hash-out artifact/out/kinematics/hash.txt
+          python -m agon.synth.kinematics --seeds "$SEEDS" --print-hash --hash-out artifact/out/kinematics/hash.txt
           python -m agon.webkinematics --seeds "$SEEDS" --out artifact/out/kinematics/web
           if python -m agon.synth.kinematics --seeds 1 --mutate > /dev/null; then
             echo "M9 passed a planted teleport: the check has no teeth"
