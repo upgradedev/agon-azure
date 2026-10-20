@@ -778,7 +778,8 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
                 {kin.status === "ready" ? (
                   <>
                     {" "}
-                    Positions are modelled and can miss the event spot; <a href="kinematics/README.txt">kinematics/README.txt</a> counts the misses.
+                    Positions are modelled and can miss the event spot: <a href="kinematics/README.txt">kinematics/README.txt</a> explains how the misses are
+                    counted, and each match&apos;s kinematics file holds the counts under checks.
                   </>
                 ) : null}
               </p>

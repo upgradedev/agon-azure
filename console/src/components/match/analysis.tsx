@@ -129,9 +129,11 @@ export function PlayerTable({
     <ChartFrame
       title="Player scorecards"
       sentence={`Every player who appeared. ${file.rules.speed} ${
-        kinematics
-          ? "The synthetic tracking is loaded, so its top running speed and distance are in the table."
-          : "Show the players on the replay to add the synthetic tracking's running speed and distance."
+        !analyst
+          ? "Analyst mode adds the synthetic tracking's running speed and distance once the players are shown on the replay."
+          : kinematics
+            ? "The synthetic tracking is loaded, so its top running speed and distance are in the table."
+            : "Show the players on the replay to add the synthetic tracking's running speed and distance."
       }`}
       label="Player scorecards"
       className="lg:col-span-2"
