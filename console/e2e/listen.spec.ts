@@ -150,8 +150,21 @@ test("the players appear only when asked for, with name tags from the synthetic 
   const pitch = page.locator('[data-view="home"] figure').first();
   await expect.poll(() => pitch.locator("circle[data-player]").count()).toBeGreaterThanOrEqual(20);
   await expect(pitch.locator("svg text").first()).toBeAttached();
+  await expect(page.getByRole("link", { name: "kinematics/README.txt" })).toBeVisible();
+  await expect(page.getByText(/Positions are modelled and can miss the event spot/)).toBeVisible();
   await expectNoSeriousAxe(page, "players on the pitch 1280");
   await pitch.screenshot({ path: "screenshots/42-players-on-pitch-1280-light.png" });
+});
+
+test("without the match file the players control says why and stays off", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  /* A web page where the event file should be, as a misrouted host would answer: the match cannot be read. */
+  await page.route("**/data/1.ndjson", (route) => route.fulfill({ status: 200, contentType: "text/html", body: "<!doctype html><title>Not the file</title>" }));
+  await page.goto("/");
+  await appReady(page);
+  const show = page.getByRole("button", { name: "Show the players" });
+  await expect(show).toBeDisabled({ timeout: 30_000 });
+  await expect(page.getByText("The synthetic tracking needs the match file, which could not be read, so the players cannot be shown.")).toBeVisible();
 });
 
 test("the Newsroom Wall stepper shows the whole lifecycle on a phone", async ({ page }) => {
