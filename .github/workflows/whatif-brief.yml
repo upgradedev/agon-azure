@@ -1,0 +1,82 @@
+# What-If analyst briefs: one gpt-5.6-luna call per scenario of the committed What-If set, every
+# number in each draft checked by code (agon.whatif.brief.check_brief); a draft with any number that
+# is not one of the scenario's own numbers is refused and never published.
+#
+# When it runs: by hand on main only (workflow_dispatch). It is not part of any pull request check:
+# a model reply is not deterministic, so it is drafted once, uploaded as an artifact with its
+# provenance (deployment, reported model, prompt sha256, the What-If file sha256 it was drafted
+# from), and a person decides whether to commit it under src/agon/whatif/briefs/. agon.webintel
+# re-checks every number of a committed brief at deploy and stops the deploy on a mismatch.
+#
+# Identity: the CI app agon-azure-ci through the environment azure subject, which holds Cognitive
+# Services OpenAI User on the Foundry account (infra/rbac.bicep). No key exists.
+
+name: whatif-brief
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+  DEPLOYMENT_NAME: agon-ai
+  MODEL_DEPLOYMENT: gpt-5.6-luna
+  TOKEN_RESOURCE: https://cognitiveservices.azure.com
+
+jobs:
+  brief:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: azure
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0 (peeled tag, git ls-remote 2026-10-19)
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Read the Foundry endpoint of agon-ai (only once it reads Succeeded)
+        id: foundry
+        run: |
+          state="$(az deployment group show --resource-group "$RESOURCE_GROUP" --name "$DEPLOYMENT_NAME" --query properties.provisioningState --output tsv)"
+          if [ "$state" != "Succeeded" ]; then
+            echo "$DEPLOYMENT_NAME is '$state', not Succeeded: its outputs are not readable yet"
+            exit 1
+          fi
+          endpoint="$(az deployment group show --resource-group "$RESOURCE_GROUP" --name "$DEPLOYMENT_NAME" --query properties.outputs.foundryOpenAiEndpoint.value --output tsv)"
+          if [ -z "$endpoint" ]; then
+            echo "agon-ai has no foundryOpenAiEndpoint output"
+            exit 1
+          fi
+          echo "openai_endpoint=$endpoint" >> "$GITHUB_OUTPUT"
+      - name: Draft and check one brief per scenario
+        env:
+          OPENAI_ENDPOINT: ${{ steps.foundry.outputs.openai_endpoint }}
+          PYTHONPATH: src:ci
+        run: |
+          AGON_AI_TOKEN="$(az account get-access-token --resource "$TOKEN_RESOURCE" --query accessToken --output tsv)"
+          if [ -z "$AGON_AI_TOKEN" ]; then
+            echo "no access token returned for $TOKEN_RESOURCE"
+            exit 1
+          fi
+          echo "::add-mask::$AGON_AI_TOKEN"
+          export AGON_AI_TOKEN
+          python ci/whatif_brief.py --endpoint "$OPENAI_ENDPOINT" --deployment "$MODEL_DEPLOYMENT" \
+            --out build/briefs --summary "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: whatif-briefs
+          path: build/briefs/
+          if-no-files-found: error
+          retention-days: 30

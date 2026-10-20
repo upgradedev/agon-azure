@@ -367,8 +367,34 @@ the press rate against the opponent's on-ball rate, so those labels say `turning
 The referee package is reachable only from CI and evidence tooling: `ci/check_referee_isolation.py`
 parses every module under `src/agon` outside `src/agon/referee` and fails on any import of it.
 
-Not built: the coupled counterfactual twins (spec P1, metric M5), which would give causal
-turning-point labels for any moment rather than only for injected storylines.
+Not built: the coupled counterfactual twins per candidate moment (spec P1, metric M5), which would
+give causal turning-point labels for any moment rather than only for injected storylines.
+
+**What-If Lab (paired replays with common random numbers, `python -m agon.whatif`).** For a
+published match and a scenario (a change and the minute it starts), `agon.whatif` replays the match
+once up to the scenario minute, then forks K baseline replays and K scenario replays from that one
+paused state. Replay r of both arms draws the same random numbers chain by chain: every
+chain-keyed stream is drawn with `replicate = r`, a key position the counter-based generator
+already had. Replicate 0 is the published match. The engine is not edited: a subclass adds the
+pause, the fork and the replicate keying, and tests pin that it reproduces the published matches
+byte for byte, that a fork at replicate 0 equals the engine's own intervention path, and that a
+replay whose change never fires is its baseline twin event for event. The pre-scenario play is the
+published match in every replay by construction, and each file counts the differing events anyway
+(0). Shared by every replay, because the engine draws them at kick-off: the added time of each half,
+the substitution minutes and who is substituted. Each replay is read with analyst-facing code only
+(score, interpret xG, the Fact Gate's box entries, interpret PPDA); win, draw and loss shares carry
+Wilson 95% intervals, differences are paired means with normal 95% intervals beside the unpaired
+half-width, all in integers. The fixed set (seven scenarios per published seed: a red card for
+either side at 30:00, a press-height knob of plus or minus 300 per mille from 60:00, a line that
+drops after the home side's next goal from 60:00, away goalkeeper heroics from 60:00, a home red
+card plus a low block from 55:00) is committed under `src/agon/whatif/scenario_set/` and
+regenerated on ubuntu and windows by the determinism workflow, which diffs the two and requires the
+committed bytes. Self-measured on 2026-10-20, branch `b/whatif`, local Windows run with Python 3.11, generator synth-v0.2, with `python -m agon.whatif --set --seeds 1,2,3 --print-hash`: K = 200 replays per arm, 21 scenarios, scenario-set sha256 `e7d9f701a18a0fbac38e303a9256e45aeb6908d9547e6cb5186320cf590c55e5`, total wall time 816780 ms (printed to stderr), and 0 differing pre-scenario events in all 21 scenarios. From the committed `src/agon/whatif/scenario_set/whatif-1.json`: a home red card from 30:00 moves the home win share from 41 to 22 of 200 replays (20.5% to 11.0%) and points per match by -0.415 (95% interval -0.604 to -0.226; the unpaired half-width would be 0.208); for the line that drops after a home goal from 60:00 (triggered in 85 of 200 replays) the paired interval half-width on points is 0.073 against 0.165 unpaired, which is what the common random numbers buy.
+
+What it is not: a prediction about real football, or a causal label for a moment that was not
+changed. A red card falls on whichever outfield player makes the next defensive duel (the engine
+cannot pick a position), and interpret xG does not see the engine's hidden late-collapse
+multiplier, only the extra shots.
 
 **Storyline index (the console's storyline picker).** `python -m agon.referee.storyline_index`
 scans storyline seeds 2001 to 2030 in order and keeps, per category, the lowest 2 seeds whose
@@ -452,7 +478,8 @@ https://github.com/upgradedev/agon-azure/actions/runs/39277712146 (ubuntu season
   action no capped path reaches; the other 67 are the model's own limits), and about 1.5% of pass receivers are not at the
   pass end when the ball arrives. The sprint and distance bands stay NOT
   MEASURABLE in M2, and on seeds 1 to 3 the layer's distances are below the distance band.
-- Storyline labels cover injected interventions only; counterfactual twins are not built.
+- Storyline labels cover injected interventions only; per-moment counterfactual twins are not built
+  (the What-If Lab replays stated scenarios only, section 5).
 - The sub marker location described in section 2.
 - The season is 30 independent matches of one league. Every club starts its fixed 4-3-3 in every
   match: no rotation, no suspension carried over (a red card does not bar the player from the next

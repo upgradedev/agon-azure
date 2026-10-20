@@ -41,11 +41,69 @@ def _load(intel: Path, name: str) -> dict:
 
 def test_written_folder_verifies_and_lists_every_file(site):
     data, intel = site
-    assert webintel.verify_intel_dir(intel, data) == 2
+    assert webintel.verify_intel_dir(intel, data) == 3
     manifest = _load(intel, "manifest.json")
-    assert [f["name"] for f in manifest["files"]] == ["metrics-1.json", "milestones-season-1.json"]
+    assert [f["name"] for f in manifest["files"]] == ["metrics-1.json", "whatif-1.json", "milestones-season-1.json"]
     served = sha256_hex((data / "1.ndjson").read_bytes())
     assert manifest["files"][0]["events_sha256"] == served == _load(intel, "metrics-1.json")["events_sha256"]
+    assert manifest["files"][1]["events_sha256"] == served == _load(intel, "whatif-1.json")["events_sha256"]
+
+
+def test_the_whatif_file_is_the_committed_set_byte_for_byte(site):
+    _, intel = site
+    from agon.whatif.scenarios import SET_DIR
+
+    assert (intel / "whatif-1.json").read_bytes() == Path(SET_DIR, "whatif-1.json").read_bytes()
+
+
+def test_a_stale_whatif_set_stops_the_deploy(site, tmp_path):
+    from agon.whatif.scenarios import SET_DIR
+
+    with pytest.raises(ValueError, match="does not match the served event log"):
+        webintel.committed_whatif(1, "0" * 64)
+    with pytest.raises(ValueError, match="no committed What-If set for seed 99"):
+        webintel.committed_whatif(99, "0" * 64)
+    body = json.loads(Path(SET_DIR, "whatif-1.json").read_bytes())
+    served = body["events_sha256"]
+    Path(tmp_path, "whatif-1.json").write_bytes(canonical_bytes(dict(body, generator="synth-v9")) + b"\n")
+    with pytest.raises(ValueError, match="generator version"):
+        webintel.committed_whatif(1, served, str(tmp_path))
+    Path(tmp_path, "whatif-1.json").write_bytes(json.dumps(body, indent=1).encode("ascii"))
+    with pytest.raises(ValueError, match="not canonical"):
+        webintel.committed_whatif(1, served, str(tmp_path))
+
+
+def test_a_truncated_replay_has_no_whatif_file(tmp_path):
+    data = tmp_path / "data"
+    write_web_data(str(data), [1], max_minute=5)
+    manifest, files = webintel.build_intel_web(str(data), [1])
+    assert sorted(files) == ["metrics-1.json", "milestones-season-1.json"]
+
+
+def test_whatif_validator_refuses_a_changed_past_and_broken_numbers():
+    from agon.whatif.scenarios import SET_DIR
+
+    good = json.loads(Path(SET_DIR, "whatif-1.json").read_bytes())
+    assert webintel.validate_payload("whatif-1.json", good) == []
+    assert webintel.validate_payload("whatif-2.json", good)
+    past = json.loads(json.dumps(good))
+    past["scenarios"][0]["prefix"]["differing_events"] = 1
+    assert any("published match" in p for p in webintel.validate_payload("whatif-1.json", past))
+    label = dict(good, label="A forecast.")
+    assert webintel.validate_payload("whatif-1.json", label)
+    counts = json.loads(json.dumps(good))
+    counts["scenarios"][0]["outcomes"]["baseline"]["win"]["count"] += 1
+    assert any("add up to k" in p for p in webintel.validate_payload("whatif-1.json", counts))
+    order = json.loads(json.dumps(good))
+    d = order["scenarios"][0]["deltas"][0]
+    d["delta_lo"] = d["delta_mean"] + 1
+    assert webintel.validate_payload("whatif-1.json", order)
+    timeline = json.loads(json.dumps(good))
+    timeline["scenarios"][0]["xg_timeline"]["scenario"]["for"].pop()
+    assert webintel.validate_payload("whatif-1.json", timeline)
+    dash = json.loads(json.dumps(good))
+    dash["scenarios"][0]["summary"] += chr(0x2014)
+    assert webintel.validate_payload("whatif-1.json", dash)
 
 
 def test_files_are_canonical_with_a_final_lf(site):
@@ -170,7 +228,7 @@ def test_manifest_validator_refuses_bad_entries(site):
     bad["files"][0]["name"] = "../metrics-1.json"
     assert webintel.validate_manifest(bad)
     bad = json.loads(json.dumps(manifest))
-    bad["files"][1]["seed"] = 1
+    bad["files"][-1]["seed"] = 1  # the milestones file has no seed
     assert webintel.validate_manifest(bad)
     bad = json.loads(json.dumps(manifest))
     bad["files"][0]["kind"] = "rumours"
@@ -223,5 +281,5 @@ def test_cli_writes_and_verifies(site, tmp_path, capsys):
     data, _ = site
     out = tmp_path / "intel"
     assert webintel.main(["--data", str(data), "--seeds", "1", "--out", str(out)]) == 0
-    assert "intel files 2" in capsys.readouterr().out
-    assert sorted(os.listdir(out)) == ["manifest.json", "metrics-1.json", "milestones-season-1.json"]
+    assert "intel files 3" in capsys.readouterr().out
+    assert sorted(os.listdir(out)) == ["manifest.json", "metrics-1.json", "milestones-season-1.json", "whatif-1.json"]
