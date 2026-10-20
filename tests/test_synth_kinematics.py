@@ -199,6 +199,20 @@ def test_most_actors_are_exactly_at_their_event_and_every_miss_is_named():
     assert (t["xy"][2 * k], t["xy"][2 * k + 1]) == (x, y)
 
 
+def test_misses_are_split_by_cause():
+    misses = kin.anchor_misses(kinkit.record(), kinkit.events())
+    summary = kin.miss_summary(misses)
+    assert summary["misses"] == len(misses) == summary["under_1m"] + summary["beyond_cap"] + summary["model_limit"]
+    assert all("need_mm_s" in m for m in misses)
+    planted = [
+        {"event_id": "a", "player": "p", "miss_dm": 50, "need_mm_s": kin.PLAYER_VMAX_MM_S + 1},
+        {"event_id": "b", "player": "p", "miss_dm": 5, "need_mm_s": kin.PLAYER_VMAX_MM_S + 1},
+        {"event_id": "c", "player": "p", "miss_dm": 50, "need_mm_s": 3000},
+        {"event_id": "d", "player": "p", "miss_dm": 12, "need_mm_s": None},
+    ]
+    assert kin.miss_summary(planted) == {"misses": 4, "under_1m": 1, "beyond_cap": 1, "model_limit": 2, "max_miss_dm": 50}
+
+
 def test_tracks_cover_each_period_at_one_hertz_with_subs_and_a_sending_off():
     rec, evs = kinkit.record(RED_CARD_SEED), kinkit.events(RED_CARD_SEED)
     for per in rec["periods"]:

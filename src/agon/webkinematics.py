@@ -23,8 +23,8 @@ README.txt beside them.
         ball_flights             every pass and shot: event_id, speed_kmh_x10, flight_ms, dist_dm ...
         players                  per player: distance_dm, top_speed_kmh_x10, sprints,
                                  top_speed_triggers and distance_milestones (period plus t_s)
-        checks                   cap_violations (metric M9, must be 0), anchors, anchor_misses,
-                                 max_anchor_miss_dm
+        checks                   cap_violations (metric M9, must be 0), anchors, anchor_misses and
+                                 its split (under_1m, beyond_cap, model_limit), max_anchor_miss_dm
     README.txt
 
 The triggers come from `agon.interpret.kinematics.triggers_from_segments` over the published 1 Hz
@@ -73,7 +73,10 @@ FLIGHT_KEYS = frozenset({
     "event_id", "type", "outcome", "qualifier", "period", "t_s", "dist_dm", "gap_ms", "flight_ms",
     "speed_kmh_x10", "under_pressure",
 })
-CHECK_KEYS = frozenset({"cap_violations", "anchors", "anchor_misses", "max_anchor_miss_dm"})
+CHECK_KEYS = frozenset({
+    "cap_violations", "anchors", "anchor_misses", "anchor_misses_under_1m", "anchor_misses_beyond_cap",
+    "anchor_misses_model_limit", "max_anchor_miss_dm",
+})
 UNITS = {
     "position": "decimetres, fixed frame: the home club attacks towards x = 1050 in both periods",
     "time": "match clock seconds; the clock repeats across periods, so a moment is (period, second)",
@@ -132,8 +135,12 @@ Checks (metric M9)
                      outside the box, ball speeds outside their bounds or flights longer than
                      their gap; must be 0 (the caps add worst-case decimetre rounding)
   anchor_misses      events whose actor is not at the event location at the event second; the
-                     engine picks some actors at random, so a few consecutive actions of one player
-                     are physically impossible, and the model never breaks a cap to reach them
+                     model never breaks a cap to reach one. Split three ways:
+  anchor_misses_under_1m       misses shorter than 1 m
+  anchor_misses_beyond_cap     misses of 1 m or more where the player needed an average speed above
+                               the 9.5 m/s cap from his previous action (the engine picks some
+                               actors at random, so these actions are physically impossible)
+  anchor_misses_model_limit    the other misses of 1 m or more: limits of this simple motion model
 """
 
 
@@ -176,7 +183,7 @@ def kinematics_payload(seed: int, events: Sequence[Mapping[str, Any]], events_sh
     away = teams[0] if teams else next(c.club_id for c in league.clubs if c.club_id != home)
     record = kin.simulate_tracking(league, events, home, away, seed, match_index)
     problems = kin.check(record)
-    misses = kin.anchor_misses(record, events)
+    summary = kin.miss_summary(kin.anchor_misses(record, events))
     anchors = sum(1 for e in events if e["player"] and e["type"] not in ("sub", "possession_change"))
     return {
         "schema": SCHEMA,
@@ -209,8 +216,11 @@ def kinematics_payload(seed: int, events: Sequence[Mapping[str, Any]], events_sh
         "checks": {
             "cap_violations": len(problems),
             "anchors": anchors,
-            "anchor_misses": len(misses),
-            "max_anchor_miss_dm": max((m["miss_dm"] or 0 for m in misses), default=0),
+            "anchor_misses": summary["misses"],
+            "anchor_misses_under_1m": summary["under_1m"],
+            "anchor_misses_beyond_cap": summary["beyond_cap"],
+            "anchor_misses_model_limit": summary["model_limit"],
+            "max_anchor_miss_dm": summary["max_miss_dm"],
         },
     }
 
@@ -468,7 +478,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         sys.stdout.write(
             f"{entry['name']} sha256 {entry['sha256']} events_sha256 {entry['events_sha256']}"
             f" cap_violations {c['cap_violations']} anchor_misses {c['anchor_misses']} of {c['anchors']}"
-            f" max_miss_dm {c['max_anchor_miss_dm']}\n"
+            f" (under_1m {c['anchor_misses_under_1m']} beyond_cap {c['anchor_misses_beyond_cap']}"
+            f" model_limit {c['anchor_misses_model_limit']}) max_miss_dm {c['max_anchor_miss_dm']}\n"
         )
         s = full_match_summary(body)
         sys.stdout.write(

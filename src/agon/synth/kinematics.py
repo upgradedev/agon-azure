@@ -34,9 +34,10 @@ the model steps once per second in millimetres:
 - Caps: speed at most `PLAYER_VMAX_MM_S` (per player, from pace: `VMAX_BASE_MM_S` plus
   `VMAX_PER_PACE_MM_S` per pace point) and a change of velocity vector of at most
   `PLAYER_AMAX_MM_S2` per second. The model never breaks a cap to reach an anchor. When an anchor
-  cannot be reached within the caps (the engine picks some actors at random, so a few consecutive
-  actions of one player are physically impossible), the player gets as close as he can and the
-  miss is reported, never hidden: see `anchor_misses`.
+  cannot be reached, the player gets as close as he can and the miss is reported, never hidden: see
+  `anchor_misses`. Some misses are physically impossible actions (the engine picks some actors at
+  random, so one player can be asked to cover more than the speed cap allows); most of the misses
+  of 1 m or more are limits of this simple model, and `miss_summary` counts the two apart.
 - Substitutes start where the player they replace stood; a sent-off player's track ends at the
   card. Each period runs from its kick-off second to its last event second.
 
@@ -533,29 +534,58 @@ def check(record: Mapping[str, Any]) -> list[str]:
 
 
 def anchor_misses(record: Mapping[str, Any], events: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """Every event whose actor is not at the event location at the event second, with the distance."""
+    """Every event whose actor is not at the event location at the event second.
+
+    Each miss carries its distance (`miss_dm`) and `need_mm_s`: the average speed the player needed
+    from his previous action in the same period (None for his first). A need above
+    PLAYER_VMAX_MM_S means no path within the speed cap reaches the event; a smaller need means the
+    miss is a limit of this simple motion model (acceleration cap, approach rules), not of physics.
+    """
     tracks: dict[tuple[int, str], list[tuple[int, list[int]]]] = {}
     for per in record["periods"]:
         for t in per["players"]:
             tracks.setdefault((per["period"], t["player_id"]), []).append((t["start_s"], t["xy"]))
+    previous: dict[tuple[int, str], tuple[int, int, int]] = {}
     misses: list[dict[str, Any]] = []
     for e in events:
         if e["type"] in ("sub", "possession_change") or not e["player"]:
             continue
         x, y, _, _ = to_fixed_frame(e, record["home"])
         s = _second(e)
+        key = (e["period"], e["player"])
+        prev = previous.get(key)
+        previous[key] = (s, x, y)
+        need = None
+        if prev is not None and s > prev[0]:
+            need = isqrt((x - prev[1]) ** 2 + (y - prev[2]) ** 2) * 100 // (s - prev[0])
         at = None
-        for start, xy in tracks.get((e["period"], e["player"]), []):
+        for start, xy in tracks.get(key, []):
             k = s - start
             if 0 <= k < len(xy) // 2:
                 at = (xy[2 * k], xy[2 * k + 1])
         if at is None:
-            misses.append({"event_id": e["event_id"], "player": e["player"], "miss_dm": None})
+            misses.append({"event_id": e["event_id"], "player": e["player"], "miss_dm": None, "need_mm_s": need})
             continue
         d = isqrt((at[0] - x) ** 2 + (at[1] - y) ** 2)
         if d > 0:
-            misses.append({"event_id": e["event_id"], "player": e["player"], "miss_dm": d})
+            misses.append({"event_id": e["event_id"], "player": e["player"], "miss_dm": d, "need_mm_s": need})
     return misses
+
+
+def miss_summary(misses: Sequence[Mapping[str, Any]]) -> dict[str, int]:
+    """Counts of anchor misses: under 1 m, 1 m or more needing more than the speed cap, and the rest."""
+    under = sum(1 for m in misses if m["miss_dm"] is not None and m["miss_dm"] < 10)
+    beyond = sum(
+        1 for m in misses
+        if not (m["miss_dm"] is not None and m["miss_dm"] < 10) and m["need_mm_s"] is not None and m["need_mm_s"] > PLAYER_VMAX_MM_S
+    )
+    return {
+        "misses": len(misses),
+        "under_1m": under,
+        "beyond_cap": beyond,
+        "model_limit": len(misses) - under - beyond,
+        "max_miss_dm": max((m["miss_dm"] or 0 for m in misses), default=0),
+    }
 
 
 def record_sha256(record: Mapping[str, Any]) -> str:
@@ -594,13 +624,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.mutate:
             record = mutate(record)
         problems = check(record)
-        misses = anchor_misses(record, events)
-        worst = max((m["miss_dm"] or 0 for m in misses), default=0)
+        summary = miss_summary(anchor_misses(record, events))
         violations += len(problems)
         tracks = sum(len(p["players"]) for p in record["periods"])
         lines.append(
             f"seed {seed} match_index {args.match_index} tracks {tracks} flights {len(record['ball_flights'])}"
-            f" violations {len(problems)} anchor_misses {len(misses)} max_miss_dm {worst} sha256 {record_sha256(record)}"
+            f" violations {len(problems)} anchor_misses {summary['misses']} (under_1m {summary['under_1m']}"
+            f" beyond_cap {summary['beyond_cap']} model_limit {summary['model_limit']}) max_miss_dm {summary['max_miss_dm']}"
+            f" sha256 {record_sha256(record)}"
         )
         for p in problems[:5]:
             sys.stderr.write(f"seed {seed}: {p}\n")

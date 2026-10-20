@@ -105,20 +105,22 @@ simple, documented motion model, not a physics or biomechanics simulation and no
 `python -m agon.synth.kinematics --seeds 1,2,3` (exit 0, about 17 s total wall time) for the cap
 violations and `python -m agon.webkinematics --seeds 1,2,3 --out build/kinematics` for the rest:
 
-| Seed | Cap violations | Actors not at their event location | Largest miss | Outfield players on all match: mean distance, mean sprints, top speeds |
+| Seed | Cap violations | Actors not at their event location (under 1 m; 1 m or more beyond the speed cap; 1 m or more, model limit) | Largest miss | Outfield players on all match: mean distance, mean sprints, top speeds |
 |---|---|---|---|---|
-| 1 | 0 | 99 of 1647 | 19.4 m | 11 players: 8.16 km, 25 sprints, 25.5 to 33.4 km/h |
-| 2 | 0 | 103 of 1622 | 4.1 m | 12 players: 7.21 km, 25 sprints, 31.6 to 33.1 km/h |
-| 3 | 0 | 78 of 1587 | 30.0 m | 12 players: 7.71 km, 25 sprints, 31.6 to 33.1 km/h |
+| 1 | 0 | 99 of 1647 (67; 2; 30) | 19.4 m | 11 players: 8.16 km, 25 sprints, 25.5 to 33.4 km/h |
+| 2 | 0 | 103 of 1622 (80; 0; 23) | 4.1 m | 12 players: 7.21 km, 25 sprints, 31.6 to 33.1 km/h |
+| 3 | 0 | 78 of 1587 (59; 0; 19) | 30.0 m | 12 players: 7.71 km, 25 sprints, 31.6 to 33.1 km/h |
 
 The check reads the published decimetre samples: step speed at most 9.7 m/s, change of step at most
 4.8 m/s^2 (the model caps plus the worst-case decimetre rounding of a difference and of a second
 difference), positions within 10 m of the lines, ball speeds in bounds and flights inside their gap.
 `python -m agon.synth.kinematics --seeds 1 --mutate` plants one 15 m teleport and must exit 1; the
-determinism workflow runs both. Most misses are under 1 m; the large ones are actions the engine
-assigns to a player who cannot physically get there, because it picks some actors at random. The
-misses are listed per event id by `agon.synth.kinematics.anchor_misses` and counted in every web
-file, never hidden.
+determinism workflow runs both. Most misses are under 1 m. Of the misses of 1 m or more, only a
+few are actions no capped path can reach (the player needed an average speed above 9.5 m/s from his
+previous action, because the engine picks some actors at random); most are limits of this simple
+motion model, which plans toward one anchor at a time under an acceleration cap. Both commands
+print that split (`agon.synth.kinematics.miss_summary`); the misses are listed per event id by
+`anchor_misses` and counted in every web file, never hidden.
 
 **Brief-field mapping.**
 
@@ -413,7 +415,12 @@ The per-seed hash is sha256 over the canonical JSON of the seed's world, match m
 CI workflow `.github/workflows/determinism.yml` compares these hashes, the fixtures manifest and the
 storyline labels between ubuntu-latest and windows-latest. The hash values of record come from that CI run, not from this card.
 It compares the season 1 hash lines (one per match plus the season sha256), the season record and
-the fresh held-out M2 record too. A second negative control flips one match hash and requires the
+the fresh held-out M2 record too, and the synthetic kinematics: the hash lines of seeds 1, 2 and 3
+and the exact web kinematics files. A third negative control flips one kinematics hash, and a
+deliberate windows-only divergence (kinematics for match index 1 on windows; the run's head commit
+68f3faa, reverted before merge) turned the compare job red in run
+https://github.com/upgradedev/agon-azure/actions/runs/39345743400 (first difference at line 2 of
+`kinematics/hash.txt`). A second negative control flips one match hash and requires the
 comparator to fail, and a deliberate windows-only divergence (9 of 10 matchdays; the run's head
 commit a036038, reverted before merge) turned the compare job red in run
 https://github.com/upgradedev/agon-azure/actions/runs/39277712146 (ubuntu season sha256
@@ -423,8 +430,9 @@ https://github.com/upgradedev/agon-azure/actions/runs/39277712146 (ubuntu season
 
 - Engine constants fitted by hand on calibration seeds; M2 held-out is 18 of 22 (section 4).
 - No measured tracking and no video. Positions come from the synthetic kinematics layer (section
-  2): a simple motion model, 1 Hz published, with some actors missing their event location when the
-  engine's choice of actor is physically impossible. The sprint and distance bands stay NOT
+  2): a simple motion model, 1 Hz published. About 6% of actors miss their event location on seeds 1
+  to 3: a few because the engine's choice of actor is physically impossible, most because of the
+  model's own limits, and two thirds of the misses are under 1 m. The sprint and distance bands stay NOT
   MEASURABLE in M2, and on seeds 1 to 3 the layer's distances are below the distance band.
 - Storyline labels cover injected interventions only; counterfactual twins are not built.
 - The sub marker location described in section 2.
