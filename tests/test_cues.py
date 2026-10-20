@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import hashlib
 import json
 import re
 from datetime import datetime, timezone
@@ -29,7 +30,7 @@ from agon.synth.schema import make_event
 
 ROOT = Path(__file__).resolve().parents[1]
 CUES_DIR = ROOT / "web" / "cues"
-SCHEMA = CUES_DIR / Q.SCHEMA_FILE
+SCHEMA = ROOT / "web" / "cues-format" / Q.SCHEMA_FILE
 SOURCE = SynthMatchSource()
 APPROVED_HASH = "ab" * 32
 APPROVED_AT = "2026-10-21T10:00:00Z"
@@ -55,6 +56,7 @@ def _doc(seed: int = 1, kinematics=None):
     return Q.document(
         seed=seed, match_index=0, match_id=rec.match_id, generator=rec.meta["generator"], approved=_approved(seed),
         cues=cues, held=held, kinematics_source=None if kinematics is None else kinematics["source"],
+        axis=Q.axis_of(rec.events),
     )
 
 
@@ -218,6 +220,11 @@ def test_the_document_validates_and_every_rule_has_teeth():
         lambda d: d["cues"][-1].update(template_id="sprint", overlay="player_tag"),
         lambda d: d["charter"].update(approved_at="2026-10-21"),
         lambda d: d.update(extra=1),
+        lambda d: d.update(charter_sha256="cd" * 32),
+        lambda d: d["cues"][0].update(at_s=d["cues"][0]["at_s"] + 1),
+        lambda d: d["cues"][0].update(until_s=d["cues"][0]["at_s"]),
+        lambda d: d["cues"][0].update(kind="headline"),
+        lambda d: d["axis"].update(half_offset_s=-1),
     ]
     for i, mutate in enumerate(broken):
         d = copy.deepcopy(doc)
@@ -236,7 +243,9 @@ def test_the_json_schema_and_the_validator_agree():
     assert schema["properties"]["languages"]["const"] == list(Q.LANGUAGES)
     assert set(schema["properties"]["charter"]["required"]) == Q.CHARTER_REF_KEYS
     assert set(schema["properties"]["held"]["items"]["properties"]["held_class"]["enum"]) == set(C.HELD_CLASSES)
-    assert schema["properties"]["format"]["const"] == Q.FORMAT and schema["$id"] == Q.SCHEMA_FILE
+    assert schema["properties"]["schema"]["const"] == Q.FORMAT and schema["$id"] == Q.SCHEMA_FILE
+    assert schema["properties"]["json_schema"]["const"] == Q.SCHEMA_FILE
+    assert cue["properties"]["kind"]["enum"] == list(Q.TEMPLATE_IDS)
 
 
 def test_the_cue_text_passes_the_sites_text_rules():
@@ -245,7 +254,77 @@ def test_the_cue_text_passes_the_sites_text_rules():
 
 
 def test_every_committed_cues_file_is_valid():
-    assert Q.check_dir(CUES_DIR) == sorted(p.name for p in CUES_DIR.glob("*.json") if p.name != Q.SCHEMA_FILE)
+    expected = sorted(p.name for p in CUES_DIR.glob("*.json") if p.name != Q.MANIFEST_NAME) if CUES_DIR.is_dir() else []
+    assert Q.check_dir(CUES_DIR) == expected
+
+
+# ----------------------------------------------------------------- what the console reads
+
+
+def console_problems(body, seed: int) -> list[str]:
+    """console/src/lib/cues.ts validateCues on the console branch, line for line in Python."""
+    if not isinstance(body, dict) or body.get("schema") != "agon.cues/1":
+        return ["not agon.cues/1"]
+    problems = []
+    if body.get("seed") != seed:
+        problems.append("seed")
+    if not isinstance(body.get("charter_sha256"), str) or not re.fullmatch("[0-9a-f]{64}", body["charter_sha256"]):
+        problems.append("charter_sha256")
+    for cue in body.get("cues", []):
+        ok = (
+            isinstance(cue, dict) and isinstance(cue.get("at_s"), int) and isinstance(cue.get("until_s"), int)
+            and cue["until_s"] >= cue["at_s"] and isinstance(cue.get("kind"), str)
+            and isinstance(cue.get("text"), dict) and isinstance(cue["text"].get("en"), str)
+        )
+        if not ok:
+            problems.append("cue")
+            break
+    return problems
+
+
+def test_the_file_carries_every_key_the_console_reads():
+    doc = _doc(9)
+    assert console_problems(json.loads(Q.document_bytes(doc)), 9) == []
+    assert doc["charter_sha256"] == doc["charter"]["bundle_sha256"] == APPROVED_HASH
+    assert all(c["kind"] == c["template_id"] for c in doc["cues"])
+
+
+def test_at_s_is_the_consoles_drawn_axis():
+    """The second half starts where the first half's last minute ends (agon.webmatch on the console branch)."""
+    for seed in (1, 9):
+        rec = _record(seed)
+        last_first = max(e.minute for e in rec.events if e.period == 1)
+        offset = max((last_first + 1) * 60, 2700) - 2700
+        assert Q.axis_of(rec.events) == {"half_offset_s": offset}
+        for cue in _cues(seed)[0]:
+            clock_s = cue["clock"]["ms"] // 1000
+            assert cue["at_s"] == clock_s + (offset if cue["clock"]["period"] == 2 else 0)
+            assert cue["until_s"] - cue["at_s"] == (cue["window"]["out_ms"] - cue["window"]["in_ms"]) // 1000
+    try:
+        from agon import webmatch
+    except ImportError:
+        return  # the console branch's agon.webmatch is not on this branch yet
+    rec = _record(9)
+    axis = webmatch._axis([e.to_dict() for e in rec.events])
+    assert axis["half_offset_s"] == Q.axis_of(rec.events)["half_offset_s"]
+
+
+def test_at_the_same_instant_the_lower_third_comes_last():
+    cues = _cues(9)[0]
+    for a, b in zip(cues, cues[1:]):
+        if (a["clock"]["period"], a["clock"]["ms"]) == (b["clock"]["period"], b["clock"]["ms"]):
+            assert Q.OVERLAY_RANK[a["overlay"]] <= Q.OVERLAY_RANK[b["overlay"]]
+    goal = next(c for c in cues if c["template_id"] == "goal")
+    showing = [c for c in cues if c["at_s"] <= goal["at_s"] < c["until_s"]]
+    assert showing[-1] is goal, "a renderer that shows the last cue in its window shows the goal"
+
+
+def test_a_missing_cues_folder_holds_no_file(tmp_path: Path):
+    assert Q.check_dir(tmp_path / "absent") == []
+    (tmp_path / "cues").mkdir()
+    (tmp_path / "cues" / "README.txt").write_text("x", encoding="utf-8")
+    with pytest.raises(Q.CueError, match="only <seed>.json"):
+        Q.check_dir(tmp_path / "cues")
 
 
 # ----------------------------------------------------------------- the export, from the published feed
@@ -305,7 +384,12 @@ def test_the_export_reads_the_published_charter_by_its_hash_and_writes_valid_cue
     assert doc["charter"]["bundle_sha256"] == sha and doc["charter"]["approved_at"] == "2026-10-21T10:00:00Z"
     assert all(c["charter_sha256"] == sha for c in doc["cues"]) and doc["cues"]
     assert Q.check_dir(out) == ["1.json"]
+    listing = json.loads((out / "manifest.json").read_text(encoding="ascii"))
     first = (out / "1.json").read_bytes()
+    assert listing == {"schema": "agon.cues-manifest/1", "files": [
+        {"name": "1.json", "seed": 1, "sha256": hashlib.sha256(first).hexdigest(), "charter_sha256": sha},
+    ]}
+    assert console_problems(json.loads(first), 1) == []
     assert Q.main(["--local", str(container), "--charter", sha, "--approved-at", "2026-10-21T10:00:00Z", "--out", str(out)]) == 1
     assert Q.main(["--local", str(container), "--charter", sha, "--approved-at", "2026-10-21T10:00:00Z", "--out", str(out), "--replace"]) == 0
     assert (out / "1.json").read_bytes() == first, "the export is deterministic"

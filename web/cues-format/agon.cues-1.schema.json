@@ -1,0 +1,413 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agon.cues-1.schema.json",
+  "title": "Agon live cues, format agon.cues/1",
+  "description": "Timed, machine-readable overlay cues for one synthetic match, produced by deterministic code (agon.cues) only inside a Match-Day Charter the club media officer approved in Microsoft Teams. The console reads schema, seed, charter_sha256 and, per cue, at_s, until_s, kind and text; every other key is extra. Every cue carries the approved charter bundle sha256, its template id and its source event ids. The Python validator agon.cues.validate enforces the same rules plus the ones a schema cannot state (cue order, window after clock, at_s on the drawn axis, every cue under the one approved hash). See README.txt in this folder.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "json_schema",
+    "seed",
+    "match_index",
+    "match_id",
+    "generator",
+    "fixture",
+    "languages",
+    "charter_sha256",
+    "charter",
+    "axis",
+    "kinematics",
+    "held",
+    "cues"
+  ],
+  "properties": {
+    "schema": {
+      "const": "agon.cues/1"
+    },
+    "json_schema": {
+      "const": "agon.cues-1.schema.json"
+    },
+    "seed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "match_index": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "match_id": {
+      "type": "string",
+      "pattern": "^s[0-9]{1,9}-m[0-9]{1,4}$"
+    },
+    "generator": {
+      "type": "string",
+      "minLength": 1
+    },
+    "fixture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "league",
+        "home",
+        "away"
+      ],
+      "properties": {
+        "league": {
+          "type": "string",
+          "minLength": 1
+        },
+        "home": {
+          "$ref": "#/$defs/club"
+        },
+        "away": {
+          "$ref": "#/$defs/club"
+        }
+      }
+    },
+    "languages": {
+      "const": [
+        "en",
+        "el",
+        "es",
+        "fr"
+      ]
+    },
+    "charter_sha256": {
+      "$ref": "#/$defs/sha256",
+      "description": "The approved charter bundle manifest sha256, the same as charter.bundle_sha256 and as every cue's charter_sha256."
+    },
+    "charter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bundle_sha256",
+        "charter_json_sha256",
+        "approved_at"
+      ],
+      "properties": {
+        "bundle_sha256": {
+          "$ref": "#/$defs/sha256",
+          "description": "The approved charter bundle manifest sha256: the hash on the Teams card and the folder of the published charter in the public feed."
+        },
+        "charter_json_sha256": {
+          "$ref": "#/$defs/sha256",
+          "description": "sha256 of the published charter.json bytes, listed in that manifest."
+        },
+        "approved_at": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
+        }
+      }
+    },
+    "axis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "half_offset_s"
+      ],
+      "properties": {
+        "half_offset_s": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Seconds the second half is shifted on the drawn axis: (last first-half minute + 1) x 60 - 2700, at least 0."
+        }
+      }
+    },
+    "kinematics": {
+      "description": "null when no tracking data exists: then no cue carries a speed or distance number.",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "format",
+            "source"
+          ],
+          "properties": {
+            "format": {
+              "const": "agon.kinematics-triggers/1"
+            },
+            "source": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
+    "held": {
+      "type": "array",
+      "description": "Events in a held claim class: never cued.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "event_id",
+          "held_class",
+          "clock"
+        ],
+        "properties": {
+          "event_id": {
+            "$ref": "#/$defs/event_id"
+          },
+          "held_class": {
+            "enum": [
+              "injury_medical",
+              "disciplinary_referee",
+              "quote_attribution"
+            ]
+          },
+          "clock": {
+            "$ref": "#/$defs/clock"
+          }
+        }
+      }
+    },
+    "cues": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/cue"
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "event_id": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{16}$"
+    },
+    "club": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "club_id",
+        "name"
+      ],
+      "properties": {
+        "club_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "clock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "period",
+        "ms",
+        "label"
+      ],
+      "properties": {
+        "period": {
+          "enum": [
+            1,
+            2
+          ]
+        },
+        "ms": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The match clock a broadcast shows, in milliseconds. The second half kicks off at 2700000 (45:00); first-half added time runs past 45:00 in period 1. Order by (period, ms)."
+        },
+        "label": {
+          "type": "string",
+          "pattern": "^[0-9]{1,3}(\\+[0-9]{1,2})?'$",
+          "description": "The display minute, for example 71' or 45+2'."
+        }
+      }
+    },
+    "text": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "en",
+        "el",
+        "es",
+        "fr"
+      ],
+      "properties": {
+        "en": {
+          "type": "string",
+          "minLength": 1
+        },
+        "el": {
+          "type": "string",
+          "minLength": 1
+        },
+        "es": {
+          "type": "string",
+          "minLength": 1
+        },
+        "fr": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "cue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "at_s",
+        "until_s",
+        "kind",
+        "text",
+        "cue_id",
+        "template_id",
+        "overlay",
+        "clock",
+        "window",
+        "data",
+        "source_event_ids",
+        "charter_sha256",
+        "team",
+        "club_id",
+        "player_id"
+      ],
+      "properties": {
+        "at_s": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "When the graphic appears on the drawn axis: clock seconds, plus axis.half_offset_s in period 2."
+        },
+        "until_s": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "When it leaves: at_s plus the template's display time in seconds."
+        },
+        "kind": {
+          "enum": [
+            "goal",
+            "red_card",
+            "substitution",
+            "big_chance",
+            "pass_quality",
+            "player_tag",
+            "sprint",
+            "top_speed",
+            "distance"
+          ],
+          "description": "The charter template id, the same as template_id."
+        },
+        "text": {
+          "$ref": "#/$defs/text"
+        },
+        "cue_id": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{16}$"
+        },
+        "template_id": {
+          "enum": [
+            "goal",
+            "red_card",
+            "substitution",
+            "big_chance",
+            "pass_quality",
+            "player_tag",
+            "sprint",
+            "top_speed",
+            "distance"
+          ]
+        },
+        "overlay": {
+          "enum": [
+            "lower_third",
+            "player_tag",
+            "stat_card"
+          ]
+        },
+        "clock": {
+          "$ref": "#/$defs/clock"
+        },
+        "window": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "in_ms",
+            "out_ms"
+          ],
+          "properties": {
+            "in_ms": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "out_ms": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          "description": "When the graphic is on screen, on the same clock and period as clock."
+        },
+        "data": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "home_goals": {
+              "type": "integer"
+            },
+            "away_goals": {
+              "type": "integer"
+            },
+            "xg_ppm": {
+              "type": "integer",
+              "description": "Interpret xG in parts per million."
+            },
+            "distance_m": {
+              "type": "integer"
+            },
+            "difficulty": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 100,
+              "description": "agon.interpret pass difficulty, 0 to 100."
+            },
+            "speed_kmh_x10": {
+              "type": "integer",
+              "description": "Tracked speed in tenths of km/h."
+            },
+            "distance_km": {
+              "type": "integer"
+            }
+          }
+        },
+        "source_event_ids": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/event_id"
+          }
+        },
+        "charter_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "team": {
+          "enum": [
+            "home",
+            "away"
+          ]
+        },
+        "club_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "player_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  }
+}

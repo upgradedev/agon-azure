@@ -4,8 +4,14 @@ During play, deterministic code (never a language model) fills the charter's tem
 event log and stamps every cue with the approved charter hash (spec 3.3, live cue engine; 7.2).
 With no approved charter, `generate` returns nothing at all, and the export refuses to write.
 
-Each cue is one graphic for a broadcast or web overlay system:
+Each cue is one graphic for a broadcast or web overlay system. The console's keys come first
+(console/src/lib/cues.ts on the console branch reads `schema`, `seed`, `charter_sha256` and, per
+cue, `at_s`, `until_s`, `kind` and `text`); every other key is extra and never renames one of them:
 
+* `at_s`, `until_s`: the on-screen window on the console's drawn time axis, in whole match
+  seconds with the second half shifted to start where the first half's last minute ends
+  (`axis.half_offset_s`, the same rule as the console's match analysis).
+* `kind`: the charter template id.
 * `clock`: when it happens on the match clock, `{period, ms, label}`. `ms` is the clock a
   broadcast shows, in milliseconds: the second half kicks off at 45:00 (2 700 000 ms) and
   first-half added time runs past 45:00 in period 1, so a stream is ordered by (period, ms).
@@ -21,12 +27,13 @@ What fires a cue (the charter's thresholds decide, not this module): a goal, a r
 substitution (an injury replacement is held, class injury_medical, and never cued), a big chance
 (interpret xG), a notable pass (distance and agon.interpret pass difficulty), and a name tag for
 the player at the centre of each. Speed and distance tags (sprint, top speed, every 2 km) need
-tracking data in the `agon.kinematics-triggers/1` form (web/cues/README.txt); without it, name
-tags carry no number and no speed or distance cue exists. The events-only carry proxy in
+tracking data in the `agon.kinematics-triggers/1` form (web/cues-format/README.txt); without it,
+name tags carry no number and no speed or distance cue exists. The events-only carry proxy in
 agon.interpret.kinematics is never shown as a running speed.
 
-Export (the console's file, web/cues/<seed>.json, format `agon.cues/1`, schema
-web/cues/agon.cues-1.schema.json):
+Export (the console's file, web/cues/<seed>.json with schema `agon.cues/1`, plus the console's
+list web/cues/manifest.json, `agon.cues-manifest/1`, in the bytes the deploy's stamp step writes;
+the folder holds nothing else. The JSON Schema and the README are in web/cues-format/):
 
     PYTHONPATH=src python -m agon.cues \\
         --feed-base-url https://<storage account>.blob.core.windows.net/feed/ \\
@@ -59,6 +66,10 @@ from agon.interpret.model import load_model
 
 FORMAT = "agon.cues/1"
 SCHEMA_FILE = "agon.cues-1.schema.json"
+MANIFEST_NAME = "manifest.json"
+MANIFEST_FORMAT = "agon.cues-manifest/1"
+HALF_SECONDS = 45 * 60
+OVERLAY_RANK: dict[str, int] = {"player_tag": 0, "stat_card": 1, "lower_third": 2}
 KINEMATICS_FORMAT = "agon.kinematics-triggers/1"
 KINEMATICS_TYPES: dict[str, str] = {"sprint": "sprint", "top_speed": "top_speed", "distance": "distance"}
 LANGUAGES = charter_mod.LANGUAGES
@@ -70,13 +81,16 @@ HELD_CLASS_INJURY = "injury_medical"
 DATA_KEYS = frozenset({
     "home_goals", "away_goals", "xg_ppm", "distance_m", "difficulty", "speed_kmh_x10", "distance_km",
 })
+# The console's required keys (console/src/lib/cues.ts on the console branch) are schema, seed,
+# charter_sha256 and cues; each cue needs at_s, until_s, kind and text. Everything else is extra.
 DOC_KEYS = frozenset({
-    "format", "schema", "seed", "match_index", "match_id", "generator", "fixture", "languages",
-    "charter", "kinematics", "held", "cues",
+    "schema", "json_schema", "seed", "match_index", "match_id", "generator", "fixture", "languages",
+    "charter_sha256", "charter", "axis", "kinematics", "held", "cues",
 })
 CHARTER_REF_KEYS = frozenset({"bundle_sha256", "charter_json_sha256", "approved_at"})
 CUE_KEYS = frozenset({
-    "cue_id", "template_id", "overlay", "clock", "window", "text", "data", "source_event_ids",
+    "at_s", "until_s", "kind", "text",
+    "cue_id", "template_id", "overlay", "clock", "window", "data", "source_event_ids",
     "charter_sha256", "team", "club_id", "player_id",
 })
 HELD_KEYS = frozenset({"event_id", "held_class", "clock"})
@@ -152,7 +166,7 @@ def _kinematics_triggers(kinematics: Mapping[str, Any] | None) -> list[dict[str,
 
 
 def kinematics_problems(kinematics: Any) -> list[str]:
-    """Shape of an agon.kinematics-triggers/1 document (web/cues/README.txt)."""
+    """Shape of an agon.kinematics-triggers/1 document (web/cues-format/README.txt)."""
     if not isinstance(kinematics, Mapping) or set(kinematics) != {"format", "source", "triggers"}:
         return ["a kinematics document holds exactly format, source and triggers"]
     problems = []
@@ -209,6 +223,7 @@ def generate(
     log = sorted(events, key=lambda e: _get(e, "seq"))
     if any(_get(e, "match_id") != charter["match_id"] for e in log):
         raise CueError(f"the approved charter governs {charter['match_id']}, and these events belong to another match")
+    axis = axis_of(log)
     model = model or load_model()
     goals = {home_id: 0, away_id: 0}
     cues: list[dict[str, Any]] = []
@@ -225,7 +240,11 @@ def generate(
             filled = {k: (v(lang) if callable(v) else str(v)) for k, v in values.items()}
             text[lang] = charter_mod.render(template["text"][lang], filled)
         identity = canonical_utf8({"template_id": template_id, "source_event_ids": event_ids, "clock": clock, "player_id": player_id})
+        at_s = at_seconds(axis, clock["period"], clock["ms"])
         cues.append({
+            "at_s": at_s,
+            "until_s": at_s + template["duration_ms"] // 1000,
+            "kind": template_id,
             "cue_id": sha256_hex(identity)[:16],
             "template_id": template_id,
             "overlay": template["overlay"],
@@ -321,9 +340,25 @@ def generate(
         add(kind, [], clock, club_id, pid, {**base, "speed_kmh": lambda lang, v=trigger["kmh_x10"]: decimal(v, 1, lang)},
             {"speed_kmh_x10": trigger["kmh_x10"]})
 
+    # Ordered by the clock; at the same instant the lower third comes last, because a renderer that
+    # shows one cue at a time (the console's cueAt) shows the last cue whose window holds "now".
     order = {tid: i for i, tid in enumerate(TEMPLATE_IDS)}
-    cues.sort(key=lambda c: (c["clock"]["period"], c["clock"]["ms"], order[c["template_id"]], c["cue_id"]))
+    cues.sort(key=lambda c: (c["clock"]["period"], c["clock"]["ms"], OVERLAY_RANK[c["overlay"]], order[c["template_id"]], c["cue_id"]))
     return cues, held
+
+
+def axis_of(events: Iterable[Any]) -> dict[str, int]:
+    """The console's drawn time axis (agon.webmatch on the console branch): match seconds, with the
+    second half shifted to start where the first half's last minute ends."""
+    log = list(events)
+    first = [_get(e, "minute") for e in log if _get(e, "period") == 1]
+    h1_end = max((max(first) + 1) * 60 if first else HALF_SECONDS, HALF_SECONDS)
+    return {"half_offset_s": h1_end - HALF_SECONDS}
+
+
+def at_seconds(axis: Mapping[str, int], period: int, ms: int) -> int:
+    """A match-clock instant on the drawn axis, in whole seconds."""
+    return ms // 1000 + (axis["half_offset_s"] if period == 2 else 0)
 
 
 # ----------------------------------------------------------------- the file
@@ -339,11 +374,12 @@ def document(
     cues: list[dict[str, Any]],
     held: list[dict[str, Any]],
     kinematics_source: str | None,
+    axis: Mapping[str, int],
 ) -> dict[str, Any]:
     charter = approved.charter
     return {
-        "format": FORMAT,
-        "schema": SCHEMA_FILE,
+        "schema": FORMAT,
+        "json_schema": SCHEMA_FILE,
         "seed": seed,
         "match_index": match_index,
         "match_id": match_id,
@@ -354,11 +390,13 @@ def document(
             "away": dict(charter["fixture"]["away"]),
         },
         "languages": list(LANGUAGES),
+        "charter_sha256": approved.bundle_sha256,
         "charter": {
             "bundle_sha256": approved.bundle_sha256,
             "charter_json_sha256": sha256_hex(charter_mod.charter_bytes(charter)),
             "approved_at": approved.approved_at,
         },
+        "axis": {"half_offset_s": int(axis["half_offset_s"])},
         "kinematics": None if kinematics_source is None else {"format": KINEMATICS_FORMAT, "source": kinematics_source},
         "held": held,
         "cues": cues,
@@ -384,15 +422,15 @@ def _clock_problems(clock: Any, where: str) -> list[str]:
 
 
 def validate(doc: Any) -> list[str]:
-    """Every way `doc` breaks agon.cues/1. Empty means valid. Mirrors web/cues/agon.cues-1.schema.json."""
+    """Every way `doc` breaks agon.cues/1. Empty means valid. Mirrors web/cues-format/agon.cues-1.schema.json."""
     if not isinstance(doc, Mapping):
         return ["the cues file is not a JSON object"]
     keys = set(doc)
     if keys != DOC_KEYS:
         return [f"keys differ: missing {sorted(DOC_KEYS - keys)}, unexpected {sorted(keys - DOC_KEYS)}"]
     problems: list[str] = []
-    if doc["format"] != FORMAT or doc["schema"] != SCHEMA_FILE:
-        problems.append(f"format must be {FORMAT} and schema {SCHEMA_FILE}")
+    if doc["schema"] != FORMAT or doc["json_schema"] != SCHEMA_FILE:
+        problems.append(f"schema must be {FORMAT} and json_schema {SCHEMA_FILE}")
     for key in ("seed", "match_index"):
         if not isinstance(doc[key], int) or isinstance(doc[key], bool) or doc[key] < 0:
             problems.append(f"{key} must be a non-negative integer")
@@ -420,6 +458,13 @@ def validate(doc: Any) -> list[str]:
             problems.append("charter hashes must be 64 lowercase hex characters")
         if not isinstance(ref["approved_at"], str) or not _UTC.match(ref["approved_at"]):
             problems.append("charter.approved_at must be YYYY-MM-DDTHH:MM:SSZ")
+    if doc["charter_sha256"] != approved_hash or not is_sha256_hex(doc["charter_sha256"]):
+        problems.append("charter_sha256 must be the approved charter bundle hash, charter.bundle_sha256")
+    axis = doc["axis"]
+    offset = axis.get("half_offset_s") if isinstance(axis, Mapping) and set(axis) == {"half_offset_s"} else None
+    if not isinstance(offset, int) or isinstance(offset, bool) or offset < 0:
+        problems.append("axis holds exactly half_offset_s, a non-negative integer")
+        offset = None
     kin = doc["kinematics"]
     if kin is not None and (not isinstance(kin, Mapping) or set(kin) != {"format", "source"} or kin.get("format") != KINEMATICS_FORMAT):
         problems.append(f"kinematics is null or {{format: {KINEMATICS_FORMAT}, source}}")
@@ -449,6 +494,8 @@ def validate(doc: Any) -> list[str]:
         seen.add(str(c["cue_id"]))
         if c["template_id"] not in TEMPLATE_IDS:
             problems.append(f"{where}: unknown template_id {c['template_id']!r}")
+        if c["kind"] != c["template_id"]:
+            problems.append(f"{where}: kind is the template id")
         elif c["overlay"] != charter_mod.TEMPLATE_SPECS[c["template_id"]]["overlay"]:
             problems.append(f"{where}: overlay {c['overlay']!r} is not the {c['template_id']} overlay")
         if c["template_id"] in ("sprint", "top_speed", "distance"):
@@ -462,6 +509,13 @@ def validate(doc: Any) -> list[str]:
             problems.append(f"{where}: window holds integer in_ms and out_ms")
         elif not clock_problems and not (window["in_ms"] >= c["clock"]["ms"] and window["out_ms"] > window["in_ms"]):
             problems.append(f"{where}: the window must open at or after the clock and close after it opens")
+        elif offset is not None and (
+            c["at_s"] != at_seconds({"half_offset_s": offset}, c["clock"]["period"], window["in_ms"])
+            or c["until_s"] != c["at_s"] + (window["out_ms"] - window["in_ms"]) // 1000
+        ):
+            problems.append(f"{where}: at_s and until_s are the window on the drawn axis (axis.half_offset_s)")
+        if not all(isinstance(c[k], int) and not isinstance(c[k], bool) for k in ("at_s", "until_s")) or not c["until_s"] > c["at_s"] >= 0:
+            problems.append(f"{where}: at_s and until_s are integers with until_s after at_s")
         text = c["text"]
         if not isinstance(text, Mapping) or set(text) != set(LANGUAGES) or not all(isinstance(t, str) and t.strip() for t in text.values()):
             problems.append(f"{where}: text must be non-empty in exactly {list(LANGUAGES)}")
@@ -546,6 +600,7 @@ def export(feed: Any, bundle_sha256: str, approved_at: str, kinematics: Mapping[
         cues=cues,
         held=held,
         kinematics_source=None if kinematics is None else str(kinematics["source"]),
+        axis=axis_of(record.events),
     )
     problems = validate(doc)
     if problems:
@@ -553,15 +608,37 @@ def export(feed: Any, bundle_sha256: str, approved_at: str, kinematics: Mapping[
     return doc
 
 
-def check_dir(folder: Path) -> list[str]:
-    """Validate every <seed>.json in a cues folder; returns the file names checked."""
-    checked = []
-    for path in sorted(folder.glob("*.json")):
-        if path.name == SCHEMA_FILE:
-            continue
+def manifest_bytes(folder: Path) -> bytes:
+    """The console's cue list (agon.cues-manifest/1): one entry per <seed>.json, in the exact bytes
+    the deploy's stamp step writes (sorted keys, no whitespace, ASCII, final LF), so it can rewrite
+    the list without a diff."""
+    files = []
+    for path in sorted(folder.glob("*.json"), key=lambda q: q.name):
         m = _FILE.match(path.name)
         if not m:
-            raise CueError(f"{path.name}: a cues file is named <seed>.json")
+            continue
+        data = path.read_bytes()
+        body = json.loads(data.decode("utf-8"))
+        files.append({"name": path.name, "seed": int(m.group(1)), "sha256": sha256_hex(data), "charter_sha256": body.get("charter_sha256")})
+    listing = {"schema": MANIFEST_FORMAT, "files": files}
+    return json.dumps(listing, sort_keys=True, separators=(",", ":")).encode("ascii") + b"\n"
+
+
+def check_dir(folder: Path) -> list[str]:
+    """Validate every <seed>.json in a cues folder and its manifest.json; returns the cue files checked.
+
+    The folder holds only <seed>.json files and the list, because the deploy's stamp step refuses
+    any other file there. A folder that does not exist holds no cue file.
+    """
+    if not folder.is_dir():
+        return []
+    checked = []
+    for path in sorted(folder.iterdir()):
+        if path.name == MANIFEST_NAME:
+            continue
+        m = _FILE.match(path.name)
+        if not m or not path.is_file():
+            raise CueError(f"{path.name}: the cues folder holds only <seed>.json files and {MANIFEST_NAME}")
         raw = path.read_bytes()
         if b"\r" in raw:
             raise CueError(f"{path.name}: CR bytes; the file is LF only")
@@ -574,6 +651,9 @@ def check_dir(folder: Path) -> list[str]:
         if problems:
             raise CueError(f"{path.name}: " + "; ".join(problems[:10]))
         checked.append(path.name)
+    listing = folder / MANIFEST_NAME
+    if checked and (not listing.is_file() or listing.read_bytes() != manifest_bytes(folder)):
+        raise CueError(f"{MANIFEST_NAME} does not list exactly the cue files with their sha256; run the export again")
     return checked
 
 
@@ -612,6 +692,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise CueError(f"{target.as_posix()} exists; pass --replace to write cues under a newer approved charter")
         args.out.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
+        (args.out / MANIFEST_NAME).write_bytes(manifest_bytes(args.out))
         check_dir(args.out)
         counts: dict[str, int] = {}
         for c in doc["cues"]:
