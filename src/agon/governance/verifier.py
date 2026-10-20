@@ -22,6 +22,15 @@ A channel adapter translates its payload into an `ApprovalDecision` and calls `v
    approval record, keyed by approval id and naming the bundle hash, stores the approved subset;
    the Publisher and every destination adapter publish to nothing else.
 
+The approval record is a projection of the consumed nonce (`_project_approval`): built from the
+stored nonce document alone, never from `now` or a payload, and created create-only. The nonce
+write and the record are two writes, so a process that dies between them, or a create that fails
+with a transient error, leaves a consumed nonce with no record. The queue then redelivers the same
+decision; it meets the consumed nonce, and when the stored decision names the same channel and the
+same bundle, the record is projected before the usual "already_consumed" refusal, so the intake
+finds it and re-sends the pointer. A decision from another channel or for another bundle writes
+nothing and stays refused.
+
 Every refusal before step 10 leaves the nonce unconsumed, so a malformed or forged decision cannot
 burn a nonce. A valid "changes" decision consumes the nonce too, so Teams "changes" followed by an
 Outlook "approve" on the same card is refused.
@@ -40,7 +49,7 @@ from datetime import datetime
 from typing import Iterable
 
 from agon.governance import seal as seal_mod
-from agon.governance.store import Conflict, PreconditionFailed, Store
+from agon.governance.store import Conflict, Document, PreconditionFailed, Store
 
 BUNDLES = "bundles"
 NONCES = "nonces"
@@ -217,6 +226,43 @@ def _shape_problem(d: ApprovalDecision, now: datetime) -> str | None:
     return None
 
 
+PROJECTED = "projected"  # the approval record was created by this call
+ALREADY_PROJECTED = "already_projected"  # the record existed: create-only met a Conflict
+NOT_PROJECTABLE = "not_projectable"  # the nonce document holds no consumed decision for this nonce
+
+
+def _project_approval(store: Store, nonce: str, nonce_doc: Document) -> str:
+    """Create `approvals/<approval_id>` from the consumed nonce document alone.
+
+    The body is the stored `consumed` block (the decision as verified, with its own received_at
+    and verified_at) plus the document's `bundle_sha256`, `purpose` and `target` and the sha256 of
+    the nonce. It never reads `now` or a redelivered payload, so a redelivery can complete the
+    record but never change it. `nonce` is the key the document was read under: the body never
+    holds the nonce itself, only `consumed.approval_id`, which must be derived from that key.
+
+    Create-only: a Conflict means the record is already there (PROJECTED versus ALREADY_PROJECTED
+    tells the caller which). A document that is not consumed, or whose consumed block names
+    another approval id, writes nothing (NOT_PROJECTABLE).
+    """
+    record = nonce_doc.body
+    consumed = record.get("consumed")
+    approval_id = approval_id_for(nonce)
+    if record.get("status") != "consumed" or not isinstance(consumed, dict) or consumed.get("approval_id") != approval_id:
+        return NOT_PROJECTABLE
+    body = {
+        **consumed,
+        "bundle_sha256": record.get("bundle_sha256"),
+        "nonce_sha256": hashlib.sha256(nonce.encode("utf-8")).hexdigest(),
+        "purpose": record.get("purpose"),
+        "target": record.get("target"),
+    }
+    try:
+        store.create(APPROVALS, approval_id, body)
+    except Conflict:
+        return ALREADY_PROJECTED
+    return PROJECTED
+
+
 def verify(decision: ApprovalDecision, store: Store, now: datetime) -> VerifyResult:
     """Turn one channel decision into at most one approval. See the module docstring for order."""
     problem = _shape_problem(decision, now)
@@ -229,6 +275,20 @@ def verify(decision: ApprovalDecision, store: Store, now: datetime) -> VerifyRes
     record = nonce_doc.body
     if record.get("status") != "pending":
         by = record.get("consumed", {})
+        if (
+            isinstance(by, dict)
+            and by.get("channel") == decision.channel
+            and record.get("bundle_sha256") == decision.bundle_sha256
+            and store.read(APPROVALS, approval_id_for(decision.nonce)) is None
+        ):
+            # The same decision redelivered (same channel, same bundle) and no record yet: the
+            # first pass stopped between the nonce write and the approval record, so complete
+            # the record from the stored nonce. The refusal below stands either way; the intake's
+            # _replay then finds the record and re-sends its pointer. Another channel or bundle
+            # writes nothing. The read comes first because a caller that holds only read on
+            # approvals (the fleet worker re-verifies a decision the intake already recorded,
+            # see agon.fleet.steps.decide) must never attempt a write.
+            _project_approval(store, decision.nonce, nonce_doc)
         return _refuse("already_consumed", f"already decided on {by.get('channel')} at {by.get('verified_at')}", decision)
     if record.get("bundle_sha256") != decision.bundle_sha256:
         return _refuse("hash_mismatch", "the decision names a different bundle than the request", decision)
@@ -291,27 +351,22 @@ def verify(decision: ApprovalDecision, store: Store, now: datetime) -> VerifyRes
         "destinations_as_offered": decision.destinations_as_offered,
     }
     try:
-        store.replace(NONCES, decision.nonce, {**record, "status": "consumed", "consumed": consumed}, if_match=nonce_doc.etag)
+        stored = store.replace(NONCES, decision.nonce, {**record, "status": "consumed", "consumed": consumed}, if_match=nonce_doc.etag)
     except PreconditionFailed:
         latest = store.read(NONCES, decision.nonce)
         by = latest.body.get("consumed", {}) if latest else {}
         return _refuse("already_consumed", f"already decided on {by.get('channel')} at {by.get('verified_at')}", decision)
 
-    try:
-        store.create(
-            APPROVALS,
-            approval_id,
-            {
-                **consumed,
-                "bundle_sha256": decision.bundle_sha256,
-                "nonce_sha256": hashlib.sha256(decision.nonce.encode("utf-8")).hexdigest(),
-                "purpose": record.get("purpose"),
-                "target": target,
-            },
-        )
-    except Conflict:
-        # Unreachable while the store honours etags; a second line of defence if it does not.
+    projected = _project_approval(store, decision.nonce, stored)
+    if projected == ALREADY_PROJECTED:
+        # A second line of defence: reached when the store ignores etags (the M15 negative
+        # control), or when a redelivery of this same decision completed the record between our
+        # two writes. Either way the record exists, and the intake's _replay re-sends its pointer.
         return _refuse("already_consumed", "an approval is already recorded for this request", decision)
+    if projected != PROJECTED:
+        # The store answered the replace with a document that does not hold this decision. Raise,
+        # so the intake leaves the message; the redelivery projects from the stored nonce.
+        raise RuntimeError(f"nonce write for approval {approval_id} returned a document without its consumed decision")
     return VerifyResult(
         ok=True,
         code="approved" if decision.decision == "approve" else "changes_requested",
