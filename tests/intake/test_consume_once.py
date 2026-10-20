@@ -401,6 +401,14 @@ def test_a_planted_block_must_match_as_json_not_just_as_python() -> None:
     _assert_refused_with_no_trace(store, env, govkit.teams_payload(env))
 
 
+def test_a_planted_nonce_missing_its_expiry_is_refused_not_retried() -> None:
+    store, env = _planted_env()
+    doc = store.read(NONCES, PLANTED)
+    body = {k: v for k, v in doc.body.items() if k != "expires_at"}
+    InMemoryStore.replace(store, NONCES, PLANTED, body, if_match=doc.etag)
+    _assert_refused_with_no_trace(store, env, govkit.teams_payload(env))
+
+
 def test_a_planted_block_without_parseable_times_is_not_projected() -> None:
     store, env = _planted_env(verified_at="yesterday")
     _assert_refused_with_no_trace(store, env, govkit.teams_payload(env))

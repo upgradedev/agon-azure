@@ -372,7 +372,10 @@ def _is_this_decision(decision: ApprovalDecision, store: Store, record: dict, bl
     verified_at = _aware(block.get("verified_at"))
     if verified_at is None or _aware(block.get("received_at")) is None:
         return False
-    checked = _check_decision(decision, store, record, verified_at)
+    try:
+        checked = _check_decision(decision, store, record, verified_at)
+    except (KeyError, TypeError, ValueError):
+        return False  # a malformed planted document is refused, not retried into the poison queue
     if isinstance(checked, VerifyResult):
         return False
     stored = {name: block[name] for name in DECIDED_FIELDS}
