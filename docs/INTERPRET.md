@@ -139,6 +139,56 @@ realised and expected swing.
 - distance milestones cannot be derived from events, because most running happens off the ball.
   The output returns `null` with that reason rather than a number.
 
+## The metrics pack (`agon.interpret.advanced`)
+
+`pack(view)` adds the advanced metrics; it is a separate entry point, so `interpret_match` and its
+pinned hash (which the fleet seals) do not change. Each metric has a label, unit, one plain
+sentence and its exact rule in `advanced.METRICS`, and the web data carries that table beside the
+numbers.
+
+- xA: the xG of the shot a pass set up. The key pass is the assist rule of
+  `agon.governance.recompute` applied to every shot (`key_pass_index`); a test checks that for
+  every seeded goal the key passer is the credited assister.
+- Progressive passes and carries (completed, from x of 42 m or more, ending at least 9.1 m closer
+  to the centre of the goal attacked), passes, crosses and carries into the penalty area, box
+  entries and deep completions (completed passes ending within 20 m of the goal centre, crosses
+  excluded). The predicates live in `agon.governance.recompute`, so the page and the Fact Gate count
+  with the same code. Crosses are a geometric proxy: the events carry no cross field.
+- Field tilt: a club's share of the passes both clubs attempted from their attacking final third.
+- PPDA: `metrics.ppda`, reused unchanged.
+- Defensive action height: the mean x of a club's tackles, fouls and interceptions in its own
+  frame. A proxy for how high a side defends, not a measured line (no 22-player tracking exists).
+- 5-second counter-press recovery rate: open-play losses regained by an interception or a won
+  tackle within 5 seconds of match clock, in the same period.
+- Set-piece xG split by how the possession started (corner, free kick, penalty; throw-ins, goal
+  kicks and kick-offs count as open play), xT added per player, and pass quality per pass, player
+  and club: distance, accuracy (completed over attempted) and difficulty.
+
+Citable by a writer as Fact Gate `stat` claims (no new claim type, so the writer's response schema
+is unchanged): `progressive_passes`, `progressive_carries`, `passes_into_box`, `crosses_into_box`,
+`carries_into_box`, `box_entries`, `deep_completions`, `key_passes`, and the club-only percents
+`field_tilt_pct` and `counter_press_recovery_pct`. xG, xA, xT and PPDA stay uncitable: the gate
+reads whole numbers only. The MCP tool `stats.recompute` answers every one of them through the same
+recompute code.
+
+Web data: `ci/stamp_web.py` writes `intel/` with `agon.webintel` (format in
+`src/agon/webintel_README.txt`). Self-measured on 2026-10-20, branch `b/intelligence`, local
+Windows run with Python 3.11, generator synth-v0.2, seed 1 (the published match, club C1 at home
+to C6), from `python -m agon.webdata --seeds 1 --out build/data` then
+`python -m agon.webintel --data build/data --seeds 1 --out build/intel` (values in
+`build/intel/metrics-1.json`, `teams`):
+
+| Metric | C1 | C6 |
+|---|---|---|
+| progressive passes | 60 | 37 |
+| box entries | 23 | 19 |
+| field tilt (per mille) | 561 | 439 |
+| counter-press recovery rate (per mille) | 320 | 163 |
+| defensive action height (dm) | 424 | 411 |
+
+One synthetic match; these numbers describe this generator only, and say nothing about real
+football.
+
 ## In the fleet
 
 The W-fulltime `interpret` executor calls this package through `AgonInterpret`

@@ -9,7 +9,8 @@
       "/runs/*",
       "/season/*",
       "/match/*",
-      "/cues/*"
+      "/cues/*",
+      "/intel/*"
     ]
   },
   "globalHeaders": {

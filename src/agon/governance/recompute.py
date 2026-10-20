@@ -22,9 +22,10 @@ page shows must come from one definition. They read plain match records, never t
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isqrt
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
-from agon.synth.schema import Event
+from agon.synth.schema import PITCH_X_DM, PITCH_Y_DM, Event
 
 FIRST_HALF_REGULAR = 45
 SECOND_HALF_REGULAR = 90
@@ -94,6 +95,190 @@ class MatchFacts:
         return {e.event_id: e for e in self.events}
 
 
+# ----------------------------------------------------------------- advanced counts (metrics pack)
+#
+# The single definition of the countable advanced metrics: agon.interpret.advanced imports these
+# predicates for the web data, and the `stat` claims below count with the same ones, so a number on a
+# page and the number the Fact Gate checks cannot disagree. Every predicate reads one event (an Event
+# or a plain dict) in the ACTING team's frame (agon.synth.schema.COORDINATE_FRAME): the team named on
+# the event attacks towards x_dm = 1050, so the goal it attacks is centred on (1050, 340).
+#
+# * Progressive: a completed pass or carry that starts at x >= 42 m (outside the team's own 40%) and
+#   ends at least 9.1 m closer to the centre of the goal it attacks (straight-line distances).
+# * Penalty area: x >= 88.5 m (16.5 m deep) and within 20.2 m of the centre line (the same box as
+#   agon.interpret.frame; a test pins the equality).
+# * Pass into the box: a completed pass that ends inside the penalty area and starts outside it.
+# * Cross into the box: a GEOMETRIC PROXY, because the event schema has no cross field: a pass into
+#   the box that starts in the final third (x >= 70 m) and wider than the box (more than 20.2 m from
+#   the centre line). A corner played into the box counts.
+# * Carry into the box: a carry that ends inside the penalty area and starts outside it.
+# * Box entry: a pass into the box or a carry into the box.
+# * Deep completion: a completed pass that ends within 20 m of the centre of the goal, crosses into
+#   the box excluded.
+# * Key pass: the pass that set up a shot, by the assist rule (see `key_pass_index`) applied to every
+#   shot, not only goals. Penalties have none.
+# * Field tilt: a club's share of the passes both clubs attempted from their attacking final third
+#   (start x >= 70 m), as a whole percent.
+# * Counter-press recovery: after a club loses the ball in open play (the opponent's possession
+#   change by interception or tackle), the club regains it in open play (its own possession change
+#   by interception or tackle) within 5 seconds of the match clock, in the same period. The rate is
+#   recoveries over open-play losses, as a whole percent.
+
+GOAL_CENTRE_X_DM = PITCH_X_DM
+GOAL_CENTRE_Y_DM = PITCH_Y_DM // 2
+BOX_MIN_X_DM = 885
+BOX_HALF_WIDTH_DM = 202
+FINAL_THIRD_MIN_X_DM = 700
+PROGRESSIVE_MIN_DM = 91
+PROGRESSIVE_MIN_START_X_DM = 420
+DEEP_COMPLETION_RADIUS_DM = 200
+COUNTER_PRESS_SECONDS = 5
+OPEN_PLAY_REGAINS: tuple[str, ...] = ("interception", "tackle")
+
+
+def goal_distance_dm(x_dm: int, y_dm: int) -> int:
+    """Straight-line distance from a point to the centre of the goal being attacked, whole dm, floor."""
+    return isqrt((GOAL_CENTRE_X_DM - x_dm) ** 2 + (GOAL_CENTRE_Y_DM - y_dm) ** 2)
+
+
+def in_box(x_dm: int, y_dm: int) -> bool:
+    """True inside the penalty area of the goal being attacked."""
+    return x_dm >= BOX_MIN_X_DM and abs(y_dm - GOAL_CENTRE_Y_DM) <= BOX_HALF_WIDTH_DM
+
+
+def _completed_move(e: Event | Mapping[str, Any], etype: str) -> bool:
+    return _get(e, "type") == etype and _get(e, "outcome") == "complete" and _get(e, "end_x_dm") is not None
+
+
+def is_progressive(e: Event | Mapping[str, Any]) -> bool:
+    """A completed pass or carry from x >= 42 m that ends at least 9.1 m closer to the goal centre."""
+    if not (_completed_move(e, "pass") or _completed_move(e, "carry")):
+        return False
+    x, y = _get(e, "x_dm"), _get(e, "y_dm")
+    if x < PROGRESSIVE_MIN_START_X_DM:
+        return False
+    return goal_distance_dm(x, y) - goal_distance_dm(_get(e, "end_x_dm"), _get(e, "end_y_dm")) >= PROGRESSIVE_MIN_DM
+
+
+def is_pass_into_box(e: Event | Mapping[str, Any]) -> bool:
+    return (
+        _completed_move(e, "pass")
+        and in_box(_get(e, "end_x_dm"), _get(e, "end_y_dm"))
+        and not in_box(_get(e, "x_dm"), _get(e, "y_dm"))
+    )
+
+
+def is_cross_into_box(e: Event | Mapping[str, Any]) -> bool:
+    """Geometric proxy (no cross field exists): a pass into the box from the final third, wider than the box."""
+    return (
+        is_pass_into_box(e)
+        and _get(e, "x_dm") >= FINAL_THIRD_MIN_X_DM
+        and abs(_get(e, "y_dm") - GOAL_CENTRE_Y_DM) > BOX_HALF_WIDTH_DM
+    )
+
+
+def is_carry_into_box(e: Event | Mapping[str, Any]) -> bool:
+    return (
+        _completed_move(e, "carry")
+        and in_box(_get(e, "end_x_dm"), _get(e, "end_y_dm"))
+        and not in_box(_get(e, "x_dm"), _get(e, "y_dm"))
+    )
+
+
+def is_deep_completion(e: Event | Mapping[str, Any]) -> bool:
+    """A completed pass ending within 20 m of the goal centre; crosses into the box are excluded."""
+    return (
+        _completed_move(e, "pass")
+        and goal_distance_dm(_get(e, "end_x_dm"), _get(e, "end_y_dm")) <= DEEP_COMPLETION_RADIUS_DM
+        and not is_cross_into_box(e)
+    )
+
+
+def key_pass_index(events: Sequence[Event | Mapping[str, Any]], index: int) -> int | None:
+    """Index of the pass that set up the shot at `events[index]`, or None. `events` in sequence order.
+
+    The assist rule, for any shot: walking back from the shot inside its possession chain, and
+    skipping the opponent's events and the shooter's own carries, the first event must be a completed
+    pass by a teammate whose `related_player` (receiver) is the shooter. Anything else, and every
+    penalty, means no key pass.
+    """
+    shot = events[index]
+    if _get(shot, "type") != "shot":
+        raise RecomputeError(f"event {_get(shot, 'event_id')} is not a shot")
+    if _get(shot, "qualifier") == "penalty":
+        return None
+    chain, team, shooter = _get(shot, "possession_chain_id"), _get(shot, "team"), _get(shot, "player")
+    for j in range(index - 1, -1, -1):
+        e = events[j]
+        if _get(e, "possession_chain_id") != chain:
+            return None
+        if _get(e, "team") != team:
+            continue
+        if _get(e, "type") == "carry" and _get(e, "player") == shooter:
+            continue
+        if (
+            _get(e, "type") == "pass"
+            and _get(e, "outcome") == "complete"
+            and _get(e, "related_player") == shooter
+            and _get(e, "player") != shooter
+        ):
+            return j
+        return None
+    return None
+
+
+def _in_seq_order(events: Iterable[Event | Mapping[str, Any]]) -> list[Event | Mapping[str, Any]]:
+    return sorted(events, key=lambda e: _get(e, "seq"))
+
+
+def key_pass_events(events: Iterable[Event | Mapping[str, Any]]) -> list[Event | Mapping[str, Any]]:
+    """Every key pass in the log, in sequence order (one shot ends its chain, so no pass is counted twice)."""
+    evs = _in_seq_order(events)
+    found = []
+    for i, e in enumerate(evs):
+        if _get(e, "type") == "shot":
+            j = key_pass_index(evs, i)
+            if j is not None:
+                found.append(evs[j])
+    return found
+
+
+def final_third_passes(events: Iterable[Event | Mapping[str, Any]], team: str) -> int:
+    """Passes attempted by `team` from its attacking final third (start x >= 70 m), any outcome."""
+    return sum(
+        1 for e in events
+        if _get(e, "type") == "pass" and _get(e, "team") == team and _get(e, "x_dm") >= FINAL_THIRD_MIN_X_DM
+    )
+
+
+def _clock_of(e: Event | Mapping[str, Any]) -> int:
+    return _get(e, "minute") * 60 + _get(e, "second")
+
+
+def counter_press(events: Iterable[Event | Mapping[str, Any]], team: str) -> list[tuple[Any, Any]]:
+    """(loss, regain or None) for every open-play loss of `team`, in sequence order.
+
+    A loss is a possession change to the other club by interception or tackle. It is a 5-second
+    recovery when the next possession change in the log is `team`'s own, by interception or tackle, in
+    the same period, at most `COUNTER_PRESS_SECONDS` of match clock later.
+    """
+    changes = [e for e in _in_seq_order(events) if _get(e, "type") == "possession_change"]
+    out: list[tuple[Any, Any]] = []
+    for k, e in enumerate(changes):
+        if _get(e, "team") == team or _get(e, "outcome") not in OPEN_PLAY_REGAINS:
+            continue
+        nxt = changes[k + 1] if k + 1 < len(changes) else None
+        regained = (
+            nxt is not None
+            and _get(nxt, "team") == team
+            and _get(nxt, "outcome") in OPEN_PLAY_REGAINS
+            and _get(nxt, "period") == _get(e, "period")
+            and _clock_of(nxt) - _clock_of(e) <= COUNTER_PRESS_SECONDS
+        )
+        out.append((e, nxt if regained else None))
+    return out
+
+
 # Event predicates by kind. second_yellow is a booking that ends in a sending-off, so it counts as
 # both a yellow card and a red card.
 EVENT_KINDS: dict[str, Callable[[Event], bool]] = {
@@ -110,6 +295,15 @@ EVENT_KINDS: dict[str, Callable[[Event], bool]] = {
     "tackle_won": lambda e: e.type == "tackle" and e.outcome == "won",
     "pass": lambda e: e.type == "pass",
     "pass_completed": lambda e: e.type == "pass" and e.outcome == "complete",
+    # The metrics pack (definitions in the "advanced counts" section above). These also accept a
+    # plain event dict, so agon.interpret.advanced counts with the very same predicates.
+    "progressive_pass": lambda e: _get(e, "type") == "pass" and is_progressive(e),
+    "progressive_carry": lambda e: _get(e, "type") == "carry" and is_progressive(e),
+    "pass_into_box": is_pass_into_box,
+    "cross_into_box": is_cross_into_box,
+    "carry_into_box": is_carry_into_box,
+    "box_entry": lambda e: is_pass_into_box(e) or is_carry_into_box(e),
+    "deep_completion": is_deep_completion,
 }
 
 # Countable statistics: name -> event kind counted for the subject's side.
@@ -126,13 +320,24 @@ COUNT_STATS: dict[str, str] = {
     "tackles_won": "tackle_won",
     "passes": "pass",
     "passes_completed": "pass_completed",
+    "progressive_passes": "progressive_pass",
+    "progressive_carries": "progressive_carry",
+    "passes_into_box": "pass_into_box",
+    "crosses_into_box": "cross_into_box",
+    "carries_into_box": "carry_into_box",
+    "box_entries": "box_entry",
+    "deep_completions": "deep_completion",
 }
 # Statistics counted from the opponent's events: saves by a club are the opponent's saved shots.
 TEAM_ONLY_OPPONENT_STATS: dict[str, str] = {"saves": "save"}
+# Counts that need the sequence, not one event: the key passes of the subject (see key_pass_index).
+SEQUENCE_STATS: tuple[str, ...] = ("key_passes",)
 # Ratios, as integer percent rounded half up; no supporting ids are required.
-RATIO_STATS: tuple[str, ...] = ("pass_accuracy_pct",)
+RATIO_STATS: tuple[str, ...] = ("pass_accuracy_pct", "field_tilt_pct", "counter_press_recovery_pct")
+# Ratios that only a club can have (they compare the two clubs or follow a club's losses).
+CLUB_ONLY_RATIO_STATS: tuple[str, ...] = ("field_tilt_pct", "counter_press_recovery_pct")
 
-STAT_KEYS: tuple[str, ...] = tuple(COUNT_STATS) + tuple(TEAM_ONLY_OPPONENT_STATS) + RATIO_STATS
+STAT_KEYS: tuple[str, ...] = tuple(COUNT_STATS) + tuple(TEAM_ONLY_OPPONENT_STATS) + RATIO_STATS + SEQUENCE_STATS
 
 
 def _is_club(facts: MatchFacts, subject: str) -> bool:
@@ -164,6 +369,9 @@ def stat_events(facts: MatchFacts, stat: str, subject: str) -> list[Event]:
             raise RecomputeError(f"{stat} is a club statistic; {subject!r} is not a club in this match")
         opponent = facts.away_id if subject == facts.home_id else facts.home_id
         return [e for e in events_of_kind(facts.events, TEAM_ONLY_OPPONENT_STATS[stat]) if e.team == opponent]
+    if stat == "key_passes":
+        keep = _subject_filter(facts, subject)
+        return [e for e in key_pass_events(facts.events) if keep(e)]
     if stat in RATIO_STATS:
         raise RecomputeError(f"{stat} is a ratio; it has no event set")
     raise RecomputeError(f"unknown statistic {stat!r}")
@@ -182,6 +390,15 @@ def recompute_stat(facts: MatchFacts, stat: str, subject: str) -> int:
         passes = [e for e in events_of_kind(facts.events, "pass") if keep(e)]
         done = [e for e in passes if e.outcome == "complete"]
         return _pct_half_up(len(done), len(passes))
+    if stat in CLUB_ONLY_RATIO_STATS:
+        if not _is_club(facts, subject):
+            raise RecomputeError(f"{stat} is a club statistic; {subject!r} is not a club in this match")
+        if stat == "field_tilt_pct":
+            opponent = facts.away_id if subject == facts.home_id else facts.home_id
+            own = final_third_passes(facts.events, subject)
+            return _pct_half_up(own, own + final_third_passes(facts.events, opponent))
+        pairs = counter_press(facts.events, subject)
+        return _pct_half_up(sum(1 for _, regain in pairs if regain is not None), len(pairs))
     return len(stat_events(facts, stat, subject))
 
 
@@ -356,20 +573,8 @@ def assist_for(events: Sequence[Event], index: int) -> str | None:
     goal = events[index]
     if not EVENT_KINDS["goal"](goal):
         raise RecomputeError(f"event {goal.event_id} is not a goal")
-    if goal.qualifier == "penalty":
-        return None
-    for j in range(index - 1, -1, -1):
-        e = events[j]
-        if e.possession_chain_id != goal.possession_chain_id:
-            return None
-        if e.team != goal.team:
-            continue
-        if e.type == "carry" and e.player == goal.player:
-            continue
-        if e.type == "pass" and e.outcome == "complete" and e.related_player == goal.player and e.player != goal.player:
-            return e.player
-        return None
-    return None
+    j = key_pass_index(events, index)
+    return None if j is None else events[j].player
 
 
 def player_lines(
