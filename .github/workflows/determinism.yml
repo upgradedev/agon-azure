@@ -143,11 +143,7 @@ jobs:
       - name: Precompute the What-If scenario set (K paired replays per arm)
         if: steps.scope.outputs.ran == 'true'
         run: |
-          # TEMPORARY, reverted in the next commit: windows computes seeds 1 and 2 only, a deliberate
-          # divergence that must turn the compare job red.
-          seeds="$SEEDS"
-          if [ "$RUNNER_OS" = "Windows" ]; then seeds="1,2"; fi
-          python -m agon.whatif --set --seeds "$seeds" --print-hash --hash-out whatif/hash.txt --out whatif/out
+          python -m agon.whatif --set --seeds "$SEEDS" --print-hash --hash-out whatif/hash.txt --out whatif/out
       - uses: actions/upload-artifact@v4
         if: steps.scope.outputs.ran == 'true'
         with:
