@@ -29,11 +29,16 @@ no floats, plus a final LF):
     milestones-season-<n>.json every matchday of season n: citable milestone facts per match
     whatif-<seed>.json         the What-If Lab scenario set for one published match, copied from
                                the committed set (agon/whatif/scenario_set, regenerated and compared
-                               on ubuntu and windows by the determinism workflow); it must describe
-                               the served log, this generator and this model, or the deploy stops
+                               on ubuntu and windows by the determinism workflow)
     brief-<seed>.json          only when a brief is committed under agon/whatif/briefs (drafted by the
                                main-only workflow whatif-brief.yml): the accepted analyst briefs, every
-                               number re-checked here against the What-If file; a mismatch stops the deploy
+                               number re-checked here against the What-If file
+
+A What-If file that no longer describes the served log, this generator and this interpret model (or a
+brief that fails its re-check) is WITHHELD, not shipped: the file is left out of intel/ and the manifest
+lists it under `withheld` with a plain reason the page shows. The deploy goes on, so a fix to recompute
+or interpret can ship; the determinism workflow stays strict and fails the pull request that made the
+set stale.
 
 Every milestone carries a sentence and the claims that make it citable (existing Fact Gate claim
 types: player_season_total, season_streak, table_position); tests run each one through the gate.
@@ -498,24 +503,57 @@ def committed_brief(seed: int, whatif_raw: bytes, brief_dir: str | None = None) 
     }
 
 
-def build_intel_web(data_dir: str, seeds: Sequence[int], season_number: int = MILESTONE_SEASON) -> tuple[dict[str, Any], dict[str, bytes]]:
+WHATIF_WITHHELD = (
+    "The What-If Lab is not available for this match in this build: its precomputed replays no longer "
+    "match the served match, the generator or the interpret model, so they are not shown. They return "
+    "when the set is regenerated."
+)
+BRIEF_WITHHELD = (
+    "The analyst brief is not available for this match in this build: it no longer passes the number "
+    "check against the What-If file, so it is not shown."
+)
+
+
+def _withheld(name: str, kind: str, seed: int, shown: str, detail: str) -> dict[str, Any]:
+    return {"name": name, "kind": kind, "seed": seed, "reason": shown, "detail": detail}
+
+
+def build_intel_web(
+    data_dir: str, seeds: Sequence[int], season_number: int = MILESTONE_SEASON,
+    set_dir: str | None = None, brief_dir: str | None = None,
+) -> tuple[dict[str, Any], dict[str, bytes]]:
     """Return (manifest, {file name: bytes}) without touching the disk. Refuses invalid content.
 
     A What-If file is included for every seed whose served log is the whole published match; a
     truncated replay (the development fixture) has none, because the replays describe the whole match.
+    A stale or invalid What-If file, or a brief that fails its re-check, is withheld (module docstring).
     """
     payloads: dict[str, dict[str, Any]] = {}
     raw_files: dict[str, bytes] = {}
+    withheld: list[dict[str, Any]] = []
     for seed in sorted(set(seeds)):
         metrics_body = metrics_payload(seed, data_dir)
         payloads[f"metrics-{seed}.json"] = metrics_body
-        if metrics_body["milestones_note"] is None:
-            body, raw = committed_whatif(seed, metrics_body["events_sha256"])
-            payloads[f"whatif-{seed}.json"] = body
-            raw_files[f"whatif-{seed}.json"] = raw
-            brief = committed_brief(seed, raw)
-            if brief is not None:
-                payloads[f"brief-{seed}.json"] = brief
+        if metrics_body["milestones_note"] is not None:
+            continue
+        name = f"whatif-{seed}.json"
+        try:
+            body, raw = committed_whatif(seed, metrics_body["events_sha256"], set_dir)
+            problems = validate_payload(name, body)
+            if problems:
+                raise ValueError("it breaks the What-If contract: " + "; ".join(problems))
+        except (ValueError, OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            withheld.append(_withheld(name, "whatif", seed, WHATIF_WITHHELD, str(exc)))
+            continue
+        payloads[name] = body
+        raw_files[name] = raw
+        try:
+            brief = committed_brief(seed, raw, brief_dir)
+        except (ValueError, OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            withheld.append(_withheld(f"brief-{seed}.json", "brief", seed, BRIEF_WITHHELD, str(exc)))
+            brief = None
+        if brief is not None:
+            payloads[f"brief-{seed}.json"] = brief
     payloads[f"milestones-season-{season_number}.json"] = milestones_payload(_season(season_number))
     problems = [p for name, body in payloads.items() for p in validate_payload(name, body)]
     if problems:
@@ -532,13 +570,15 @@ def build_intel_web(data_dir: str, seeds: Sequence[int], season_number: int = MI
              "events_sha256": body.get("events_sha256")}
             for name, body in payloads.items()
         ],
+        "withheld": withheld,
     }
     return manifest, data
 
 
-def write_intel_web(out_dir: str, data_dir: str, seeds: Sequence[int]) -> dict[str, Any]:
+def write_intel_web(out_dir: str, data_dir: str, seeds: Sequence[int], set_dir: str | None = None,
+                    brief_dir: str | None = None) -> dict[str, Any]:
     """Write every intel file and manifest.json under out_dir, binary, LF only. Returns the manifest."""
-    manifest, data = build_intel_web(data_dir, seeds)
+    manifest, data = build_intel_web(data_dir, seeds, set_dir=set_dir, brief_dir=brief_dir)
     problems = validate_manifest(manifest)
     if problems:
         raise ValueError("refusing an invalid intel manifest: " + "; ".join(problems))
@@ -570,7 +610,8 @@ def _keys(obj: Any, expected: frozenset[str] | set[str], where: str) -> list[str
     return []
 
 
-MANIFEST_KEYS = frozenset({"schema", "generator", "interpret", "pack", "model_sha256", "files"})
+MANIFEST_KEYS = frozenset({"schema", "generator", "interpret", "pack", "model_sha256", "files", "withheld"})
+WITHHELD_KEYS = frozenset({"name", "kind", "seed", "reason", "detail"})
 MANIFEST_FILE_KEYS = frozenset({"name", "kind", "seed", "sha256", "events_sha256"})
 FILE_KINDS = frozenset({"metrics", "milestones", "whatif", "brief"})
 
@@ -608,6 +649,20 @@ def validate_manifest(manifest: Any) -> list[str]:
                 problems.append(f"{where}: a match file needs an integer seed and an events_sha256")
             elif name != f"{entry['kind']}-{entry['seed']}.json":
                 problems.append(f"{where}.name must be {entry['kind']}-{entry['seed']}.json")
+    if not isinstance(manifest["withheld"], list):
+        return problems + ["manifest.withheld must be a list"]
+    for i, entry in enumerate(manifest["withheld"]):
+        where = f"manifest.withheld[{i}]"
+        bad = _keys(entry, WITHHELD_KEYS, where)
+        if bad:
+            problems.extend(bad)
+            continue
+        if entry["kind"] not in ("whatif", "brief") or entry["name"] != f"{entry['kind']}-{entry['seed']}.json":
+            problems.append(f"{where} must name a whatif-<seed>.json or brief-<seed>.json file")
+        if entry["name"] in seen:
+            problems.append(f"{where}: {entry['name']} cannot be both shipped and withheld")
+        if not isinstance(entry["reason"], str) or not entry["reason"] or not isinstance(entry["detail"], str):
+            problems.append(f"{where} needs a reason to show and a detail")
     return problems
 
 
@@ -921,6 +976,9 @@ def verify_intel_dir(intel_dir: str | os.PathLike[str], data_dir: str | os.PathL
             if sha256_hex(_read_bytes(served)) != entry["events_sha256"] or body.get("events_sha256") != entry["events_sha256"]:
                 raise ValueError(f"intel/{entry['name']} does not describe the served event log of seed {entry['seed']}")
     listed = {entry["name"] for entry in manifest["files"]}
+    for entry in manifest["withheld"]:
+        if os.path.exists(os.path.join(root, entry["name"])):
+            raise ValueError(f"intel/{entry['name']} is listed as withheld but is present")
     present = sorted(
         os.path.relpath(os.path.join(d, n), root).replace(os.sep, "/") for d, _, names in os.walk(root) for n in names
     )

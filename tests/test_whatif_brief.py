@@ -125,7 +125,26 @@ def test_webintel_publishes_only_accepted_briefs_after_rechecking_them(tmp_path,
     assert webintel.committed_brief(1, raw, str(tmp_path / "nothing-here")) is None
 
 
-def test_webintel_stops_on_a_brief_with_an_unchecked_number_or_another_set(tmp_path, whatif):
+def test_a_failing_brief_is_withheld_and_the_deploy_goes_on(tmp_path, whatif):
+    from agon.webdata import write_web_data
+
+    data = tmp_path / "data"
+    write_web_data(str(data), [1])
+    briefs = tmp_path / "briefs"
+    briefs.mkdir()
+    _committed(briefs, whatif, lambda sc: _good(sc).replace("paired replays", "4321 paired replays"))
+    manifest, files = webintel.build_intel_web(str(data), [1], brief_dir=str(briefs))
+    assert "whatif-1.json" in files and "brief-1.json" not in files
+    [held] = manifest["withheld"]
+    assert held["name"] == "brief-1.json" and "4321" in held["detail"] and held["reason"].startswith("The analyst brief")
+    good = tmp_path / "good"
+    good.mkdir()
+    _committed(good, whatif, _good)
+    manifest, files = webintel.build_intel_web(str(data), [1], brief_dir=str(good))
+    assert "brief-1.json" in files and manifest["withheld"] == []
+
+
+def test_webintel_refuses_a_brief_with_an_unchecked_number_or_another_set(tmp_path, whatif):
     raw = SET_FILE.read_bytes()
     bad = _committed(tmp_path, whatif, lambda sc: _good(sc).replace("paired replays", "4321 paired replays"))
     with pytest.raises(ValueError, match="4321"):

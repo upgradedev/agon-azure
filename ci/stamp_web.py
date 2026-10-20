@@ -260,11 +260,12 @@ def stamp_intel(web_dir: Path, data_dir: Path, seeds: list[int]) -> str:
 
     intel_dir = web_dir / INTEL_DIR
     try:
-        write_intel_web(str(intel_dir), str(data_dir), seeds)
+        manifest = write_intel_web(str(intel_dir), str(data_dir), seeds)
         count = verify_intel_dir(intel_dir, data_dir)
     except (ValueError, OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise StampError(f"intel: {exc}") from exc
-    return f"wrote and verified {count} intel files under {intel_dir.as_posix()}"
+    held = "".join(f"\n  withheld {w['name']}: {w['detail']}" for w in manifest["withheld"])
+    return f"wrote and verified {count} intel files under {intel_dir.as_posix()}{held}"
 
 
 def stamp_kinematics(web_dir: Path, data_dir: Path) -> str:

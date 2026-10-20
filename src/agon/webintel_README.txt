@@ -43,7 +43,16 @@ manifest.json
                     events_sha256  sha256 of data/<seed>.ndjson the file describes (null for
                                    milestones); refuse a file whose events_sha256 differs from
                                    the sha256 the data manifest lists for that seed
-Fetch only the files the manifest lists. Any other file in intel/ fails the deploy.
+  withheld        files left out of this build, one entry per file: {name, kind ("whatif"
+                  or "brief"), seed, reason (a plain sentence to show where the What-If Lab or
+                  the brief would be, for example "The What-If Lab is not available for this
+                  match in this build ..."), detail (the technical cause, for the log)}.
+                  A What-If file is withheld when it no longer matches the served log, the
+                  generator or the interpret model; a brief when it fails its number check.
+                  The deploy goes on; the determinism workflow fails the pull request that
+                  made the set stale.
+Fetch only the files the manifest lists under files. Any other file in intel/ fails the deploy,
+and so does a withheld file that is present.
 
 
 metrics-<seed>.json (kind "metrics", schema "agon.webintel.metrics/1")
