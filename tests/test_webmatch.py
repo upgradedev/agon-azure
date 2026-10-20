@@ -198,7 +198,8 @@ def _stamped(tmp_path: Path) -> tuple[Path, Path]:
 
 def test_without_cue_files_the_stamp_lists_none(tmp_path, capsys):
     web, data = _stamped(tmp_path)
-    assert stamp_web.main([str(web), "--sha", SHA, "--data-dir", str(data), "--seeds", "1"]) == 0
+    no_cues = tmp_path / "no-cues"  # the repository now carries real cues in web/cues; this case has none
+    assert stamp_web.main([str(web), "--sha", SHA, "--data-dir", str(data), "--seeds", "1", "--cues-dir", str(no_cues)]) == 0
     assert "listed 0 cue files" in capsys.readouterr().out
     assert json.loads((web / "cues" / "manifest.json").read_text(encoding="ascii")) == {"files": [], "schema": "agon.cues-manifest/1"}
 
