@@ -105,9 +105,14 @@ jobs:
     # deploy.yml, which changes the live data-commit partway through a capture,
     # and the commit check then fails the run (main run 39344161942). On main the
     # real render is video.yml, dispatched once the deploy queue is empty.
+    # Deploys from other merges change the commit too, so the job first waits
+    # until no deploy.yml run is in progress or queued (actions: read lists them).
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 50
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -124,6 +129,21 @@ jobs:
           sudo apt-get install -y -qq --no-install-recommends ffmpeg fonts-dejavu-core espeak-ng
           ffmpeg -hide_banner -version | head -1
           espeak-ng --version
+      - name: Wait until no deploy is running, so the live commit holds still during the capture
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for attempt in $(seq 1 40); do
+            busy="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow deploy.yml --limit 10 --json status --jq '[.[] | select(.status != "completed")] | length')"
+            if [ "$busy" = "0" ]; then
+              echo "no deploy is running or queued"
+              exit 0
+            fi
+            echo "$busy deploy run(s) in progress or queued; waiting 30 s (attempt $attempt of 40)"
+            sleep 30
+          done
+          echo "deploys were still running after 20 minutes"
+          exit 1
       - name: The commit the live site serves
         id: live
         run: |
