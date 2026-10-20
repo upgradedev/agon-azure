@@ -7,14 +7,14 @@
   single sentence is cut out of the audio; the page says so instead of
   guessing a timing.
 */
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Headphones } from "lucide-react";
 import { bundleFileUrl } from "../lib/runs";
 import { fetchBytes } from "../lib/hash";
 import { isObject } from "../lib/core";
 import type { BundleManifest, Run } from "../lib/types";
 
-interface Captions {
+export interface Captions {
   edition: string;
   language: string;
   disclosure: string;
@@ -42,7 +42,32 @@ function readCaptions(body: unknown): Captions | null {
   };
 }
 
-export function Listen({ run, manifest, edition }: { run: Run; manifest: BundleManifest; edition: string }) {
+/* What the page says about the disclosure line, whatever state the captions are in. */
+export function disclosureLine(captions: Captions | null, problem: string, hasCaptions: boolean): string {
+  if (captions) {
+    return captions.disclosure;
+  }
+  if (problem) {
+    return "an AI disclosure, whose words are not shown here because the captions could not be read";
+  }
+  if (!hasCaptions) {
+    return "an AI disclosure; this run carries no captions file with its words";
+  }
+  return "loading";
+}
+
+/* The note under the transcript: timings, and for Greek the goal line, said once and consistently. */
+export function captionsNote(captions: Captions, edition: string): string {
+  if (captions.word_timings) {
+    return "This run's captions carry word timings, but this page does not read them yet, so the lines are not highlighted in time with the voice.";
+  }
+  const note = "The captions carry no word timings in this run, so the lines are not highlighted in time with the voice.";
+  return edition === "el"
+    ? `${note} The Greek goal line: the Greek audio speaks every sentence, the goals included, but without word timings the goal sentence cannot be cut out and played on its own; play the report to hear it.`
+    : note;
+}
+
+export function Listen({ run, manifest, edition, active = true }: { run: Run; manifest: BundleManifest; edition: string; active?: boolean }) {
   const names = Object.keys(manifest.artifacts ?? {});
   const audio = names.find((n) => n.startsWith(`audio-${edition}.`) && n.endsWith(".mp3")) ?? null;
   const captionsName = names.includes(`captions-${edition}.json`) ? `captions-${edition}.json` : null;
@@ -50,6 +75,23 @@ export function Listen({ run, manifest, edition }: { run: Run; manifest: BundleM
   const [problem, setProblem] = useState("");
   const [status, setStatus] = useState("");
   const statusId = useId();
+  const player = useRef<HTMLAudioElement>(null);
+
+  /* Screens stay mounted when hidden: leaving the recap, or hiding the tab, pauses the voice. */
+  useEffect(() => {
+    if (!active) {
+      player.current?.pause();
+    }
+  }, [active]);
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") {
+        player.current?.pause();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => document.removeEventListener("visibilitychange", onVisibility);
+  }, []);
 
   useEffect(() => {
     setCaptions(null);
@@ -97,9 +139,14 @@ export function Listen({ run, manifest, edition }: { run: Run; manifest: BundleM
         <div className="mt-3 space-y-3">
           <p className="text-sm leading-6 text-muted">
             The spoken report the fleet sealed in this bundle ({audio}), made with a synthetic voice{captions?.voice ? ` (${captions.voice})` : ""}. It opens
-            with this disclosure: <span lang={captions?.language ?? undefined} className="text-fg">{captions?.disclosure ?? "loading"}</span>
+            with {captions ? "this disclosure: " : ""}
+            <span lang={captions?.language ?? undefined} className="text-fg">
+              {disclosureLine(captions, problem, Boolean(captionsName))}
+            </span>
+            {captions ? "" : "."}
           </p>
           <audio
+            ref={player}
             controls
             preload="none"
             src={bundleFileUrl(run, audio)}
@@ -126,14 +173,7 @@ export function Listen({ run, manifest, edition }: { run: Run; manifest: BundleM
                   </li>
                 ))}
               </ol>
-              <p className="text-xs leading-5 text-muted">
-                {captions.word_timings
-                  ? "This run's captions carry word timings, but this page does not read them yet, so the lines are not highlighted in time with the voice."
-                  : "The captions carry no word timings in this run, so the lines are not highlighted in time with the voice."}
-                {edition === "el"
-                  ? " The Greek goal line: the Greek audio speaks every sentence, the goals included, but without word timings the goal sentence cannot be cut out and played on its own; play the report to hear it."
-                  : ""}
-              </p>
+              <p className="text-xs leading-5 text-muted">{captionsNote(captions, edition)}</p>
             </>
           ) : problem ? (
             <p className="text-sm text-muted">{problem}</p>

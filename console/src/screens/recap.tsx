@@ -294,7 +294,7 @@ export function Recap({ active, route, loaded, error, blownSeed }: Props) {
             <p className="text-sm text-muted">This run lists no edition that could be loaded, so there is nothing to read.</p>
           )}
         </div>
-        {current ? <Listen run={run} manifest={loaded.manifest} edition={current.meta.edition} /> : null}
+        {current ? <Listen run={run} manifest={loaded.manifest} edition={current.meta.edition} active={active} /> : null}
       </div>
 
       <Dialog

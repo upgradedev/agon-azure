@@ -27,6 +27,30 @@ test("Listen plays the recorded run's own report per edition, with captions", as
   await page.locator('section[aria-labelledby="h-listen"]').screenshot({ path: "screenshots/40-listen-greek-1280-light.png" });
 });
 
+test("the narration pauses when the visitor leaves the recap", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await appReady(page);
+  const run = await defaultRun(page);
+  test.skip(run.provenance !== "pipeline", "the site has no recorded run with audio");
+  await page.goto(`/#/recap/${run.run_id}`);
+  const audio = page.locator('section[aria-labelledby="h-listen"] audio');
+  const started = await audio.evaluate(async (a: HTMLAudioElement) => {
+    a.muted = true;
+    try {
+      await a.play();
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  expect(started, "the recorded mp3 plays in the browser").toBe(true);
+  await expect.poll(() => audio.evaluate((a: HTMLAudioElement) => a.paused)).toBe(false);
+  await page.getByRole("link", { name: /Verify/ }).first().click();
+  await expect(page).toHaveURL(/#\/verify/);
+  await expect.poll(() => audio.evaluate((a: HTMLAudioElement) => a.paused)).toBe(true);
+});
+
 test("Pitch Sound starts only on a tap and can be muted", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.goto("/");
@@ -45,6 +69,24 @@ test("Pitch Sound starts only on a tap and can be muted", async ({ page }) => {
   await page.getByRole("button", { name: "Pause", exact: true }).click();
   await start.click();
   await expect(start).toHaveAttribute("aria-pressed", "false");
+});
+
+test("the tick stops while another seed loads, and Pitch Sound stops when the visitor leaves", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await appReady(page);
+  await expect(page.locator('[data-view="home"] section[data-analysis="ready"]')).toBeAttached({ timeout: 30_000 });
+  const start = page.getByRole("button", { name: "Pitch Sound" });
+  await start.click();
+  await page.getByRole("button", { name: "Play", exact: true }).click();
+  await expect(start).toHaveAttribute("data-ticking", "true");
+  await page.getByText("Seed 2", { exact: true }).click();
+  await expect(start).toHaveAttribute("data-ticking", "false");
+  await expect(start).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("link", { name: /Verify/ }).first().click();
+  await expect(page).toHaveURL(/#\/verify/);
+  await expect(start).toHaveAttribute("aria-pressed", "false");
+  await expect(start).toHaveAttribute("data-ticking", "false");
 });
 
 test("the Newsroom Wall stepper shows the whole lifecycle on a phone", async ({ page }) => {

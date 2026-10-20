@@ -324,7 +324,12 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
   useEffect(() => {
     if (!active) {
       setPlaying(false);
+      /* Pitch Sound belongs to the replay: leaving the Match Centre stops it. */
+      if (sound.running) {
+        sound.stop();
+      }
     }
+    /* sound's functions are recreated each render; only leaving the screen matters here. */
   }, [active]);
 
   const ready = match.status === "ready" ? match : null;
@@ -371,6 +376,10 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
      a tone for each shot and a rising figure for each goal as the replay passes them. */
   useEffect(() => {
     if (!sound.running || !ready || !view) {
+      /* A seed loading (or failing to load) has no ball and no pressure: the tick stops. */
+      if (sound.running) {
+        sound.update(null, null, false);
+      }
       soundIndex.current = view ? view.index : -1;
       return;
     }
@@ -661,6 +670,7 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
                   size="sm"
                   onClick={() => (sound.running ? sound.stop() : sound.start())}
                   aria-pressed={sound.running}
+                  data-ticking={sound.ticking ? "true" : "false"}
                   disabled={!sound.supported}
                   aria-describedby={ids.soundHint}
                 >

@@ -35,6 +35,7 @@ function blip(engine: Engine, freq: number, at: number, length = 0.06, level = 0
 
 export interface PitchSound {
   running: boolean;
+  ticking: boolean;
   muted: boolean;
   supported: boolean;
   start: () => void;
@@ -48,6 +49,7 @@ export interface PitchSound {
 export function usePitchSound(): PitchSound {
   const engine = useRef<Engine | null>(null);
   const [running, setRunning] = useState(false);
+  const [ticking, setTicking] = useState(false);
   const [muted, setMuted] = useState(false);
   /* Decided after hydration, so the prerendered button and the first client render agree. */
   const [supported, setSupported] = useState(false);
@@ -60,12 +62,14 @@ export function usePitchSound(): PitchSound {
       window.clearInterval(e.timer);
       e.timer = null;
     }
+    setTicking(false);
   }
 
   function schedule(e: Engine, bpm: number): void {
     clearTimer(e);
     e.bpm = bpm;
     e.timer = window.setInterval(() => blip(e, 880, e.ctx.currentTime + 0.01, 0.04, 0.08), Math.round(60000 / bpm));
+    setTicking(true);
   }
 
   function start(): void {
@@ -151,5 +155,5 @@ export function usePitchSound(): PitchSound {
     [],
   );
 
-  return { running, muted, supported, start, stop, toggleMute, update, earcon };
+  return { running, ticking, muted, supported, start, stop, toggleMute, update, earcon };
 }
