@@ -27,6 +27,7 @@ import {
   type TimelineMark,
 } from "../../lib/match";
 import type { MetricId, Preferences, ViewMode } from "../../hooks/preferences";
+import { km, runningKmh, type KinematicsFile } from "../../lib/kinematics";
 import { ChartFrame, MomentumChart, ShotMap, SourceNote, TerritoryGrid, TerritoryMaps, WinProbabilityChart, XgRaceChart, possessive, winAt } from "./charts";
 import { Crest, EventIcon, ICON_FOR, SIDE_BG, SIDE_FILL, SIDE_TEXT, SideBadge, SideTriangle } from "./marks";
 
@@ -109,12 +110,29 @@ function passLine(p: PlayerLine): string {
   return `${p.passes_completed} of ${p.passes}${p.pass_accuracy_pct === null ? "" : ` (${p.pass_accuracy_pct}%)`}`;
 }
 
-export function PlayerTable({ file, names, mode, favourite }: { file: MatchFile; names: Record<Side, string>; mode: ViewMode; favourite: string | null }) {
+export function PlayerTable({
+  file,
+  names,
+  mode,
+  favourite,
+  kinematics = null,
+}: {
+  file: MatchFile;
+  names: Record<Side, string>;
+  mode: ViewMode;
+  favourite: string | null;
+  kinematics?: KinematicsFile | null;
+}) {
   const analyst = mode === "analyst";
+  const run = (id: string) => kinematics?.players.find((k) => k.player_id === id) ?? null;
   return (
     <ChartFrame
       title="Player scorecards"
-      sentence={`Every player who appeared. ${file.rules.speed} ${file.rules.distance}`}
+      sentence={`Every player who appeared. ${file.rules.speed} ${
+        kinematics
+          ? "Top running speed and distance come from the synthetic tracking (agon.synth.kinematics), modelled from the event log within speed caps, not measured."
+          : file.rules.distance
+      }`}
       label="Player scorecards"
       className="lg:col-span-2"
     >
@@ -140,6 +158,12 @@ export function PlayerTable({ file, names, mode, favourite }: { file: MatchFile;
                         <th scope="col" className="px-1.5 py-1.5 text-right font-medium">Passes</th>
                         <th scope="col" className="px-1.5 py-1.5 text-right font-medium">Top carry speed (proxy)</th>
                         <th scope="col" className="px-1.5 py-1.5 text-right font-medium">Sprint carries (proxy)</th>
+                        {kinematics ? (
+                          <>
+                            <th scope="col" className="px-1.5 py-1.5 text-right font-medium">Top running speed (synthetic tracking)</th>
+                            <th scope="col" className="px-1.5 py-1.5 text-right font-medium">Distance (synthetic tracking)</th>
+                          </>
+                        ) : null}
                       </>
                     ) : null}
                   </tr>
@@ -176,6 +200,12 @@ export function PlayerTable({ file, names, mode, favourite }: { file: MatchFile;
                               <td className="px-1.5 py-1.5 text-right whitespace-nowrap">{passLine(p)}</td>
                               <td className="px-1.5 py-1.5 text-right whitespace-nowrap">{kmh(p.top_carry_proxy_kmh_x10)}</td>
                               <td className="px-1.5 py-1.5 text-right">{p.sprint_carries}</td>
+                              {kinematics ? (
+                                <>
+                                  <td className="px-1.5 py-1.5 text-right whitespace-nowrap">{run(p.player_id) ? runningKmh(run(p.player_id)!.top_speed_kmh_x10) : "none"}</td>
+                                  <td className="px-1.5 py-1.5 text-right whitespace-nowrap">{run(p.player_id) ? km(run(p.player_id)!.distance_dm) : "none"}</td>
+                                </>
+                              ) : null}
                             </>
                           ) : null}
                         </tr>
@@ -330,7 +360,20 @@ export function YourClub({ file, names, side, nowS, nowSeq }: { file: MatchFile;
 
 /* ------------------------------------------------------------- player focus */
 
-export function PlayerFocus({ file, player, names, nowSeq }: { file: MatchFile; player: PlayerLine; names: Record<Side, string>; nowSeq: number | null }) {
+export function PlayerFocus({
+  file,
+  player,
+  names,
+  nowSeq,
+  kinematics = null,
+}: {
+  file: MatchFile;
+  player: PlayerLine;
+  names: Record<Side, string>;
+  nowSeq: number | null;
+  kinematics?: KinematicsFile | null;
+}) {
+  const tracked = kinematics?.players.find((k) => k.player_id === player.player_id) ?? null;
   const cells = Array<number>(file.territory.cols * file.territory.rows).fill(0);
   for (const [cell, n] of player.zones) {
     cells[cell] = n;
@@ -347,6 +390,13 @@ export function PlayerFocus({ file, player, names, nowSeq }: { file: MatchFile; 
     ["Mean pass difficulty", player.mean_pass_difficulty_centi === null ? "none" : `${(player.mean_pass_difficulty_centi / 100).toFixed(0)} of 100`],
     ["Top carry speed (proxy)", kmh(player.top_carry_proxy_kmh_x10)],
     ["Sprint carries (proxy)", String(player.sprint_carries)],
+    ...(tracked
+      ? ([
+          ["Top running speed (synthetic tracking)", runningKmh(tracked.top_speed_kmh_x10)],
+          ["Distance (synthetic tracking)", km(tracked.distance_dm)],
+          ["Sprints (synthetic tracking)", String(tracked.sprints.length)],
+        ] as [string, string][])
+      : []),
   ];
   return (
     <section aria-labelledby="h-focus" className="min-w-0 rounded-xl border border-line bg-surface p-4 shadow-card lg:col-span-2">
@@ -509,9 +559,10 @@ export interface AnalysisProps {
   prefs: Preferences;
   nowS: number | null;
   nowSeq: number | null;
+  kinematics?: KinematicsFile | null;
 }
 
-export function Analysis({ file, names, prefs, nowS, nowSeq }: AnalysisProps) {
+export function Analysis({ file, names, prefs, nowS, nowSeq, kinematics = null }: AnalysisProps) {
   const club: Side | null = prefs.club === file.clubs.home.club_id ? "home" : prefs.club === file.clubs.away.club_id ? "away" : null;
   const favourite = prefs.player ? file.players.find((p) => p.player_id === prefs.player) ?? null : null;
   const focus = prefs.focus && favourite ? favourite : null;
@@ -519,7 +570,7 @@ export function Analysis({ file, names, prefs, nowS, nowSeq }: AnalysisProps) {
   return (
     <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
       {club ? <YourClub file={file} names={names} side={club} nowS={nowS} nowSeq={nowSeq} /> : null}
-      {focus ? <PlayerFocus file={file} player={focus} names={names} nowSeq={nowSeq} /> : null}
+      {focus ? <PlayerFocus file={file} player={focus} names={names} nowSeq={nowSeq} kinematics={kinematics} /> : null}
       {prefs.metric ? (
         <MetricLens file={file} metric={prefs.metric} names={names} nowS={nowS} focusPlayer={focusId} />
       ) : prefs.mode === "fan" ? (
@@ -539,7 +590,7 @@ export function Analysis({ file, names, prefs, nowS, nowSeq }: AnalysisProps) {
           <TerritoryMaps file={file} names={names} />
           <StarCard file={file} names={names} />
           <TeamStats file={file} names={names} mode="analyst" />
-          <PlayerTable file={file} names={names} mode="analyst" favourite={prefs.player} />
+          <PlayerTable file={file} names={names} mode="analyst" favourite={prefs.player} kinematics={kinematics} />
         </>
       )}
       {prefs.mode === "fan" && !prefs.metric ? <PlayerTable file={file} names={names} mode="fan" favourite={prefs.player} /> : null}

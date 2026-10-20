@@ -13,6 +13,20 @@ export interface TrailPoint {
   side: "home" | "away";
 }
 
+export interface PlayerDot {
+  x: number;
+  y: number;
+  side: "home" | "away";
+  focus: boolean;
+}
+
+export interface NameTag {
+  x: number;
+  y: number;
+  side: "home" | "away";
+  lines: string[];
+}
+
 export interface PitchProps {
   ball: { x: number; y: number } | null;
   path: [number, number, number, number] | null;
@@ -21,6 +35,8 @@ export interface PitchProps {
   trail?: TrailPoint[];
   ballSide?: "home" | "away" | null;
   focusRing?: boolean;
+  players?: PlayerDot[];
+  tags?: NameTag[];
   overlay?: ReactNode;
 }
 
@@ -29,7 +45,7 @@ const BAND_WIDTH = 17;
 const SIDE_FILL = { home: "fill-home", away: "fill-away" } as const;
 const SIDE_STROKE = { home: "stroke-home", away: "stroke-away" } as const;
 
-export function Pitch({ ball, path, pressureLeft, summary, trail = [], ballSide = null, focusRing = false, overlay = null }: PitchProps) {
+export function Pitch({ ball, path, pressureLeft, summary, trail = [], ballSide = null, focusRing = false, overlay = null, players = [], tags = [] }: PitchProps) {
   const titleId = useId();
   const descId = useId();
   /* Used inside url(#...), so only plain characters. */
@@ -120,9 +136,36 @@ export function Pitch({ ball, path, pressureLeft, summary, trail = [], ballSide 
             strokeLinecap="round"
           />
         ) : null}
+        {players.map((pl, i) => (
+          <circle
+            key={`p${i}`}
+            data-player=""
+            cx={pl.x.toFixed(2)}
+            cy={pl.y.toFixed(2)}
+            r={pl.focus ? "1.5" : "1.05"}
+            className={`${SIDE_FILL[pl.side]} ${pl.focus ? "stroke-pressure" : "stroke-pitch-line"}`}
+            strokeWidth={pl.focus ? "0.6" : "0.3"}
+          />
+        ))}
         {focusRing ? <circle cx={bx} cy={by} r="3.4" className="fill-none stroke-pressure motion-safe:animate-pulse" strokeWidth="0.6" /> : null}
         <circle cx={bx} cy={by} r="2.2" className={ballSide ? `${SIDE_FILL[ballSide]} opacity-40` : "fill-ball opacity-25"} />
         <circle cx={bx} cy={by} r="1.1" className="fill-ball stroke-ball-edge" strokeWidth="0.3" />
+        {tags.map((tag, i) => {
+          const width = Math.max(...tag.lines.map((l) => l.length)) * 1.15 + 2;
+          const height = tag.lines.length * 2.9 + 1.2;
+          const left = Math.min(Math.max(tag.x - width / 2, -2.5), 107.5 - width);
+          const top = tag.y > 12 ? tag.y - height - 2.2 : tag.y + 2.2;
+          return (
+            <g key={`t${i}`} aria-hidden="true">
+              <rect x={left.toFixed(2)} y={top.toFixed(2)} width={width.toFixed(2)} height={height.toFixed(2)} rx="0.8" className={`fill-surface ${SIDE_STROKE[tag.side]}`} strokeWidth="0.35" fillOpacity="0.95" />
+              {tag.lines.map((line, j) => (
+                <text key={j} x={(left + 1).toFixed(2)} y={(top + 2.9 * (j + 1) - 0.4).toFixed(2)} className={j === 0 ? "fill-fg text-[2.4px] font-semibold" : "fill-muted text-[2.1px]"}>
+                  {line}
+                </text>
+              ))}
+            </g>
+          );
+        })}
       </svg>
       {overlay}
     </figure>

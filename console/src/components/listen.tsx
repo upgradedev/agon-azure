@@ -53,7 +53,7 @@ export function disclosureLine(captions: Captions | null, problem: string, hasCa
   if (!hasCaptions) {
     return "an AI disclosure; this run carries no captions file with its words";
   }
-  return "loading";
+  return "an AI disclosure, whose words are still loading";
 }
 
 /* The note under the transcript: timings, and for Greek the goal line, said once and consistently. */
