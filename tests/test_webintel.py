@@ -41,11 +41,168 @@ def _load(intel: Path, name: str) -> dict:
 
 def test_written_folder_verifies_and_lists_every_file(site):
     data, intel = site
-    assert webintel.verify_intel_dir(intel, data) == 2
+    assert webintel.verify_intel_dir(intel, data) == 3
     manifest = _load(intel, "manifest.json")
-    assert [f["name"] for f in manifest["files"]] == ["metrics-1.json", "milestones-season-1.json"]
+    assert [f["name"] for f in manifest["files"]] == ["metrics-1.json", "whatif-1.json", "milestones-season-1.json"]
     served = sha256_hex((data / "1.ndjson").read_bytes())
     assert manifest["files"][0]["events_sha256"] == served == _load(intel, "metrics-1.json")["events_sha256"]
+    assert manifest["files"][1]["events_sha256"] == served == _load(intel, "whatif-1.json")["events_sha256"]
+
+
+def test_the_whatif_file_is_the_committed_set_byte_for_byte(site):
+    _, intel = site
+    from agon.whatif.scenarios import SET_DIR
+
+    assert (intel / "whatif-1.json").read_bytes() == Path(SET_DIR, "whatif-1.json").read_bytes()
+
+
+def test_the_whatif_helper_names_why_a_set_is_stale(site, tmp_path):
+    from agon.whatif.scenarios import SET_DIR
+
+    with pytest.raises(ValueError, match="does not match the served event log"):
+        webintel.committed_whatif(1, "0" * 64)
+    with pytest.raises(ValueError, match="no committed What-If set for seed 99"):
+        webintel.committed_whatif(99, "0" * 64)
+    body = json.loads(Path(SET_DIR, "whatif-1.json").read_bytes())
+    served = body["events_sha256"]
+    Path(tmp_path, "whatif-1.json").write_bytes(canonical_bytes(dict(body, generator="synth-v9")) + b"\n")
+    with pytest.raises(ValueError, match="generator version"):
+        webintel.committed_whatif(1, served, str(tmp_path))
+    Path(tmp_path, "whatif-1.json").write_bytes(json.dumps(body, indent=1).encode("ascii"))
+    with pytest.raises(ValueError, match="not canonical"):
+        webintel.committed_whatif(1, served, str(tmp_path))
+
+
+def test_a_stale_whatif_set_is_withheld_and_the_deploy_goes_on(site, tmp_path):
+    from agon.whatif.scenarios import SET_DIR
+
+    data, _ = site
+    stale = tmp_path / "set"
+    stale.mkdir()
+    body = json.loads(Path(SET_DIR, "whatif-1.json").read_bytes())
+    (stale / "whatif-1.json").write_bytes(canonical_bytes(dict(body, model_sha256="0" * 64)) + b"\n")
+    out = tmp_path / "intel"
+    manifest = webintel.write_intel_web(str(out), str(data), [1], set_dir=str(stale))
+    assert [f["name"] for f in manifest["files"]] == ["metrics-1.json", "milestones-season-1.json"]
+    [held] = manifest["withheld"]
+    assert held["name"] == "whatif-1.json" and held["seed"] == 1 and "interpret model" in held["detail"]
+    assert held["reason"].startswith("The What-If Lab is not available for this match")
+    assert webintel.verify_intel_dir(out, data) == 2
+    (out / "whatif-1.json").write_bytes(b"{}\n")
+    with pytest.raises(ValueError, match="listed as withheld but is present"):
+        webintel.verify_intel_dir(out, data)
+
+
+def test_a_missing_or_invalid_whatif_file_is_withheld_too(site, tmp_path):
+    from agon.whatif.scenarios import SET_DIR
+
+    data, _ = site
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    manifest, files = webintel.build_intel_web(str(data), [1], set_dir=str(empty))
+    assert "whatif-1.json" not in files and manifest["withheld"][0]["detail"].startswith("no committed What-If set")
+    broken = tmp_path / "broken"
+    broken.mkdir()
+    body = json.loads(Path(SET_DIR, "whatif-1.json").read_bytes())
+    body["scenarios"][0]["prefix"]["differing_events"] = 3
+    (broken / "whatif-1.json").write_bytes(canonical_bytes(body) + b"\n")
+    manifest, files = webintel.build_intel_web(str(data), [1], set_dir=str(broken))
+    assert "whatif-1.json" not in files and "What-If contract" in manifest["withheld"][0]["detail"]
+
+
+@pytest.mark.parametrize("payload", [b"[]\n", b'"text"\n', b"null\n", b"{}\n"])
+def test_a_malformed_whatif_file_is_withheld_not_a_stopped_deploy(site, tmp_path, payload):
+    data, _ = site
+    bad = tmp_path / "bad"
+    bad.mkdir()
+    (bad / "whatif-1.json").write_bytes(payload)
+    manifest, files = webintel.build_intel_web(str(data), [1], set_dir=str(bad))
+    assert "whatif-1.json" not in files and [w["name"] for w in manifest["withheld"]] == ["whatif-1.json"]
+
+
+@pytest.mark.parametrize(("field", "value", "cause"), [
+    ("code_sha256", "0" * 64, "the code of python -m agon.whatif"),
+    ("interpret", "interpret-v0", "the interpret version"),
+])
+def test_a_whatif_file_for_other_code_is_withheld(site, tmp_path, field, value, cause):
+    from agon.whatif.scenarios import SET_DIR
+
+    data, _ = site
+    other = tmp_path / "other"
+    other.mkdir()
+    body = json.loads(Path(SET_DIR, "whatif-1.json").read_bytes())
+    (other / "whatif-1.json").write_bytes(canonical_bytes(dict(body, **{field: value})) + b"\n")
+    manifest, files = webintel.build_intel_web(str(data), [1], set_dir=str(other))
+    assert "whatif-1.json" not in files and cause in manifest["withheld"][0]["detail"]
+
+
+def test_the_code_fingerprint_ignores_line_endings_and_sees_a_change(tmp_path):
+    from agon.whatif.scenarios import AGON_DIR, CODE_FILES, code_sha256
+
+    for rel in CODE_FILES:
+        target = tmp_path.joinpath(*rel.split("/"))
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(Path(AGON_DIR, *rel.split("/")).read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
+    assert code_sha256(str(tmp_path)) == code_sha256()
+    metrics = tmp_path / "interpret" / "metrics.py"
+    metrics.write_bytes(metrics.read_bytes() + b"# a changed definition\r\n")
+    assert code_sha256(str(tmp_path)) != code_sha256()
+
+
+def test_manifest_refuses_a_file_both_shipped_and_withheld(site):
+    _, intel = site
+    manifest = _load(intel, "manifest.json")
+    assert manifest["withheld"] == []
+    both = json.loads(json.dumps(manifest))
+    both["withheld"] = [{"name": "whatif-1.json", "kind": "whatif", "seed": 1, "reason": "r", "detail": "d"}]
+    assert any("both shipped and withheld" in p for p in webintel.validate_manifest(both))
+    odd = json.loads(json.dumps(manifest))
+    odd["withheld"] = [{"name": "metrics-1.json", "kind": "metrics", "seed": 1, "reason": "r", "detail": "d"}]
+    assert webintel.validate_manifest(odd)
+
+
+def test_a_truncated_replay_has_no_whatif_file(tmp_path):
+    data = tmp_path / "data"
+    write_web_data(str(data), [1], max_minute=5)
+    manifest, files = webintel.build_intel_web(str(data), [1])
+    assert sorted(files) == ["metrics-1.json", "milestones-season-1.json"]
+
+
+def test_whatif_validator_refuses_a_changed_past_and_broken_numbers():
+    from agon.whatif.scenarios import SET_DIR
+
+    good = json.loads(Path(SET_DIR, "whatif-1.json").read_bytes())
+    assert webintel.validate_payload("whatif-1.json", good) == []
+    assert webintel.validate_payload("whatif-2.json", good)
+    past = json.loads(json.dumps(good))
+    past["scenarios"][0]["prefix"]["differing_events"] = 1
+    assert any("published match" in p for p in webintel.validate_payload("whatif-1.json", past))
+    label = dict(good, label="A forecast.")
+    assert webintel.validate_payload("whatif-1.json", label)
+    counts = json.loads(json.dumps(good))
+    counts["scenarios"][0]["outcomes"]["baseline"]["win"]["count"] += 1
+    assert any("add up to k" in p for p in webintel.validate_payload("whatif-1.json", counts))
+    order = json.loads(json.dumps(good))
+    d = order["scenarios"][0]["deltas"][0]
+    d["delta_lo"] = d["delta_mean"] + 1
+    assert webintel.validate_payload("whatif-1.json", order)
+    timeline = json.loads(json.dumps(good))
+    timeline["scenarios"][0]["xg_timeline"]["scenario"]["for"].pop()
+    assert webintel.validate_payload("whatif-1.json", timeline)
+    dash = json.loads(json.dumps(good))
+    dash["scenarios"][0]["summary"] += chr(0x2014)
+    assert webintel.validate_payload("whatif-1.json", dash)
+    for field, value in (("title", 7), ("question", None), ("engine_note", ["x"]), ("summary", {}), ("scenario_id", 1)):
+        typed = json.loads(json.dumps(good))
+        typed["scenarios"][0][field] = value
+        assert any(field in p for p in webintel.validate_payload("whatif-1.json", typed)), field
+    deltas = json.loads(json.dumps(good))
+    deltas["scenarios"][0]["deltas"] = "none"
+    assert webintel.validate_payload("whatif-1.json", deltas)
+    for field, value in (("clubs", [{"club_id": 1}]), ("method", "one sentence"), ("schema", "other/1")):
+        top = json.loads(json.dumps(good))
+        top[field] = value
+        assert any(field in p for p in webintel.validate_payload("whatif-1.json", top)), field
 
 
 def test_files_are_canonical_with_a_final_lf(site):
@@ -170,7 +327,7 @@ def test_manifest_validator_refuses_bad_entries(site):
     bad["files"][0]["name"] = "../metrics-1.json"
     assert webintel.validate_manifest(bad)
     bad = json.loads(json.dumps(manifest))
-    bad["files"][1]["seed"] = 1
+    bad["files"][-1]["seed"] = 1  # the milestones file has no seed
     assert webintel.validate_manifest(bad)
     bad = json.loads(json.dumps(manifest))
     bad["files"][0]["kind"] = "rumours"
@@ -223,5 +380,5 @@ def test_cli_writes_and_verifies(site, tmp_path, capsys):
     data, _ = site
     out = tmp_path / "intel"
     assert webintel.main(["--data", str(data), "--seeds", "1", "--out", str(out)]) == 0
-    assert "intel files 2" in capsys.readouterr().out
-    assert sorted(os.listdir(out)) == ["manifest.json", "metrics-1.json", "milestones-season-1.json"]
+    assert "intel files 3" in capsys.readouterr().out
+    assert sorted(os.listdir(out)) == ["manifest.json", "metrics-1.json", "milestones-season-1.json", "whatif-1.json"]

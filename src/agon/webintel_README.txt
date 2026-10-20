@@ -43,7 +43,17 @@ manifest.json
                     events_sha256  sha256 of data/<seed>.ndjson the file describes (null for
                                    milestones); refuse a file whose events_sha256 differs from
                                    the sha256 the data manifest lists for that seed
-Fetch only the files the manifest lists. Any other file in intel/ fails the deploy.
+  withheld        files left out of this build, one entry per file: {name, kind ("whatif"
+                  or "brief"), seed, reason (a plain sentence to show where the What-If Lab or
+                  the brief would be, for example "The What-If Lab is not available for this
+                  match in this build ..."), detail (the technical cause, for the log)}.
+                  A What-If file is withheld when it no longer matches the served log, the
+                  generator, the interpret version or model, or the code fingerprint, or is
+                  malformed; a brief when it fails its number check or is malformed.
+                  The deploy goes on; the determinism workflow fails the pull request that
+                  made the set stale.
+Fetch only the files the manifest lists under files. Any other file in intel/ fails the deploy,
+and so does a withheld file that is present.
 
 
 metrics-<seed>.json (kind "metrics", schema "agon.webintel.metrics/1")
@@ -152,6 +162,66 @@ milestones-season-<n>.json (kind "milestones", schema "agon.webintel.milestones/
   each fact has the milestones shape above.
 
 
+whatif-<seed>.json (kind "whatif", schema "agon.webintel.whatif/1")
+-------------------------------------------------------------------
+The What-If Lab for one published match: the same seven scenarios for every seed, each replayed
+K times with and without the change from the scenario minute (python -m agon.whatif; the file
+is the committed set under src/agon/whatif/scenario_set, regenerated and compared byte for byte on
+ubuntu and windows by the determinism workflow). Show the label beside every number.
+
+Header: kind, schema, seed, match_id, generator, interpret, model_sha256, code_sha256 and
+code_files (a fingerprint of every module the What-If CLI imports, its whole import closure, and the
+list of those files; a file whose fingerprint differs from the deployed code is withheld),
+events_sha256 (the served data/<seed>.ndjson, as for metrics), label ("Synthetic engine, paired replays, not a
+prediction about real football."), method (list of plain sentences: how the replays are paired
+and what they share), k (replays per arm), home, away, clubs, actual_score,
+timeline_marks (["5", "10", ..., "45", "45+", "50", ..., "90", "90+"]: cumulative cut-offs; "45+"
+is the end of the first half with its added time, "90+" full time).
+
+scenarios     list, one per scenario, each with:
+                scenario_id   red_home_30, red_away_30, press_up_home_60, press_down_home_60,
+                              collapse_home_60, heroics_away_60, red_press_down_home_55
+                title, question, engine_note   plain text; engine_note says what the engine
+                              really changes (show it, it is the honest limit)
+                side, club_id the side the scenario changes; every share and delta is told from
+                              its point of view ("for" is that side, "against" its opponent)
+                params        the exact parameters (side, period, minute, interventions,
+                              press_side, press_shift, collapse_side, collapse_magnitude)
+                command       the CLI line that reproduces this scenario
+                k             replays per arm
+                prefix        {events_before_scenario, replays_checked, differing_events}:
+                              differing_events is always 0 (the validator refuses anything else)
+                triggered     for collapse_home_60, how many scenario replays saw the trigger
+                              goal; null for the others
+                outcomes      {baseline, scenario}: {win, draw, loss}: {count, ppm, lo_ppm,
+                              hi_ppm} with a Wilson 95% interval; counts add up to k
+                deltas        list of {metric, side, unit, scale, pairs, dropped,
+                              baseline_mean, scenario_mean, delta_mean, delta_lo, delta_hi,
+                              unpaired_half}; metric is points (side for only), xg, shots,
+                              box_entries or ppda. Every number is the quantity times scale
+                              (points 1000, xg 1000000, shots 1000, box_entries 1000,
+                              ppda 100). delta = with the change minus without, paired per
+                              replay; delta_lo..delta_hi is its 95% interval; unpaired_half is
+                              the half-width without pairing, to show what pairing buys.
+                              box_entries and ppda count the play after the scenario minute;
+                              a pair with no PPDA (no defensive action) is dropped and counted.
+                xg_timeline   {marks, baseline: {for, against}, scenario: {for, against}}: mean
+                              cumulative xG in ppm at each mark, for a line chart of both arms
+                summary       one plain sentence from the numbers, ready to show
+
+
+brief-<seed>.json (kind "brief", schema "agon.webintel.brief/1"), optional
+-------------------------------------------------------------------------
+Present only when an analyst brief was drafted for the seed (workflow whatif-brief.yml, by hand on
+main: one gpt-5.6-luna call per scenario from that scenario's numbers only) and committed under
+src/agon/whatif/briefs/. Every number in every brief is re-checked by code against the What-If file
+at deploy; a refused draft is never published.
+  kind, schema, seed, events_sha256 (as the What-If file), whatif_sha256 (the What-If file the
+  briefs were drafted from), deployment, label ("AI-drafted from the numbers above; every number
+  checked by code."), briefs: [{scenario_id, text, model, prompt_sha256}]
+Show the label with every brief, under the numbers it was drafted from.
+
+
 Honest limits (say them on the page where the number appears)
 -------------------------------------------------------------
   * Crosses are a geometric proxy: the events carry no cross field.
@@ -160,3 +230,6 @@ Honest limits (say them on the page where the number appears)
   * xA equals xG for a club whose every shot followed a key pass; the engine's chains often
     end that way.
   * Nothing here measures scanning, metabolic load, injury risk or pitch control.
+  * The What-If replays come from this synthetic engine; they are not a prediction about any real
+    match. A red card falls on whichever player makes the next defensive duel (no position can
+    be chosen), and xG does not see the engine's hidden late-collapse multiplier, only the shots.

@@ -27,6 +27,19 @@ no floats, plus a final LF):
     metrics-<seed>.json        one published match: definitions, per club, per 15 minutes, per
                                player, every pass, rhythm changes with sentences, milestones
     milestones-season-<n>.json every matchday of season n: citable milestone facts per match
+    whatif-<seed>.json         the What-If Lab scenario set for one published match, copied from
+                               the committed set (agon/whatif/scenario_set, regenerated and compared
+                               on ubuntu and windows by the determinism workflow)
+    brief-<seed>.json          only when a brief is committed under agon/whatif/briefs (drafted by the
+                               main-only workflow whatif-brief.yml): the accepted analyst briefs, every
+                               number re-checked here against the What-If file
+
+A What-If file that no longer describes the served log, this generator, this interpret version and
+model, and this code (its code_sha256: every module `python -m agon.whatif` imports), or that is malformed in any way (or a
+brief that fails its re-check or is malformed) is WITHHELD, not shipped: the file is left out of intel/ and the manifest
+lists it under `withheld` with a plain reason the page shows. The deploy goes on, so a fix to recompute
+or interpret can ship; the determinism workflow stays strict and fails the pull request that made the
+set stale.
 
 Every milestone carries a sentence and the claims that make it citable (existing Fact Gate claim
 types: player_season_total, season_streak, table_position); tests run each one through the gate.
@@ -73,6 +86,9 @@ SEASON_MILESTONES_LABEL = (
     "Fact Gate's definitions) over all matches of the simulated season up to its matchday."
 )
 METRICS_NAME = re.compile(r"^metrics-([0-9]+)\.json$")
+WHATIF_NAME = re.compile(r"^whatif-([0-9]+)\.json$")
+BRIEF_NAME = re.compile(r"^brief-([0-9]+)\.json$")
+BRIEF_SCHEMA = "agon.webintel.brief/1"
 MILESTONES_NAME = re.compile(r"^milestones-season-([0-9]+)\.json$")
 SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
 STREAK_MIN = 3
@@ -423,16 +439,161 @@ def file_bytes(payload: Any) -> bytes:
     return canonical_bytes(payload) + b"\n"
 
 
-def build_intel_web(data_dir: str, seeds: Sequence[int], season_number: int = MILESTONE_SEASON) -> tuple[dict[str, Any], dict[str, bytes]]:
-    """Return (manifest, {file name: bytes}) without touching the disk. Refuses invalid content."""
+def committed_whatif(seed: int, served_sha256: str, set_dir: str | None = None) -> tuple[dict[str, Any], bytes]:
+    """The committed What-If file of a published seed, refused unless it describes this log and this code.
+
+    "This code" is the generator version, the interpret version, the frozen model and the fingerprint of
+    every module in the import closure of `python -m agon.whatif` (agon.whatif.scenarios.code_sha256). Raises ValueError.
+    """
+    from agon.whatif.scenarios import REGENERATE, SET_DIR, code_sha256
+
+    path = os.path.join(set_dir or SET_DIR, f"whatif-{seed}.json")
+    if not os.path.isfile(path):
+        raise ValueError(f"no committed What-If set for seed {seed}: {REGENERATE}")
+    raw = _read_bytes(path)
+    body = json.loads(raw.decode("ascii"))
+    if not isinstance(body, dict):
+        raise ValueError(f"the committed What-If set for seed {seed} is not a JSON object")
+    stale = []
+    if body.get("events_sha256") != served_sha256:
+        stale.append("the served event log")
+    if body.get("generator") != GENERATOR_VERSION:
+        stale.append("the generator version")
+    if body.get("interpret") != INTERPRET_VERSION:
+        stale.append("the interpret version")
+    if body.get("model_sha256") != model_sha256():
+        stale.append("the interpret model")
+    if body.get("code_sha256") != code_sha256():
+        stale.append("the code of python -m agon.whatif (its import closure)")
+    if stale:
+        raise ValueError(f"the committed What-If set for seed {seed} does not match {', '.join(stale)}: {REGENERATE}")
+    if raw != file_bytes(body):
+        raise ValueError(f"the committed What-If set for seed {seed} is not canonical JSON with a final LF")
+    return body, raw
+
+
+def committed_brief(seed: int, whatif_raw: bytes, brief_dir: str | None = None) -> dict[str, Any] | None:
+    """The web brief of a published seed, or None when no brief is committed for it.
+
+    A committed brief must name the sha256 of the What-If file it was drafted from, and every accepted
+    text must pass agon.whatif.brief.check_brief again against that file; otherwise this raises
+    ValueError and build_intel_web withholds the brief (the deploy goes on). Refused drafts stay in the
+    repo as evidence and are never published.
+    """
+    from agon.whatif.brief import BRIEF_LABEL, check_brief
+    from agon.whatif.scenarios import BRIEF_DIR
+
+    path = os.path.join(brief_dir or BRIEF_DIR, f"brief-{seed}.json")
+    if not os.path.isfile(path):
+        return None
+    committed = json.loads(_read_bytes(path).decode("ascii"))
+    if not isinstance(committed, dict) or not isinstance(committed.get("briefs", []), list):
+        raise ValueError(f"brief-{seed}.json is not an object with a list of briefs")
+    if committed.get("whatif_sha256") != sha256_hex(whatif_raw):
+        raise ValueError(f"brief-{seed}.json was drafted from another What-If file; draft it again with whatif-brief.yml")
+    if not isinstance(committed.get("deployment", ""), str):
+        raise ValueError(f"brief-{seed}.json: deployment must be a string")
+    whatif = json.loads(whatif_raw.decode("ascii"))
+    scenarios = {sc["scenario_id"]: sc for sc in whatif["scenarios"]}
+    briefs = []
+    for row in committed.get("briefs", []):
+        if not isinstance(row, dict):
+            raise ValueError(f"brief-{seed}.json holds a brief that is not an object")
+        if row.get("status") != "accepted":
+            continue
+        sc = scenarios.get(row.get("scenario_id"))
+        if sc is None:
+            raise ValueError(f"brief-{seed}.json names a scenario the What-If file does not hold: {row.get('scenario_id')}")
+        if not isinstance(row.get("text"), str):
+            raise ValueError(f"brief-{seed}.json {row.get('scenario_id')}: an accepted brief needs its text as a string")
+        for field in ("model", "prompt_sha256"):
+            if not isinstance(row.get(field, ""), str):
+                raise ValueError(f"brief-{seed}.json {row.get('scenario_id')}: {field} must be a string")
+        reasons = check_brief(row["text"], sc)
+        if reasons:
+            raise ValueError(f"brief-{seed}.json {row['scenario_id']}: " + "; ".join(reasons))
+        briefs.append({"scenario_id": row["scenario_id"], "text": row["text"], "model": row.get("model", ""),
+                       "prompt_sha256": row.get("prompt_sha256", "")})
+    return {
+        "kind": "brief",
+        "schema": BRIEF_SCHEMA,
+        "seed": seed,
+        "events_sha256": whatif["events_sha256"],
+        "whatif_sha256": sha256_hex(whatif_raw),
+        "deployment": committed.get("deployment", ""),
+        "label": BRIEF_LABEL,
+        "briefs": briefs,
+    }
+
+
+WHATIF_WITHHELD = (
+    "The What-If Lab is not available for this match in this build: its precomputed replays no longer "
+    "match the served match or the code that reads it, so they are not shown. They return when the set "
+    "is regenerated."
+)
+# Everything a malformed committed file can raise on the way in: it is withheld, never a stopped deploy.
+WITHHOLD_ERRORS = (
+    ValueError, OSError, UnicodeDecodeError, json.JSONDecodeError, AttributeError, KeyError, TypeError, RecursionError,
+)
+BRIEF_WITHHELD = (
+    "The analyst brief is not available for this match in this build: it no longer passes the number "
+    "check against the What-If file, so it is not shown."
+)
+
+
+def _withheld(name: str, kind: str, seed: int, shown: str, detail: str) -> dict[str, Any]:
+    return {"name": name, "kind": kind, "seed": seed, "reason": shown, "detail": detail}
+
+
+def build_intel_web(
+    data_dir: str, seeds: Sequence[int], season_number: int = MILESTONE_SEASON,
+    set_dir: str | None = None, brief_dir: str | None = None,
+) -> tuple[dict[str, Any], dict[str, bytes]]:
+    """Return (manifest, {file name: bytes}) without touching the disk. Refuses invalid content.
+
+    A What-If file is included for every seed whose served log is the whole published match; a
+    truncated replay (the development fixture) has none, because the replays describe the whole match.
+    A stale or invalid What-If file, or a brief that fails its re-check, is withheld (module docstring).
+    """
     payloads: dict[str, dict[str, Any]] = {}
+    raw_files: dict[str, bytes] = {}
+    withheld: list[dict[str, Any]] = []
     for seed in sorted(set(seeds)):
-        payloads[f"metrics-{seed}.json"] = metrics_payload(seed, data_dir)
+        metrics_body = metrics_payload(seed, data_dir)
+        payloads[f"metrics-{seed}.json"] = metrics_body
+        if metrics_body["milestones_note"] is not None:
+            continue
+        name = f"whatif-{seed}.json"
+        try:
+            body, raw = committed_whatif(seed, metrics_body["events_sha256"], set_dir)
+            problems = validate_payload(name, body)
+            if problems:
+                raise ValueError("it breaks the What-If contract: " + "; ".join(problems))
+        except WITHHOLD_ERRORS as exc:
+            withheld.append(_withheld(name, "whatif", seed, WHATIF_WITHHELD, str(exc)))
+            continue
+        payloads[name] = body
+        raw_files[name] = raw
+        try:
+            brief = committed_brief(seed, raw, brief_dir)
+        except WITHHOLD_ERRORS as exc:
+            withheld.append(_withheld(f"brief-{seed}.json", "brief", seed, BRIEF_WITHHELD, str(exc)))
+            brief = None
+        if brief is not None:
+            try:
+                problems = validate_payload(f"brief-{seed}.json", brief)
+                if problems:
+                    raise ValueError("; ".join(problems))
+                file_bytes(brief)  # a value canonical JSON refuses is caught here, not in the deploy
+            except WITHHOLD_ERRORS as exc:
+                withheld.append(_withheld(f"brief-{seed}.json", "brief", seed, BRIEF_WITHHELD, str(exc)))
+                continue
+            payloads[f"brief-{seed}.json"] = brief
     payloads[f"milestones-season-{season_number}.json"] = milestones_payload(_season(season_number))
     problems = [p for name, body in payloads.items() for p in validate_payload(name, body)]
     if problems:
         raise ValueError("refusing invalid intel files: " + "; ".join(problems))
-    data = {name: file_bytes(body) for name, body in payloads.items()}
+    data = {name: raw_files.get(name) or file_bytes(body) for name, body in payloads.items()}
     manifest = {
         "schema": MANIFEST_SCHEMA,
         "generator": GENERATOR_VERSION,
@@ -444,13 +605,15 @@ def build_intel_web(data_dir: str, seeds: Sequence[int], season_number: int = MI
              "events_sha256": body.get("events_sha256")}
             for name, body in payloads.items()
         ],
+        "withheld": withheld,
     }
     return manifest, data
 
 
-def write_intel_web(out_dir: str, data_dir: str, seeds: Sequence[int]) -> dict[str, Any]:
+def write_intel_web(out_dir: str, data_dir: str, seeds: Sequence[int], set_dir: str | None = None,
+                    brief_dir: str | None = None) -> dict[str, Any]:
     """Write every intel file and manifest.json under out_dir, binary, LF only. Returns the manifest."""
-    manifest, data = build_intel_web(data_dir, seeds)
+    manifest, data = build_intel_web(data_dir, seeds, set_dir=set_dir, brief_dir=brief_dir)
     problems = validate_manifest(manifest)
     if problems:
         raise ValueError("refusing an invalid intel manifest: " + "; ".join(problems))
@@ -482,9 +645,10 @@ def _keys(obj: Any, expected: frozenset[str] | set[str], where: str) -> list[str
     return []
 
 
-MANIFEST_KEYS = frozenset({"schema", "generator", "interpret", "pack", "model_sha256", "files"})
+MANIFEST_KEYS = frozenset({"schema", "generator", "interpret", "pack", "model_sha256", "files", "withheld"})
+WITHHELD_KEYS = frozenset({"name", "kind", "seed", "reason", "detail"})
 MANIFEST_FILE_KEYS = frozenset({"name", "kind", "seed", "sha256", "events_sha256"})
-FILE_KINDS = frozenset({"metrics", "milestones", "whatif"})
+FILE_KINDS = frozenset({"metrics", "milestones", "whatif", "brief"})
 
 
 def validate_manifest(manifest: Any) -> list[str]:
@@ -520,6 +684,20 @@ def validate_manifest(manifest: Any) -> list[str]:
                 problems.append(f"{where}: a match file needs an integer seed and an events_sha256")
             elif name != f"{entry['kind']}-{entry['seed']}.json":
                 problems.append(f"{where}.name must be {entry['kind']}-{entry['seed']}.json")
+    if not isinstance(manifest["withheld"], list):
+        return problems + ["manifest.withheld must be a list"]
+    for i, entry in enumerate(manifest["withheld"]):
+        where = f"manifest.withheld[{i}]"
+        bad = _keys(entry, WITHHELD_KEYS, where)
+        if bad:
+            problems.extend(bad)
+            continue
+        if entry["kind"] not in ("whatif", "brief") or entry["name"] != f"{entry['kind']}-{entry['seed']}.json":
+            problems.append(f"{where} must name a whatif-<seed>.json or brief-<seed>.json file")
+        if entry["name"] in seen:
+            problems.append(f"{where}: {entry['name']} cannot be both shipped and withheld")
+        if not isinstance(entry["reason"], str) or not entry["reason"] or not isinstance(entry["detail"], str):
+            problems.append(f"{where} needs a reason to show and a detail")
     return problems
 
 
@@ -679,6 +857,125 @@ def _validate_milestones(body: Mapping[str, Any]) -> list[str]:
     return problems
 
 
+WHATIF_KEYS = frozenset({
+    "kind", "schema", "seed", "match_id", "generator", "interpret", "model_sha256", "code_sha256", "code_files",
+    "events_sha256", "label", "method", "k", "home", "away", "clubs", "actual_score", "timeline_marks", "scenarios",
+})
+SCENARIO_KEYS = frozenset({
+    "scenario_id", "title", "question", "engine_note", "side", "club_id", "params", "k", "prefix", "triggered",
+    "outcomes", "deltas", "xg_timeline", "summary", "command",
+})
+SHARE_KEYS = frozenset({"count", "ppm", "lo_ppm", "hi_ppm"})
+DELTA_KEYS = frozenset({
+    "metric", "side", "unit", "scale", "dropped", "pairs", "baseline_mean", "scenario_mean", "delta_mean",
+    "delta_lo", "delta_hi", "unpaired_half",
+})
+WHATIF_LABEL = "Synthetic engine, paired replays, not a prediction about real football."
+WHATIF_SCHEMA = "agon.webintel.whatif/1"
+_DASHES = (chr(0x2013), chr(0x2014))
+
+
+def _validate_scenario(sc: Any, k: int, marks: list[str], where: str) -> list[str]:
+    problems = _keys(sc, SCENARIO_KEYS, where)
+    if problems:
+        return problems
+    for field in ("scenario_id", "title", "question", "engine_note", "summary", "side", "club_id", "command"):
+        if not isinstance(sc[field], str) or not sc[field]:
+            problems.append(f"{where}.{field} must be a non-empty string")
+    if problems:
+        return problems
+    if not isinstance(sc["deltas"], list) or not all(isinstance(d, dict) for d in sc["deltas"]):
+        return problems + [f"{where}.deltas must be a list of objects"]
+    if sc["k"] != k:
+        problems.append(f"{where}.k must equal the file's k")
+    prefix = sc["prefix"]
+    if not isinstance(prefix, dict) or prefix.get("differing_events") != 0:
+        problems.append(f"{where}.prefix.differing_events must be 0: the pre-scenario play must be the published match")
+    for arm in ("baseline", "scenario"):
+        shares = sc["outcomes"][arm]
+        if set(shares) != {"win", "draw", "loss"}:
+            problems.append(f"{where}.outcomes.{arm} must hold win, draw and loss")
+            continue
+        for kind, sh in shares.items():
+            ok = not _keys(sh, SHARE_KEYS, "share") and all(_is_int(sh[x]) for x in SHARE_KEYS)
+            if not ok or not 0 <= sh["lo_ppm"] <= sh["ppm"] <= sh["hi_ppm"] <= 1_000_000:
+                problems.append(f"{where}.outcomes.{arm}.{kind} must be integers with lo <= share <= hi in ppm")
+        if sum(sh.get("count", 0) for sh in shares.values()) != k:
+            problems.append(f"{where}.outcomes.{arm} counts must add up to k")
+    for i, d in enumerate(sc["deltas"]):
+        dw = f"{where}.deltas[{i}]"
+        if _keys(d, DELTA_KEYS, dw):
+            problems.append(f"{dw} keys must be exactly {', '.join(sorted(DELTA_KEYS))}")
+            continue
+        values = [d[x] for x in ("baseline_mean", "scenario_mean", "delta_mean", "delta_lo", "delta_hi", "unpaired_half")]
+        if not all(_int_or_none(v) for v in values) or not _is_int(d["pairs"]) or d["pairs"] + d["dropped"] != k:
+            problems.append(f"{dw} must hold integers or nulls, and pairs plus dropped must equal k")
+        elif d["delta_mean"] is not None and not d["delta_lo"] <= d["delta_mean"] <= d["delta_hi"]:
+            problems.append(f"{dw} must have delta_lo <= delta_mean <= delta_hi")
+    tl = sc["xg_timeline"]
+    if tl.get("marks") != marks:
+        problems.append(f"{where}.xg_timeline.marks must equal timeline_marks")
+    for arm in ("baseline", "scenario"):
+        for side in ("for", "against"):
+            vals = tl.get(arm, {}).get(side)
+            if not isinstance(vals, list) or len(vals) != len(marks) or not all(_is_int(v) and v >= 0 for v in vals):
+                problems.append(f"{where}.xg_timeline.{arm}.{side} must be {len(marks)} non-negative integers")
+    text = " ".join(str(sc[x]) for x in ("title", "question", "engine_note", "summary"))
+    if not sc["summary"] or any(ch in text for ch in _DASHES):
+        problems.append(f"{where}: summary must be a sentence and the texts must not use long dashes")
+    return problems
+
+
+def _validate_whatif(body: Mapping[str, Any]) -> list[str]:
+    problems = _keys(body, WHATIF_KEYS, "whatif")
+    if problems:
+        return problems
+    if body["label"] != WHATIF_LABEL:
+        problems.append(f"whatif.label must be {WHATIF_LABEL!r}")
+    if body["schema"] != WHATIF_SCHEMA:
+        problems.append(f"whatif.schema must be {WHATIF_SCHEMA}")
+    if not isinstance(body["method"], list) or not body["method"] or not all(isinstance(m, str) and m for m in body["method"]):
+        problems.append("whatif.method must be a non-empty list of sentences")
+    clubs = body["clubs"]
+    if not isinstance(clubs, list) or len(clubs) != 2 or not all(
+        isinstance(c, dict) and set(c) == {"club_id", "name", "short"} and all(isinstance(v, str) for v in c.values())
+        for c in clubs
+    ):
+        problems.append("whatif.clubs must be two {club_id, name, short} objects of strings")
+    if not isinstance(body["code_files"], list) or not all(isinstance(f, str) for f in body["code_files"]):
+        problems.append("whatif.code_files must be a list of paths")
+    if not isinstance(body["events_sha256"], str) or not SHA256_HEX.match(body["events_sha256"]):
+        problems.append("whatif.events_sha256 must be 64 lowercase hex characters")
+    if not _is_int(body["k"]) or body["k"] < 2:
+        return problems + ["whatif.k must be an integer of at least 2"]
+    if not isinstance(body["scenarios"], list) or not body["scenarios"]:
+        return problems + ["whatif.scenarios must be a non-empty list"]
+    marks = body["timeline_marks"]
+    for i, sc in enumerate(body["scenarios"]):
+        problems.extend(_validate_scenario(sc, body["k"], marks, f"whatif.scenarios[{i}]"))
+    return problems
+
+
+BRIEF_KEYS = frozenset({"kind", "schema", "seed", "events_sha256", "whatif_sha256", "deployment", "label", "briefs"})
+BRIEF_ROW_KEYS = frozenset({"scenario_id", "text", "model", "prompt_sha256"})
+
+
+def _validate_brief(body: Mapping[str, Any]) -> list[str]:
+    from agon.whatif.brief import BRIEF_LABEL
+
+    problems = _keys(body, BRIEF_KEYS, "brief")
+    if problems:
+        return problems
+    if body["schema"] != BRIEF_SCHEMA or body["label"] != BRIEF_LABEL:
+        problems.append(f"brief must be {BRIEF_SCHEMA} with the label {BRIEF_LABEL!r}")
+    if not isinstance(body["deployment"], str) or not isinstance(body["briefs"], list):
+        return problems + ["brief.deployment must be a string and brief.briefs a list"]
+    for i, row in enumerate(body["briefs"]):
+        if _keys(row, BRIEF_ROW_KEYS, "row") or not all(isinstance(row[k], str) for k in BRIEF_ROW_KEYS) or not row["text"]:
+            problems.append(f"brief.briefs[{i}] must hold scenario_id, text, model and prompt_sha256 as strings")
+    return problems
+
+
 def validate_payload(name: str, body: Any) -> list[str]:
     """Problems with one intel file's content; empty means it matches the contract."""
     if not isinstance(body, dict):
@@ -688,6 +985,14 @@ def validate_payload(name: str, body: Any) -> list[str]:
             if body.get("kind") != "metrics" or str(body.get("seed")) != METRICS_NAME.match(name).group(1):
                 return [f"{name} must be the metrics file of seed {METRICS_NAME.match(name).group(1)}"]
             return _validate_metrics(body)
+        if BRIEF_NAME.match(name):
+            if body.get("kind") != "brief" or str(body.get("seed")) != BRIEF_NAME.match(name).group(1):
+                return [f"{name} must be the brief file of seed {BRIEF_NAME.match(name).group(1)}"]
+            return _validate_brief(body)
+        if WHATIF_NAME.match(name):
+            if body.get("kind") != "whatif" or str(body.get("seed")) != WHATIF_NAME.match(name).group(1):
+                return [f"{name} must be the What-If file of seed {WHATIF_NAME.match(name).group(1)}"]
+            return _validate_whatif(body)
         if MILESTONES_NAME.match(name):
             if body.get("kind") != "milestones" or str(body.get("season")) != MILESTONES_NAME.match(name).group(1):
                 return [f"{name} must be the milestones file of season {MILESTONES_NAME.match(name).group(1)}"]
@@ -728,6 +1033,9 @@ def verify_intel_dir(intel_dir: str | os.PathLike[str], data_dir: str | os.PathL
             if sha256_hex(_read_bytes(served)) != entry["events_sha256"] or body.get("events_sha256") != entry["events_sha256"]:
                 raise ValueError(f"intel/{entry['name']} does not describe the served event log of seed {entry['seed']}")
     listed = {entry["name"] for entry in manifest["files"]}
+    for entry in manifest["withheld"]:
+        if os.path.exists(os.path.join(root, entry["name"])):
+            raise ValueError(f"intel/{entry['name']} is listed as withheld but is present")
     present = sorted(
         os.path.relpath(os.path.join(d, n), root).replace(os.sep, "/") for d, _, names in os.walk(root) for n in names
     )

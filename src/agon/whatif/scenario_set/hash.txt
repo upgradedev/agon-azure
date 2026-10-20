@@ -1,0 +1,4 @@
+whatif file whatif-1.json k 200 sha256 436e6a4a0fa63fd1f7de66a30afc6ae4d9232ba41fce690e6b48db36260bf345
+whatif file whatif-2.json k 200 sha256 ee98c7ccdbe0034d55bb46fd33a2cf9db214205b24ca7a98d05e7627bb0d9810
+whatif file whatif-3.json k 200 sha256 6be93e9031fee66a2f9195f486a4c8170d3420c4fbf6b6fd7a45e2141f052f82
+whatif set sha256 36d41e0df10fac121e504e47621d4ca6cd24fe98d396765567c30c043eeeaf8e

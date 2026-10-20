@@ -10,6 +10,10 @@ name: determinism
 # compares them. A mismatch prints both hash files and the first diverging line and fails.
 # Three negative controls prove the comparator has teeth: one mutates a seed 1 event, one a
 # season match hash, one a kinematics hash. The check is never relaxed; on divergence, fix the generator.
+# A parallel job precomputes the What-If Lab scenario set (python -m agon.whatif --set: K paired
+# replays per arm for every scenario of every published seed) on both OS; the compare job diffs the
+# two byte for byte, prints the scenario-set sha256 of each, requires the committed set the deploy
+# ships (src/agon/whatif/scenario_set), and runs a fourth negative control, on a What-If file.
 
 on:
   push:
@@ -96,9 +100,61 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  whatif:
+    name: whatif (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    outputs:
+      ran: ${{ steps.scope.outputs.ran }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # The set is a pure function of the engine, interpret, the Fact Gate's definitions and the lab,
+      # and takes minutes per OS. A pull request that touches none of those inputs skips it (the step
+      # summary says so); a push to main and a manual run always compute it.
+      - name: Decide whether the What-If inputs changed
+        id: scope
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          ran=true
+          if [ "$EVENT" = "pull_request" ]; then
+            if git diff --name-only "$BASE" HEAD | grep -Eq '^(src/agon/(synth|interpret|whatif)/|src/agon/governance/recompute\.py$|\.github/workflows/determinism\.yml$)'; then
+              ran=true
+            else
+              ran=false
+              echo "What-If inputs unchanged in this pull request: the scenario set is not recomputed here (it is on every push to main)" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          fi
+          echo "ran=$ran" >> "$GITHUB_OUTPUT"
+          echo "What-If set computed: $ran"
+      # Hash lines (no paths, no timings) go to stdout and hash.txt; the total wall time goes to stderr.
+      - name: Precompute the What-If scenario set (K paired replays per arm)
+        if: steps.scope.outputs.ran == 'true'
+        run: |
+          python -m agon.whatif --set --seeds "$SEEDS" --print-hash --hash-out whatif/hash.txt --out whatif/out
+      - uses: actions/upload-artifact@v4
+        if: steps.scope.outputs.ran == 'true'
+        with:
+          name: whatif-${{ matrix.os }}
+          path: whatif/
+          if-no-files-found: error
+          retention-days: 14
+
   compare:
     name: compare ubuntu vs windows
-    needs: generate
+    needs: [generate, whatif]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -109,6 +165,11 @@ jobs:
         with:
           pattern: synth-*
           path: hashes
+      - uses: actions/download-artifact@v4
+        if: needs.whatif.outputs.ran == 'true'
+        with:
+          pattern: whatif-*
+          path: whatif
       - name: List what was downloaded
         run: find hashes -maxdepth 2 | sort
       - name: Negative control (a one-byte change must fail the comparator)
@@ -165,3 +226,45 @@ jobs:
           done
       - name: Compare ubuntu and windows outputs
         run: python -m agon.synth.crosscheck hashes/synth-ubuntu-latest hashes/synth-windows-latest
+      - name: Negative control on the What-If set (a one-byte change must fail the comparator)
+        if: needs.whatif.outputs.ran == 'true'
+        run: |
+          cp -r whatif/whatif-ubuntu-latest mutated-whatif
+          python - <<'PY'
+          path = "mutated-whatif/out/whatif-1.json"
+          data = bytearray(open(path, "rb").read())
+          pos = data.index(b'"k":')
+          data[pos + 4] = ord("9") if data[pos + 4] != ord("9") else ord("8")
+          open(path, "wb").write(bytes(data))
+          PY
+          if python -m agon.synth.crosscheck whatif/whatif-ubuntu-latest mutated-whatif; then
+            echo "comparator passed a mutated What-If file: the gate has no teeth"
+            exit 1
+          fi
+          echo "What-If negative control failed as required"
+      - name: What-If scenario-set sha256 on each OS
+        if: needs.whatif.outputs.ran == 'true'
+        run: |
+          for os in ubuntu-latest windows-latest; do
+            echo "$os: $(tail -n 1 "whatif/whatif-$os/hash.txt")"
+          done
+      - name: Compare the What-If set on ubuntu and windows
+        if: needs.whatif.outputs.ran == 'true'
+        run: python -m agon.synth.crosscheck whatif/whatif-ubuntu-latest whatif/whatif-windows-latest
+      # The deploy ships the committed set; it must be exactly what both OS just computed.
+      - name: Require the committed What-If set
+        if: needs.whatif.outputs.ran == 'true'
+        run: |
+          python - <<'PY'
+          import os, sys
+          fresh, committed = "whatif/whatif-ubuntu-latest", "src/agon/whatif/scenario_set"
+          pairs = [(os.path.join(fresh, "hash.txt"), os.path.join(committed, "hash.txt"))]
+          pairs += [(os.path.join(fresh, "out", n), os.path.join(committed, n)) for n in sorted(os.listdir(os.path.join(fresh, "out")))]
+          names = sorted(n for n in os.listdir(committed) if n != "hash.txt")
+          if names != sorted(os.listdir(os.path.join(fresh, "out"))):
+              sys.exit(f"committed files {names} differ from the fresh set")
+          for a, b in pairs:
+              if open(a, "rb").read() != open(b, "rb").read():
+                  sys.exit(f"{b} differs from the fresh set: python -m agon.whatif --set --seeds 1,2,3 --out src/agon/whatif/scenario_set --hash-out src/agon/whatif/scenario_set/hash.txt")
+          print(f"committed What-If set reproduced: {len(pairs)} files")
+          PY
