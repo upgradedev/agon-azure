@@ -53,6 +53,7 @@ on:
       - "infra/**"
       - "web/**"
       - "console/**"
+      - "evidence/**"
       - "src/agon/**"
       - "requirements/**"
       - "Dockerfile"
@@ -258,7 +259,9 @@ jobs:
         run: |
           rm -rf console/dist/data
           python -m agon.webdata --seeds "$PUBLISHED_SEEDS" --out console/dist/data
-      - name: Stamp the commit, re-hash the data, write the season files and verify the runs
+      # The stamp copies every exported cue file in web/cues (absent until a charter is approved) into
+      # the site and lists it, so a committed cue file always reaches the page.
+      - name: Stamp the commit, re-hash the data, write the season, match, cue and ops files and verify the runs
         run: python ci/stamp_web.py console/dist --sha "$GITHUB_SHA" --data-dir console/dist/data --seeds "$PUBLISHED_SEEDS"
       - name: Static checks on the exact tree that ships
         run: python ci/web_check.py console/dist

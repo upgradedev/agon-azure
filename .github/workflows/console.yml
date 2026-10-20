@@ -161,7 +161,8 @@ jobs:
           npm run build:ssr
           node scripts/prerender.mjs --site dist-recorded --runs "$runs"
           python -m agon.webdata --seeds "$PUBLISHED_SEEDS" --out dist-recorded/data
-          python ../ci/stamp_web.py dist-recorded --sha "$GITHUB_SHA" --data-dir dist-recorded/data --seeds "$PUBLISHED_SEEDS"
+          # a committed test cue file, copied by the stamp, so the lower-third is proven to reach the page before a charter exists
+          python ../ci/stamp_web.py dist-recorded --cues-dir ../tests/fixtures/cues --sha "$GITHUB_SHA" --data-dir dist-recorded/data --seeds "$PUBLISHED_SEEDS"
           python ../ci/web_check.py dist-recorded
           python scripts/readiness_offline.py dist-recorded "$RUNNER_TEMP/readiness-recorded" ../README.md
           python ../ci/readiness.py --offline "$RUNNER_TEMP/readiness-recorded" --config "$config" --set-host agon.example --add-marker "demo=$GITHUB_SHA"

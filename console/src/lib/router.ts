@@ -11,6 +11,7 @@ export type ViewKey =
   | "recap"
   | "verify"
   | "data-lab"
+  | "media-office"
   | "how-it-works"
   | "about"
   | "not-found";
@@ -28,6 +29,7 @@ const PATHS: Record<string, ViewKey> = {
   recap: "recap",
   verify: "verify",
   "data-lab": "data-lab",
+  "media-office": "media-office",
   "how-it-works": "how-it-works",
   about: "about",
 };
@@ -43,6 +45,7 @@ export const VIEW_TITLES: Record<ViewKey, string> = {
   recap: "Recap",
   verify: "Verify",
   "data-lab": "Data Lab",
+  "media-office": "Media office",
   "how-it-works": "How Agon works",
   about: "About",
   "not-found": "Page not found",

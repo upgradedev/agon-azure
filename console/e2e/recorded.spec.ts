@@ -86,3 +86,16 @@ for (const viewport of VIEWPORTS) {
     await page.screenshot({ path: `screenshots/23-recorded-verify-${viewport.width}-light.png`, fullPage: true });
   });
 }
+
+test("a committed cue file reaches the replay as a lower-third, labelled with its charter hash", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/");
+  await appReady(page);
+  await expect(page.locator('[data-view="home"] section[data-analysis="ready"]')).toBeAttached({ timeout: 30_000 });
+  await page.getByLabel("Match time").focus();
+  await page.keyboard.press("End");
+  await expect(page.getByText(/Rehearsal cue: this lower-third comes from a committed test file/)).toBeVisible();
+  await expect(page.getByText("Live cue, charter 000000000000")).toBeVisible();
+  await page.screenshot({ path: "screenshots/24-recorded-cue-lower-third-1280-light.png" });
+});

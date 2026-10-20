@@ -208,6 +208,7 @@ html[data-boot-route="approve"] [data-view="approve"][hidden],
 html[data-boot-route="recap"] [data-view="recap"][hidden],
 html[data-boot-route="verify"] [data-view="verify"][hidden],
 html[data-boot-route="data-lab"] [data-view="data-lab"][hidden],
+html[data-boot-route="media-office"] [data-view="media-office"][hidden],
 html[data-boot-route="how-it-works"] [data-view="how-it-works"][hidden],
 html[data-boot-route="about"] [data-view="about"][hidden] { display: block !important; }
 

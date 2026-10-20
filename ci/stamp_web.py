@@ -198,14 +198,35 @@ CUES_SCHEMA = "agon.cues/1"
 CUE_FILE = re.compile(r"^[0-9]{1,9}\.json$")
 
 
-def stamp_cues(web_dir: Path) -> str:
-    """Write web_dir/cues/manifest.json listing the cue files present (none until a charter is approved).
+def _cue_ok(cue: object) -> bool:
+    if not isinstance(cue, dict):
+        return False
+    at, until, text = cue.get("at_s"), cue.get("until_s"), cue.get("text")
+    ints = all(isinstance(v, int) and not isinstance(v, bool) for v in (at, until))
+    return ints and until >= at and isinstance(cue.get("kind"), str) and isinstance(text, dict) and isinstance(text.get("en"), str)  # type: ignore[operator]
 
-    The console fetches the list and only then a seed's cue file, so a seed without cues costs no
-    failed request. A cue file must be agon.cues/1 for its own seed and name a 64-hex charter hash.
+
+def stamp_cues(web_dir: Path, source_dir: Path | None = None) -> str:
+    """Copy the exported cues into web_dir/cues and write the list of cue files present.
+
+    `source_dir` is the committed export (web/cues, written by agon.cues once a charter is approved;
+    absent until then): every <seed>.json in it is copied into the site byte for byte, so the stamp
+    itself guarantees an exported cue reaches the page; its manifest.json is not copied, because the
+    list is rewritten here from the files present. The console fetches the list and only then a
+    seed's cue file, so a seed without cues costs no failed request. A cue file must be agon.cues/1
+    for its own seed, name a 64-hex charter hash, and hold well-formed cues.
     """
     cues_dir = web_dir / CUES_DIR
     cues_dir.mkdir(parents=True, exist_ok=True)
+    copied = 0
+    if source_dir is not None and source_dir.is_dir():
+        for path in sorted(source_dir.iterdir()):
+            if path.name == "manifest.json":
+                continue
+            if not path.is_file() or not CUE_FILE.match(path.name):
+                raise StampError(f"cues: unexpected file {path.name} in {source_dir.as_posix()}")
+            (cues_dir / path.name).write_bytes(path.read_bytes())
+            copied += 1
     files = []
     for path in sorted(cues_dir.iterdir()):
         if path.name == "manifest.json":
@@ -223,10 +244,14 @@ def stamp_cues(web_dir: Path) -> str:
             raise StampError(f"cues: {path.name} is not {CUES_SCHEMA} for seed {seed}")
         if not isinstance(charter, str) or not re.fullmatch(r"[0-9a-f]{64}", charter):
             raise StampError(f"cues: {path.name} names no approved charter hash")
+        cues = body.get("cues")
+        if not isinstance(cues, list) or not all(_cue_ok(c) for c in cues):
+            raise StampError(f"cues: {path.name} needs cues with integer at_s and until_s (until_s not before at_s), a kind and an English text")
         files.append({"name": path.name, "seed": seed, "sha256": hashlib.sha256(data).hexdigest(), "charter_sha256": charter})
     manifest = {"schema": CUES_MANIFEST_SCHEMA, "files": files}
     (cues_dir / "manifest.json").write_bytes(json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode("ascii") + b"\n")
-    return f"listed {len(files)} cue files under {cues_dir.as_posix()}"
+    source = f" ({copied} copied from {source_dir.as_posix()})" if copied and source_dir is not None else ""
+    return f"listed {len(files)} cue files under {cues_dir.as_posix()}{source}"
 
 
 def stamp_intel(web_dir: Path, data_dir: Path, seeds: list[int]) -> str:
@@ -256,12 +281,28 @@ def stamp_kinematics(web_dir: Path, data_dir: Path) -> str:
     return f"wrote and verified {count} kinematics files under {kin_dir.as_posix()}"
 
 
+def stamp_ops(web_dir: Path, evidence_dir: Path) -> str:
+    """Copy the recorded runs' job execution evidence into web_dir/ops (agon.webops), validated against the shipped runs."""
+    from agon.webops import OPS_DIR, verify_ops_dir, write_ops
+
+    try:
+        write_ops(str(web_dir), str(evidence_dir))
+        count = verify_ops_dir(str(web_dir))
+    except (ValueError, OSError, KeyError, TypeError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise StampError(f"ops: {exc}") from exc
+    return f"wrote and verified {count} execution evidence files under {(web_dir / OPS_DIR).as_posix()}"
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("web_dir", type=Path)
     parser.add_argument("--sha", required=True, help="full commit sha to stamp")
     parser.add_argument("--data-dir", type=Path, help="generated data directory to verify")
     parser.add_argument("--seeds", default="", help="published seeds the manifest must list, e.g. 1,2,3")
+    parser.add_argument("--cues-dir", type=Path, default=Path(__file__).resolve().parent.parent / "web" / "cues",
+                        help="exported live cues to copy into the site (default: web/cues in the repository; absent until a charter is approved)")
+    parser.add_argument("--evidence-dir", type=Path, default=Path(__file__).resolve().parent.parent / "evidence",
+                        help="recorded run execution evidence (default: evidence/ in the repository)")
     args = parser.parse_args(argv)
     try:
         stamp_commit(args.web_dir, args.sha)
@@ -271,11 +312,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"verified {count} data files against {args.data_dir.as_posix()}/manifest.json")
             print(stamp_season(args.web_dir))
             print(stamp_match(args.web_dir, args.data_dir))
-            print(stamp_cues(args.web_dir))
+            print(stamp_cues(args.web_dir, args.cues_dir))
             print(stamp_intel(args.web_dir, args.data_dir, parse_seeds(args.seeds)))
             print(stamp_kinematics(args.web_dir, args.data_dir))
         runs = verify_runs(args.web_dir)
         print(f"verified {len(runs)} runs under {args.web_dir.as_posix()}/runs" + (f": {', '.join(runs)}" if runs else ""))
+        if args.data_dir is not None:
+            print(stamp_ops(args.web_dir, args.evidence_dir))
     except (StampError, KeyError, TypeError, ValueError) as exc:
         print(f"stamp_web: FAIL: {exc}")
         return 1

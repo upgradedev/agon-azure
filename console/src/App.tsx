@@ -18,6 +18,7 @@ import { Recap } from "./screens/recap";
 import { Verify } from "./screens/verify";
 import { DataLab } from "./screens/data-lab";
 import { HowItWorks } from "./screens/how-it-works";
+import { MediaOffice } from "./screens/media-office";
 import { About } from "./screens/about";
 import { NotFound } from "./screens/not-found";
 import { navigate, useRoute } from "./hooks/stores";
@@ -111,6 +112,7 @@ export function App({ initial }: { initial: InitialData }) {
         />
         <Verify active={route.view === "verify"} />
         <DataLab active={route.view === "data-lab"} />
+        <MediaOffice active={route.view === "media-office"} runs={runs} />
         <HowItWorks active={route.view === "how-it-works"} />
         <About active={route.view === "about"} runs={runs} />
         <NotFound active={route.view === "not-found"} />

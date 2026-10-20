@@ -26,7 +26,7 @@
   } catch (error) {
     /* No storage: the defaults apply. */
   }
-  var known = ["newsroom", "approve", "recap", "verify", "data-lab", "how-it-works", "about"];
+  var known = ["newsroom", "approve", "recap", "verify", "data-lab", "media-office", "how-it-works", "about"];
   var match = /^#\/([a-z-]+)/.exec(window.location.hash || "");
   var key = match && known.indexOf(match[1]) !== -1 ? match[1] : "home";
   root.setAttribute("data-boot-route", key);

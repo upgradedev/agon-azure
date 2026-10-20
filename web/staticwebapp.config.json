@@ -10,7 +10,8 @@
       "/match/*",
       "/cues/*",
       "/intel/*",
-      "/kinematics/*"
+      "/kinematics/*",
+      "/ops/*"
     ]
   },
   "globalHeaders": {

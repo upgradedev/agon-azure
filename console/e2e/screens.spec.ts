@@ -18,6 +18,7 @@ const SCREENS: { name: string; hash: string; view: string }[] = [
   { name: "06-how-it-works", hash: "#/how-it-works", view: "how-it-works" },
   { name: "07-data-lab", hash: "#/data-lab", view: "data-lab" },
   { name: "08-about", hash: "#/about", view: "about" },
+  { name: "09-media-office", hash: "#/media-office", view: "media-office" },
 ];
 
 const VIEWPORTS = [
@@ -32,6 +33,9 @@ async function settled(page: Page, view: string): Promise<void> {
   }
   if (view === "data-lab") {
     await expect(page.locator('[data-view="data-lab"] [data-state="ready"]')).toBeVisible({ timeout: 30_000 });
+  }
+  if (view === "media-office") {
+    await expect(page.locator('[data-view="media-office"] [data-ops]').first()).toBeAttached({ timeout: 30_000 });
   }
   if (view === "verify") {
     await expect(page.locator('[data-view="verify"] section[data-state="done"]').first()).toBeVisible({ timeout: 30_000 });
