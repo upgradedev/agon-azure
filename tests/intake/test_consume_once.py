@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import timedelta
 from typing import Any
 
 import govkit
@@ -438,3 +439,53 @@ def test_a_planted_block_identical_to_the_officers_own_decision_projects_only_th
     record = store.read(APPROVALS, verifier.approval_id_for(PLANTED)).body
     assert record["approver"] == govkit.OFFICER and record["decision"] == "approve" and record["channel"] == "teams"
     assert record["destinations"] == govkit.offered(env) and record["verified_at"] == planted_time
+
+
+# The red team's residual on the recovery path: a planted block whose times the planter chose.
+# The times cannot be proved, but they must be ones verify() could have written for this request
+# before the redelivery: canonical, inside issued_at..expires_at, received before verified,
+# not in the future and at most RECOVERY_WINDOW_SECONDS old.
+
+
+@pytest.mark.parametrize(
+    "received, verified",
+    [
+        ("1970-01-01T00:00:00+00:00", "1970-01-01T00:00:00+00:00"),  # before the request was issued
+        (govkit.later(5).isoformat(), "2090-01-01T00:00:00+00:00"),  # after the redelivery
+        (govkit.later(20).isoformat(), govkit.later(10).isoformat()),  # verified before it was received
+        (govkit.later(5).isoformat().replace("+00:00", "Z"), govkit.later(5).isoformat()),  # not canonical
+        (govkit.later(5).isoformat(), govkit.later(5).isoformat().replace("+00:00", ".5+00:00")),  # not canonical
+    ],
+)
+def test_a_planted_block_with_times_verify_could_not_have_written_is_not_projected(received: str, verified: str) -> None:
+    store, env = _planted_env(received_at=received, verified_at=verified)
+    _assert_refused_with_no_trace(store, env, govkit.teams_payload(env))
+
+
+def test_a_planted_block_older_than_the_recovery_window_is_not_projected() -> None:
+    planted_time = govkit.later(5).isoformat()
+    store, env = _planted_env(received_at=planted_time, verified_at=planted_time)
+    out = Out()
+    late = govkit.later(5 + verifier.RECOVERY_WINDOW_SECONDS + 1)
+    outcome = intake.handle_message("decisions-teams", intake.encode_message(RUN, govkit.teams_payload(env)), store, late, out)
+    assert (outcome.status, outcome.code) == ("refused", "already_consumed")
+    assert store.writes == [] and store.keys(APPROVALS) == [] and out.sent == []
+
+
+def test_the_red_teams_planted_expiry_cannot_reach_past_the_request_it_names() -> None:
+    """Planted: expires 60 s after issue, verified 1 s after issue, the officer taps an hour later.
+
+    The block's verified_at sits inside its own request and inside the window, so the residual
+    stays what the module docstring says: the record carries the planter's time for the officer's
+    real decision. A verified_at at or past expires_at is refused.
+    """
+    issued = int(govkit.T0.timestamp())
+    inside = govkit.T0.replace(microsecond=0) + timedelta(seconds=1)
+    store, env = _planted_env(expires_at=issued + 60, received_at=inside.isoformat(), verified_at=inside.isoformat())
+    out = Out()
+    outcome = intake.handle_message("decisions-teams", intake.encode_message(RUN, govkit.teams_payload(env)), store, govkit.later(3600), out)
+    assert (outcome.status, outcome.code) == ("verified_replay", "approved")
+
+    at_expiry = (govkit.T0.replace(microsecond=0) + timedelta(seconds=60)).isoformat()
+    store, env = _planted_env(expires_at=issued + 60, received_at=at_expiry, verified_at=at_expiry)
+    _assert_refused_with_no_trace(store, env, govkit.teams_payload(env))

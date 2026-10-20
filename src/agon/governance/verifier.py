@@ -32,9 +32,13 @@ stored consumed block is exactly the block this verifier would write for the red
 (`_is_this_decision`): steps 3 to 9 run again against the nonce document, the sealed bundle and the
 approver's current role, with expiry judged at the stored verified_at, and every decided field
 (approval id, decision, normalised approver, channel, confirmed rows, destinations, as offered)
-must equal the stored one as JSON, with no other field present; only the two times may differ.
+must equal the stored one as JSON, with no other field present; only the two times may differ,
+and they must be canonical, fall inside the request (issued_at <= received_at <= verified_at <
+expires_at), not lie after the redelivery and be at most `RECOVERY_WINDOW_SECONDS` older than it.
 A stored block proves nothing by itself: the fleet may create nonces, RBAC cannot constrain a
 field, so a nonce can be created already consumed. Anything that does not match writes nothing.
+What stays open: a planted block that equals the officer's real decision is recorded with times
+the planter chose inside those bounds; closing that needs a consumed block only id-api can sign.
 
 Every refusal before step 10 leaves the nonce unconsumed, so a malformed or forged decision cannot
 burn a nonce. A valid "changes" decision consumes the nonce too, so Teams "changes" followed by an
@@ -282,6 +286,10 @@ DECIDED_FIELDS: tuple[str, ...] = (
     "approval_id", "decision", "approver", "channel", "confirmed_rows", "destinations", "destinations_as_offered",
 )
 TIME_FIELDS: tuple[str, ...] = ("received_at", "verified_at")
+# How long after its first pass a redelivered decision may still complete its record. A real
+# redelivery comes back after the queue's visibility timeout, or later if the intake was down; a
+# day covers an outage, and it bounds how far a planted block's times can sit from the real tap.
+RECOVERY_WINDOW_SECONDS = 24 * 3600
 
 
 def _decided(decision: ApprovalDecision, checked: _Checked) -> dict[str, object]:
@@ -358,21 +366,47 @@ def _check_decision(decision: ApprovalDecision, store: Store, record: dict, at: 
     return _Checked(principal, approved_destinations)
 
 
-def _is_this_decision(decision: ApprovalDecision, store: Store, record: dict, block: dict) -> bool:
+def _times_hold(record: dict, block: dict, now: datetime) -> bool:
+    """The block's two times are ones verify() could have written for this nonce, before `now`.
+
+    verify() writes both with `_iso`, takes `received_at` from the decision and `verified_at` from
+    its clock, and only while the request is open, so: canonical strings, issued_at <= received_at
+    <= verified_at < expires_at, verified_at not after `now`, and no older than the recovery window.
+    The fleet chooses issued_at and expires_at when it plants a document, so these bounds cannot
+    make a planted time true; they keep it inside the request it names and within a day of the tap.
+    """
+    received_at = _aware(block.get("received_at"))
+    verified_at = _aware(block.get("verified_at"))
+    if received_at is None or verified_at is None:
+        return False
+    if block["received_at"] != _iso(received_at) or block["verified_at"] != _iso(verified_at):
+        return False
+    received, verified, at = _epoch(received_at), _epoch(verified_at), _epoch(now)
+    return (
+        int(record["issued_at"]) <= received <= verified < int(record["expires_at"])
+        and verified <= at
+        and at - verified <= RECOVERY_WINDOW_SECONDS
+    )
+
+
+def _is_this_decision(decision: ApprovalDecision, store: Store, record: dict, block: dict, now: datetime) -> bool:
     """True only when `block` is the consumed block verify() would have written for `decision`.
 
     A nonce can be created already consumed (the fleet holds create on nonces, and RBAC cannot
     constrain a field), so a stored block proves nothing by itself. Every check runs again against
     the nonce document, the sealed bundle and the approver's current role, with expiry judged at
     the stored verified_at, and the block must hold exactly the decided fields those checks give,
-    equal as JSON, plus the two times. The times are the only fields that may differ.
+    equal as JSON, plus two times that pass `_times_hold`. The times are the only fields that may
+    differ from what a fresh pass would decide.
     """
     if set(block) != set(DECIDED_FIELDS) | set(TIME_FIELDS):
         return False
     verified_at = _aware(block.get("verified_at"))
-    if verified_at is None or _aware(block.get("received_at")) is None:
+    if verified_at is None:
         return False
     try:
+        if not _times_hold(record, block, now):
+            return False
         checked = _check_decision(decision, store, record, verified_at)
     except (KeyError, TypeError, ValueError):
         return False  # a malformed planted document is refused, not retried into the poison queue
@@ -398,7 +432,7 @@ def verify(decision: ApprovalDecision, store: Store, now: datetime) -> VerifyRes
             by.get("channel") == decision.channel
             and record.get("bundle_sha256") == decision.bundle_sha256
             and store.read(APPROVALS, approval_id_for(decision.nonce)) is None
-            and _is_this_decision(decision, store, record, by)
+            and _is_this_decision(decision, store, record, by, now)
         ):
             # The same decision redelivered and no record yet: the first pass stopped between the
             # nonce write and the approval record, so complete the record from the stored nonce.
