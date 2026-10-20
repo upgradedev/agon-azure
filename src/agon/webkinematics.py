@@ -134,7 +134,8 @@ Ball speed
   speed_kmh_x10 is the pass or shot distance over its flight time. The drawn speed of a pass reads
   its distance and whether it was under pressure; the drawn speed of a shot does not read distance:
   it is a base per shot type (open play 70, header 42, penalty 88, free kick 82 km/h), plus 0.4 km/h
-  per point of the shooter's finishing above 60, minus 6 km/h under pressure, with uniform noise.
+  per point of the shooter's finishing above or below 60 (a finisher at 20 loses 16 km/h), minus
+  6 km/h under pressure, with uniform noise.
   The flight always ends before the next event; when the drawn speed would not get there in time,
   the flight is shortened and the published speed is the faster average that results.
 
@@ -147,9 +148,12 @@ Checks (metric M9)
   anchor_misses_under_1m       misses shorter than 1 m
   anchor_misses_beyond_cap     misses of 1 m or more next to an action no capped path reaches: the
                                player needed an average speed above the 9.5 m/s cap from his
-                               previous action or to his next one (the engine picks some actors at
-                               random). A player carries his velocity toward his next action through
-                               an anchor, so an unreachable next action can pull him off this one.
+                               nearest earlier action or to his nearest later one, however far apart
+                               in time (the engine picks some actors at random). A player carries
+                               his velocity toward his next action through an anchor, so an
+                               unreachable next action can pull him off this one. The count is of
+                               events: one impossible movement can count at both of its ends, or
+                               twice at one spot (a corner kick and its pass).
   anchor_misses_model_limit    the other misses of 1 m or more: limits of this simple motion model
   receiver_misses    completed passes whose receiver is not at the pass end at the second the ball
                      arrives (receiver_no_sample: he has no position at that second, for example

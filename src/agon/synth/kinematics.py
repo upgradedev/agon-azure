@@ -17,7 +17,8 @@ Ball. Every pass (complete, incomplete or out) and every shot gets a drawn ball 
 stated bounds (`drawn_speed_kmh_x10`). A pass speed reads its distance and whether it was played
 under pressure. A shot speed does NOT read distance: it is a base per shot type (open play, header,
 penalty, free kick), plus `SHOT_PER_FINISHING_KMH_X10` per point of the shooter's finishing above
-60, plus `SHOT_PRESSURE_KMH_X10` under pressure; both carry uniform noise. The flight time is the
+or below 60 (signed: a finisher at 20 loses 16 km/h), plus `SHOT_PRESSURE_KMH_X10` under pressure;
+both carry uniform noise. The flight time is the
 distance over that speed, and it must fit inside the gap to the next event; when it would not, the
 flight is shortened to the gap and the published speed is the faster average that results. The
 published `speed_kmh_x10` is always distance over flight time, so the two never disagree.
@@ -41,11 +42,13 @@ the model steps at 10 Hz (`SUBSTEPS`) in units of 0.1 mm (`UNITS_PER_DM` units p
 - Caps: speed at most `PLAYER_VMAX_MM_S` (per player, from pace: `VMAX_BASE_MM_S` plus
   `VMAX_PER_PACE_MM_S` per pace point) and a change of velocity vector of at most
   `PLAYER_AMAX_MM_S2` per second. The model never breaks a cap to reach an anchor, so some anchors
-  are missed. `anchor_misses` lists every missed actor event and `receiver_misses` every missed pass
-  arrival; `miss_summary` splits the actor misses into those under 1 m, those next to an action no
-  capped path can reach (the engine picks some actors at random, so one player can be asked to
-  cover more than the speed cap allows, from his previous action or to his next one), and the rest,
-  which are limits of this simple model.
+  are missed. `anchor_misses` lists every missed actor event; `receiver_arrivals` lists every pass
+  arrival with the receiver's distance from the pass end and `receiver_summary` counts the misses.
+  `miss_summary` splits the actor misses into those under 1 m, those next to an action no capped
+  path can reach (the engine picks some actors at random, so one player can be asked to cover more
+  than the speed cap allows, from his nearest earlier action or to his nearest later one), and the
+  rest, which are limits of this simple model. It counts events, so one impossible movement can be
+  counted at both of its end events, or twice at one spot (a corner kick and its pass).
 - Substitutes start where the player they replace stood; a sent-off player's track ends at the
   card. Each period runs from its kick-off second to its last event second.
 
@@ -89,7 +92,7 @@ PASS_PRESSURE_KMH_X10 = 40  # a pass played under pressure is hit harder
 PASS_NOISE_KMH_X10 = 60  # uniform +- noise
 PASS_BOUNDS_KMH_X10 = (150, 1150)
 SHOT_BASE_KMH_X10: dict[str, int] = {"open_play": 700, "header": 420, "penalty": 880, "free_kick": 820}
-SHOT_PER_FINISHING_KMH_X10 = 4  # per point of finishing above 60
+SHOT_PER_FINISHING_KMH_X10 = 4  # per point of finishing above or below 60 (signed)
 SHOT_PRESSURE_KMH_X10 = -60
 SHOT_NOISE_KMH_X10 = 120
 SHOT_BOUNDS_KMH_X10 = (300, 1350)
@@ -577,8 +580,9 @@ def anchor_misses(record: Mapping[str, Any], events: Sequence[Mapping[str, Any]]
     """Every actor event whose actor is not at the event location at the event second.
 
     Each miss carries its distance (`miss_dm`, None when the player has no sample then) and the
-    average speed he needed from his action at the previous second (`need_mm_s`) and to his action
-    at the next second (`need_next_mm_s`) in the same period, None where there is none.
+    average speed he needed from his nearest action at an earlier second (`need_mm_s`) and to his
+    nearest action at a later second (`need_next_mm_s`) in the same period, however far apart in
+    time, None where there is none.
     """
     tracks = _tracks(record)
     acts = _actor_events(events)
