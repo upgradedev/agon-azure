@@ -432,6 +432,26 @@ def verify_kinematics_dir(kin_dir: str | os.PathLike[str], data_dir: str | os.Pa
     return len(manifest["files"]) + 1
 
 
+def full_match_summary(body: Mapping[str, Any]) -> dict[str, int]:
+    """Descriptive figures over outfield players on the pitch for every second of both periods."""
+    span = {per["period"]: (per["start_s"], per["end_s"]) for per in body["periods"]}
+    whole: dict[str, int] = {}
+    for per in body["periods"]:
+        for t in per["players"]:
+            if t["start_s"] == per["start_s"] and t["start_s"] + len(t["xy"]) // 2 - 1 == per["end_s"]:
+                whole[t["player_id"]] = whole.get(t["player_id"], 0) + 1
+    keepers = {p.player_id for c in build_world(body["seed"]).clubs for p in c.players if p.position == "GK"}
+    rows = [p for p in body["players"] if whole.get(p["player_id"]) == len(span) and p["player_id"] not in keepers]
+    n = len(rows)
+    return {
+        "players": n,
+        "mean_distance_dm": sum(p["distance_dm"] for p in rows) // n if n else 0,
+        "mean_sprints": sum(len(p["sprints"]) for p in rows) // n if n else 0,
+        "min_top_kmh_x10": min((p["top_speed_kmh_x10"] for p in rows), default=0),
+        "max_top_kmh_x10": max((p["top_speed_kmh_x10"] for p in rows), default=0),
+    }
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m agon.webkinematics", description=__doc__.splitlines()[0])
     source = parser.add_mutually_exclusive_group(required=True)
@@ -447,7 +467,13 @@ def main(argv: Sequence[str] | None = None) -> int:
         c = body["checks"]
         sys.stdout.write(
             f"{entry['name']} sha256 {entry['sha256']} events_sha256 {entry['events_sha256']}"
-            f" cap_violations {c['cap_violations']} anchor_misses {c['anchor_misses']} of {c['anchors']}\n"
+            f" cap_violations {c['cap_violations']} anchor_misses {c['anchor_misses']} of {c['anchors']}"
+            f" max_miss_dm {c['max_anchor_miss_dm']}\n"
+        )
+        s = full_match_summary(body)
+        sys.stdout.write(
+            f"  outfield players on for the whole match {s['players']}: mean distance {s['mean_distance_dm']} dm,"
+            f" mean sprints {s['mean_sprints']}, top speed {s['min_top_kmh_x10']} to {s['max_top_kmh_x10']} (tenths of km/h)\n"
         )
     sys.stdout.write(f"kinematics files {count} model {manifest['model']}\n")
     return 0

@@ -74,7 +74,63 @@ opposite touchlines. It is a marker, not a location of play.
 A planned substitution has no qualifier. An injury replacement (only in storyline matches, section
 5) has `qualifier` `injury`; `validate_event` allows exactly these two.
 
-**Brief-field mapping table and tracking data.** Not built yet.
+### Synthetic kinematics (tracking layer)
+
+The engine produces events, not tracking. `agon.synth.kinematics` (model `synth-kin-v1`) adds a
+synthetic tracking layer on top of a finished event log. It reads the events and the seed's world
+(pace, starting elevens) and never changes them; its only random draws are on its own stream
+(`StreamId.KINEMATICS`), which the engine never draws, so every event log, manifest and season hash
+is unchanged (`tests/test_synth_additive.py` and `tests/test_synth_season.py` stay green). It is a
+simple, documented motion model, not a physics or biomechanics simulation and not a measurement.
+
+- **Ball.** Every pass and shot gets a speed from its distance, type and pressure (constants in the
+  module), inside bounds of 15 to 115 km/h for passes and 30 to 135 km/h for shots. The flight is
+  distance over speed and always ends before the next event; when it would not, the flight is
+  shortened and the published speed is the faster average, so speed always equals distance over
+  flight time.
+- **Players.** One position per second for every player on the pitch and the ball, in decimetres,
+  frame `home_attacks_high_x_both_periods`. Each club keeps a fixed 4-3-3 that shifts with the ball,
+  pushes up and widens in possession and drops and narrows out of it; each player has a personal
+  offset; keepers track the ball in their box. The actor of every event is placed at the event
+  location at the event second, and the receiver of a completed pass at the pass end when the ball
+  arrives. Internally the model steps at 10 Hz with a speed cap of 9.5 m/s (34.2 km/h; lower for
+  slower players: 7.8 m/s plus 0.02 m/s per pace point) and an acceleration cap of 4.5 m/s^2, and it
+  never breaks a cap to reach an anchor. Substitutes start where the player they replace stood; a
+  sent-off player's track ends at the card.
+- **Triggers.** `agon.interpret.kinematics.triggers_from_segments` reads the published 1 Hz samples,
+  one stream per period: sprint at 25.2 km/h or more, top-speed trigger at 30 km/h or more, a
+  milestone every 2 km across the match. At 1 Hz every speed is a 1-second average.
+
+**Metric M9 and anchors.** Self-measured, Windows 11, Python 3.11, branch `b/kinematics`, command
+`python -m agon.synth.kinematics --seeds 1,2,3` (exit 0, about 17 s total wall time) for the cap
+violations and `python -m agon.webkinematics --seeds 1,2,3 --out build/kinematics` for the rest:
+
+| Seed | Cap violations | Actors not at their event location | Largest miss | Outfield players on all match: mean distance, mean sprints, top speeds |
+|---|---|---|---|---|
+| 1 | 0 | 99 of 1647 | 19.4 m | 11 players: 8.16 km, 25 sprints, 25.5 to 33.4 km/h |
+| 2 | 0 | 103 of 1622 | 4.1 m | 12 players: 7.21 km, 25 sprints, 31.6 to 33.1 km/h |
+| 3 | 0 | 78 of 1587 | 30.0 m | 12 players: 7.71 km, 25 sprints, 31.6 to 33.1 km/h |
+
+The check reads the published decimetre samples: step speed at most 9.7 m/s, change of step at most
+4.8 m/s^2 (the model caps plus the worst-case decimetre rounding of a difference and of a second
+difference), positions within 10 m of the lines, ball speeds in bounds and flights inside their gap.
+`python -m agon.synth.kinematics --seeds 1 --mutate` plants one 15 m teleport and must exit 1; the
+determinism workflow runs both. Most misses are under 1 m; the large ones are actions the engine
+assigns to a player who cannot physically get there, because it picks some actors at random. The
+misses are listed per event id by `agon.synth.kinematics.anchor_misses` and counted in every web
+file, never hidden.
+
+**Brief-field mapping.**
+
+| Brief item | Field | Where |
+|---|---|---|
+| Player name tag with speed and distance indicators at thresholds | `players[]`: `top_speed_kmh_x10`, `sprints`, `top_speed_triggers`, `distance_milestones`, `distance_dm`, and the 1 Hz track; names from `<seed>.world.json` | `web/kinematics/<seed>.kinematics.json` |
+| Pass distance | `ball_flights[].dist_dm`; pass distance in metres from `agon.interpret.features.pass_distance_m` | kinematics file; interpret |
+| Pass accuracy | event outcome (`complete`, `incomplete`, `out`); `pass_accuracy_pct` in `agon.governance.recompute` | event log; Fact Gate |
+| Pass difficulty | `agon.interpret.features.pass_difficulty` (100 x (1 minus the modelled completion chance)) | interpret |
+| Ball speed | `ball_flights[].speed_kmh_x10` for passes | kinematics file |
+| Shot speed | `ball_flights[].speed_kmh_x10` for shots | kinematics file |
+| Auto-eventing from video | not built | none |
 
 ### The season
 
@@ -169,8 +225,14 @@ runs that widened-and-relocked attack. Before the bands were written we had read
 to 1040 (goals, shots, passes, cards, corners); the bands were not set to bracket them.
 
 Two bands need tracking data (sprints per outfield player, distance per outfield player). The
-generator has none yet, so they print NOT MEASURABLE and count as not passed. With the M2 threshold
-at 20 of 22, every other band must pass.
+generator has none, so they print NOT MEASURABLE and count as not passed. With the M2 threshold
+at 20 of 22, every other band must pass. The synthetic kinematics layer (section 2) is not folded
+into M2: M2 and its committed record stay as they are. For information only, that layer gives the
+outfield players on for a whole match on seeds 1 to 3 a mean of 7.2 to 8.2 km and 25 sprints (table
+in section 2), so on those seeds it would sit below the distance band and inside the sprint band.
+Its shape and speed constants were set from general knowledge and not changed after those figures
+were read; its anchor-approach rules were changed only to reduce anchor misses on seeds 1 to 3; and
+it was never run on the held-out seeds.
 
 **Fitting.** The engine constants in `agon.synth.engine` (the block under "Calibrated constants")
 were moved by hand, not by the evolution strategy the build spec describes, which is not built.
@@ -333,7 +395,13 @@ python -m agon.synth.season --season 1 --hash-out build/season-1/hash.txt --out 
 python -m agon.referee.storyline_index --out build/storylines.json
 python -m agon.webseason --season 1 --storylines build/storylines.json --out build/web-season
 python -m agon.synth.bands --seeds 1001-1200 --json-out build/bands-heldout.json
+python -m agon.synth.kinematics --seeds 1,2,3 --print-hash
+python -m agon.webkinematics --seeds 1,2,3 --out build/kinematics
 ```
+
+At deploy, `ci/stamp_web.py` also writes `web/kinematics/` from the event files it has just
+verified in `web/data/`; each kinematics file names the sha256 of its event file, and the README
+shipped beside them (`agon.webkinematics.README_TEXT`) states units, frame, rate and joins.
 
 `python -m agon.synth.season --season 1 --matchdays N` builds matchdays 1 to N only; a test shows
 the cut changes no match.
@@ -354,7 +422,10 @@ https://github.com/upgradedev/agon-azure/actions/runs/39277712146 (ubuntu season
 ## 8. Maintenance and known gaps
 
 - Engine constants fitted by hand on calibration seeds; M2 held-out is 18 of 22 (section 4).
-- No tracking data and no video, so the sprint and distance bands cannot be measured.
+- No measured tracking and no video. Positions come from the synthetic kinematics layer (section
+  2): a simple motion model, 1 Hz published, with some actors missing their event location when the
+  engine's choice of actor is physically impossible. The sprint and distance bands stay NOT
+  MEASURABLE in M2, and on seeds 1 to 3 the layer's distances are below the distance band.
 - Storyline labels cover injected interventions only; counterfactual twins are not built.
 - The sub marker location described in section 2.
 - The season is 30 independent matches of one league. Every club starts its fixed 4-3-3 in every
