@@ -170,8 +170,9 @@ def executions_html(evidence: dict[str, Any], run: dict[str, Any]) -> str:
   .label {{ position: absolute; left: 120px; width: 330px; font-size: 25px; }}
   .label span {{ display: block; font-family: "DejaVu Sans Mono", Consolas, monospace; font-size: 18px; color: #8b949e; margin-top: 6px; }}
   .bar {{ position: absolute; height: 40px; border-radius: 8px; }}
-  .times {{ position: absolute; left: {left}px; width: {width}px; font-size: 19px; color: #c9d1d9; white-space: nowrap;
-    overflow: hidden; text-overflow: ellipsis; }}
+  .times {{ position: absolute; left: {left}px; max-width: {width}px; font-size: 19px; color: #c9d1d9; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; background: #0b0f14; padding: 2px 8px 2px 0; z-index: 3; }}
+  .bar, .label {{ z-index: 2; }}
   .tick {{ position: absolute; top: 236px; height: 500px; border-left: 1px dashed #26303b; }}
   .tick span {{ position: absolute; top: 506px; left: -30px; font-size: 18px; color: #8b949e; }}
   .gap {{ position: absolute; top: 236px; height: 500px; background: rgba(110, 168, 254, .07); border-left: 2px solid #26303b; border-right: 2px solid #26303b; }}

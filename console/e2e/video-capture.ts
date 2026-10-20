@@ -9,8 +9,8 @@
   rehearsal). Nothing here runs on a developer machine.
 
   Per web clip:
-  1. A fresh context at the beat's framing (1920 x 1080, or 375 x 812 at device
-     scale 2 for a phone beat), dark theme, first-run guide skipped, recording.
+  1. A fresh context at the beat's framing (1920 x 1080, or 375 x 812 for a
+     phone beat), dark theme, first-run guide skipped, recording.
   2. Before anything is used, the page's body data-commit must equal
      AGON_VIDEO_RELEASE_SHA. The run is the one the sheet names, or with
      run_id "default" the first run in the live runs/index.json, which must be
@@ -76,9 +76,10 @@ interface StillMeta {
   placeholder: string | null;
 }
 
+/* Device scale 1: Playwright's recorder takes frames at CSS size, so a scale of 2 would only pad the frame. */
 const FRAMING = {
   desktop: { width: 1920, height: 1080, scale: 1 },
-  phone: { width: 375, height: 812, scale: 2 },
+  phone: { width: 375, height: 812, scale: 1 },
 } as const;
 const STILL = { width: 1920, height: 930 };
 const MARGIN_SECONDS = 1.5;
