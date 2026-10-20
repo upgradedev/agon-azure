@@ -1,0 +1,94 @@
+AGON SUBMISSION VIDEO: THE THREE MICROSOFT TEAMS CLIPS THE OWNER RECORDS
+
+Plain text on purpose. ci/video/compose.py reads these clips for the final cut;
+CI never sees them and they are never committed.
+
+WHERE THE CLIPS GO
+
+Put the three files in one local folder OUTSIDE the repository, for example
+C:\Users\<you>\Videos\agon-teams\. Name each file after its clip, with any of
+these endings: .mp4, .mov, .mkv, .webm. compose.py looks for exactly:
+
+  card-arrives.<ext>
+  officer-approves.<ext>
+  card-published.<ext>
+
+WHAT EACH CLIP SHOWS (recorded during the second real approval, 2026-10-20)
+
+Use only the team "agon" and its channel "Match Day". Fictional clubs and players
+only. No other team, chat or company content may be on screen.
+
+1. card-arrives (beat 1, "card-arrives")
+   The approval card arriving in the Match Day channel at full time, without
+   anyone asking: the report headline, the hash, the editions.
+   Narration over it: "Full time. Agon has written the club's match report in
+   four languages, and nothing is published until the media officer approves
+   this exact bundle in Microsoft Teams."
+   Needs at least 14 seconds of picture after its trim point (the beat may run
+   up to 12.5 seconds).
+
+2. officer-approves (beat 4, "officer-approves")
+   The officer reading the report they attest, ticking the sentence the card
+   flags for a person (the Confirm row), unticking Instagram in the
+   destinations, and tapping Approve.
+   Narration over it: "The card arrives without anyone asking. The officer reads
+   the report they attest, ticks the flagged sentence, leaves Instagram out, and
+   approves."
+   Needs at least 16 seconds of picture after its trim point (the beat may run
+   up to 15 seconds). Keep the actions in the first 13 seconds.
+
+3. card-published (first part of beat 6, "published")
+   The same card after the run publishes, updated in place to Published,
+   naming the destinations that received the report.
+   It fills the first 6 seconds of the beat; the Recap web capture follows.
+   Needs at least 7 seconds of picture after its trim point.
+
+TRIMS THE COMPOSER EXPECTS
+
+Each clip is used from its trim point onwards, for exactly the length its beat
+measures. The beat sheet (video/beats.json) sets trim_start 0 for all three, so
+either cut each file to start on its first useful frame, or pass the offset in
+seconds on the command line, for example:
+
+  --trim card-arrives=3.2 --trim officer-approves=1.5 --trim card-published=0.8
+
+A clip that is too short after its trim fails the compose with the number of
+seconds it lacks. Nothing is stretched or looped to hide it.
+
+Picture: any size works; each clip is scaled to fit the 1920 x 930 area above
+the caption band and padded on a dark background. A 1920 x 1080 desktop
+recording of the Teams window looks best. Sound in the clips is not used: the
+narration is the only audio, and captions are burned in over every beat.
+
+THE OWNER'S NAME
+
+A Teams screen may show the owner's own name (the responder, the channel
+member list, the avatar). The owner decides whether to blur it. compose.py
+blurs any box of a clip, given in that clip's own pixels (x, y from the top
+left, then width and height, at least 8 x 8), repeatable:
+
+  --blur officer-approves:1480,22,300,40 --blur card-published:96,310,260,36
+
+The blur covers the whole clip at that position, so keep the window still.
+
+THE FINAL CUT, ON THE OWNER'S MACHINE (ffmpeg 8.1.1, Python standard library only)
+
+1. Dispatch the video workflow on main with the commit the live site serves:
+     sha="$(curl -fsS https://jolly-stone-0c9c8a003.4.azurestaticapps.net/ | grep -o 'data-commit="[0-9a-f]\{40\}"' | cut -d'"' -f2)"
+     gh workflow run video.yml --repo upgradedev/agon-azure --ref main -f release_sha="$sha" -f beats=all
+2. Download its narration and clips (run id from gh run list --workflow video.yml):
+     gh run download <run-id> --repo upgradedev/agon-azure -n video-narration -D <work>/narration
+     gh run download <run-id> --repo upgradedev/agon-azure -n video-clips -D <work>/clips
+3. Compose with the Teams clips:
+     python ci/video/compose.py --beats video/beats.json --narration <work>/narration \
+       --clips <work>/clips --teams-dir <your teams folder> --release-sha <sha> --out <work>/final
+   (add --trim and --blur as above)
+4. Run the gate on the file you will upload:
+     python ci/video/sync_gate.py <work>/final/agon-video-final.mp4 --receipt <work>/final/receipt.json \
+       --srt <work>/final/captions.srt --cap-seconds 115
+5. Upload <work>/final/agon-video-final.mp4 to YouTube as Public (the owner's step), optionally with
+   captions.srt as its subtitles, and record the sha256 from receipt.json next to the YouTube URL.
+
+The captions use the font DejaVu Sans. CI has it; on Windows libass falls back to
+a system font unless DejaVu Sans is installed, so the final cut may look a little
+different from the CI preview. The timing and the gate do not depend on the font.

@@ -179,11 +179,16 @@ def _part(raw: Any, where: str, last: bool) -> Part:
         raise BeatSheetError(f"{where}.facts must be a list")
     clean_facts = []
     for n, fact in enumerate(facts):
-        if not isinstance(fact, dict) or set(fact) - {"text", "within"}:
-            raise BeatSheetError(f"{where}.facts[{n}] must be an object with text and an optional within")
+        if not isinstance(fact, dict) or set(fact) - {"text", "within", "file"} or {"within", "file"} <= set(fact):
+            raise BeatSheetError(f"{where}.facts[{n}] must be an object with text and at most one of within or file")
         clean = {"text": _text(fact.get("text"), f"{where}.facts[{n}].text", limit=200)}
         if "within" in fact:
             clean["within"] = _text(fact["within"], f"{where}.facts[{n}].within", limit=200)
+        if "file" in fact:
+            served = _text(fact["file"], f"{where}.facts[{n}].file", limit=200)
+            if not re.fullmatch(r"[a-z0-9{}_.-]+(/[a-z0-9{}_.-]+)*", served) or ".." in served:
+                raise BeatSheetError(f"{where}.facts[{n}].file must be a path the live site serves, such as runs/{{run_id}}/card.json")
+            clean["file"] = served
         try:
             re.compile(clean["text"])
         except re.error as exc:
@@ -213,7 +218,7 @@ def parse_sheet(data: Any) -> Sheet:
         raise BeatSheetError("site must be an https origin with no path")
     run_id = _text(data.get("run_id"), "run_id")
     if not RUN_ID.match(run_id):
-        raise BeatSheetError("run_id must be a run slug such as run-c8a19020c98a")
+        raise BeatSheetError("run_id must be default (the live site's first run) or a run slug such as run-c8a19020c98a")
     theme = data.get("theme", "dark")
     if theme not in ("dark", "light"):
         raise BeatSheetError("theme must be dark or light")

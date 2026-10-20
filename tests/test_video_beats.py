@@ -256,3 +256,136 @@ def test_named_parts_take_their_frames_and_the_last_takes_the_rest():
     assert compose.part_frames(beat, 350) == [150, 200]
     with pytest.raises(compose.ComposeError):
         compose.part_frames(beat, 160)
+
+
+# --------------------------------------------------------------------- stills
+
+
+import stills  # noqa: E402
+
+LIVE_SHA = "92a8394" + "0" * 33
+EVIDENCE = {
+    "schema": "agon.run-executions/1",
+    "recorded_run": "run-c8a19020c98a",
+    "bundle_sha256": "c8a19020c98a8de7dab58475bc0b2466129d3de771e30fd8ec519ab2716382dd",
+    "source_command": "az containerapp job execution list -g rg-agon-swc -n <job>",
+    "captured_at": "2026-10-20",
+    "executions": [
+        {"job": "job-agon-fleet", "execution": "job-agon-fleet-rvh66", "status": "Succeeded",
+         "start": "2026-10-19T21:19:06+00:00", "end": "2026-10-19T21:21:36+00:00", "role": "fleet: paused, process ended"},
+        {"job": "job-agon-intake", "execution": "job-agon-intake-669v2", "status": "Succeeded",
+         "start": "2026-10-19T21:24:36+00:00", "end": "2026-10-19T21:25:27+00:00", "role": "intake: verified"},
+        {"job": "job-agon-fleet", "execution": "job-agon-fleet-qwtgb", "status": "Succeeded",
+         "start": "2026-10-19T21:25:06+00:00", "end": "2026-10-19T21:26:37+00:00", "role": "fleet: resumed"},
+        {"job": "job-agon-publisher", "execution": "job-agon-publisher-fw22b", "status": "Succeeded",
+         "start": "2026-10-19T21:25:36+00:00", "end": "2026-10-19T21:26:22+00:00", "role": "publisher: published"},
+    ],
+}
+RUN = {
+    "run_id": "run-c8a19020c98a",
+    "label": "Recorded run, 2026-10-19, commit 0195a32",
+    "bundle": {"sha256": EVIDENCE["bundle_sha256"]},
+    "approval": {"approved_at": "2026-10-19T21:24:58Z"},
+}
+
+
+def test_the_execution_facts_hold_for_the_recorded_run():
+    facts = stills.execution_facts(EVIDENCE, RUN)
+    assert facts and all(ok for _, ok in facts), [f for f, ok in facts if not ok]
+
+
+@pytest.mark.parametrize(
+    "mutate, broken",
+    [
+        (lambda e: e.update(recorded_run="run-other"), "names the recorded run"),
+        (lambda e: e.update(bundle_sha256="0" * 64), "bundle hash"),
+        (lambda e: e["executions"][2].update(start="2026-10-19T21:24:00+00:00"), "new worker process started after the intake"),
+        (lambda e: e["executions"].append(dict(e["executions"][3], execution="job-agon-publisher-two")), "exactly one Publisher"),
+        (lambda e: e["executions"][0].update(end="2026-10-19T21:25:00+00:00"), "ended before the approval"),
+        (lambda e: e["executions"][1].update(status="Failed"), "every execution succeeded"),
+    ],
+)
+def test_each_broken_execution_fact_is_named(mutate, broken):
+    evidence = copy.deepcopy(EVIDENCE)
+    mutate(evidence)
+    failed = [f for f, ok in stills.execution_facts(evidence, RUN) if not ok]
+    assert any(broken in f for f in failed), failed
+
+
+def test_the_executions_still_shows_times_and_its_source_and_no_dashes():
+    page = stills.executions_html(EVIDENCE, RUN)
+    for text in ("21:21:36", "21:25:06", "Approval recorded 21:24:58 UTC", stills.html.escape(EVIDENCE["source_command"]),
+                 "evidence/run-c8a19020c98a.executions.json", "process 2"):
+        assert text in page
+    assert EM not in page and EN not in page
+
+
+def _fake_site(commit: str, first_provenance: str = "pipeline"):
+    pages = {
+        f"{bs.load_sheet(SHEET_PATH).site}/": f'<body data-commit="{commit}">',
+        f"{bs.load_sheet(SHEET_PATH).site}/runs/index.json": json.dumps(
+            {"runs": [{"run_id": RUN["run_id"], "provenance": first_provenance}]}),
+        f"{bs.load_sheet(SHEET_PATH).site}/runs/{RUN['run_id']}.json": json.dumps(RUN),
+    }
+    return lambda url: pages[url]
+
+
+def _repo(tmp_path: Path, with_evidence: bool) -> Path:
+    (tmp_path / "video" / "stills").mkdir(parents=True)
+    (tmp_path / "video" / "stills" / "architecture.html").write_text(
+        (ROOT / "video" / "stills" / "architecture.html").read_text(encoding="utf-8"), encoding="utf-8")
+    if with_evidence:
+        (tmp_path / "evidence").mkdir()
+        (tmp_path / "evidence" / "run-c8a19020c98a.executions.json").write_text(json.dumps(EVIDENCE), encoding="utf-8")
+    return tmp_path
+
+
+def test_stills_build_both_pages_for_the_live_default_run(tmp_path):
+    out = tmp_path / "out"
+    code = stills.main(["--beats", str(SHEET_PATH), "--release-sha", LIVE_SHA, "--out", str(out),
+                        "--repo", str(_repo(tmp_path / "repo", True))], fetch=_fake_site(LIVE_SHA))
+    assert code == 0
+    for name in ("architecture", "executions"):
+        meta = json.loads((out / f"still-{name}.meta.json").read_text(encoding="utf-8"))
+        assert meta["placeholder"] is None and meta["run_id"] == RUN["run_id"] and not meta["facts_failed"]
+        assert (out / f"still-{name}.html").is_file()
+
+
+def test_stills_refuse_another_live_commit_and_a_design_preview_default(tmp_path):
+    repo = _repo(tmp_path / "repo", True)
+    args = ["--beats", str(SHEET_PATH), "--release-sha", LIVE_SHA, "--out", str(tmp_path / "out"), "--repo", str(repo)]
+    assert stills.main(args, fetch=_fake_site("f" * 40)) == 1
+    with pytest.raises(stills.StillError, match="not a pipeline run"):
+        stills.main(args, fetch=_fake_site(LIVE_SHA, "design_preview"))
+
+
+def test_missing_evidence_fails_when_enforced_and_is_a_placeholder_when_reported(tmp_path):
+    repo = _repo(tmp_path / "repo", False)
+    base = ["--beats", str(SHEET_PATH), "--release-sha", LIVE_SHA, "--repo", str(repo), "--only", "worker-resumes"]
+    assert stills.main([*base, "--out", str(tmp_path / "a")], fetch=_fake_site(LIVE_SHA)) == 1
+    assert stills.main([*base, "--out", str(tmp_path / "b"), "--facts", "report"], fetch=_fake_site(LIVE_SHA)) == 0
+    meta = json.loads((tmp_path / "b" / "still-executions.meta.json").read_text(encoding="utf-8"))
+    assert "no evidence file" in meta["placeholder"]
+
+
+def test_architecture_still_names_the_live_url_the_repo_and_the_load_bearing_sentence():
+    text = (ROOT / "video" / "stills" / "architecture.html").read_text(encoding="utf-8")
+    sheet = bs.load_sheet(SHEET_PATH)
+    _, facts = stills.build_architecture(ROOT, sheet, RUN)
+    assert facts and all(ok for _, ok in facts), facts
+    assert EM not in text and EN not in text
+
+
+def test_a_served_file_fact_needs_a_path_and_cannot_also_scope_to_the_page():
+    good = _broken(lambda d: d["beats"][6]["visual"][0]["facts"].append({"file": "runs/{run_id}/card.json", "text": "x"}))
+    bs.parse_sheet(good)
+    with pytest.raises(bs.BeatSheetError, match="at most one of within or file"):
+        bs.parse_sheet(_broken(lambda d: d["beats"][6]["visual"][0]["facts"].append(
+            {"file": "runs/x.json", "within": "body", "text": "x"})))
+    with pytest.raises(bs.BeatSheetError, match="a path the live site serves"):
+        bs.parse_sheet(_broken(lambda d: d["beats"][6]["visual"][0]["facts"].append({"file": "../secret", "text": "x"})))
+
+
+def test_the_closing_narration_says_the_sentence_the_still_shows():
+    close = next(b for b in bs.load_sheet(SHEET_PATH).beats if b.id == "close")
+    assert close.narration.startswith(stills.LOAD_BEARING)

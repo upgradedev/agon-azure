@@ -6,12 +6,16 @@
 #            proven to fail for the right reason on every broken synthetic file and
 #            to pass the good ones (ci/video/sync_gate_selftest.py; one good file is
 #            built by narrate.py and compose.py, so the composer is held to the gate).
-# rehearsal  one beat end to end before merge, because video.yml can only be
-#            dispatched on main: the real Playwright capture of the verify beat from
-#            the live site at the commit it serves, an espeak-ng STAND-IN narration
-#            (never the submitted voice: Azure Speech runs only in video.yml on main),
-#            compose, and the sync gate on the composed mp4. The receipt and the
-#            step summary say stand-in.
+# rehearsal  the whole sheet end to end before merge, because video.yml can only
+#            be dispatched on main: the stills built and checked (ci/video/stills.py),
+#            the real Playwright capture of every web beat from the live site at the
+#            commit it serves, an espeak-ng STAND-IN narration (never the submitted
+#            voice: Azure Speech runs only in video.yml on main), compose with Teams
+#            beats as labelled cards, and the sync gate on the composed mp4. Narrated
+#            facts are checked with AGON_VIDEO_FACTS=report: one that does not hold on
+#            the live site is listed in the receipt, the step summary and a warning
+#            annotation, and the rehearsal goes on (compose --rehearsal); video.yml
+#            enforces them and refuses such a clip. The receipt says stand-in.
 #
 # Actions are pinned by full commit sha; the comment names the version.
 
@@ -23,6 +27,7 @@ on:
       - "video/**"
       - "ci/video/**"
       - "ci/fixtures/video/**"
+      - "evidence/**"
       - "tests/test_video_beats.py"
       - "console/e2e/video-capture.ts"
       - "console/playwright.video.config.ts"
@@ -36,6 +41,7 @@ on:
       - "video/**"
       - "ci/video/**"
       - "ci/fixtures/video/**"
+      - "evidence/**"
       - "tests/test_video_beats.py"
       - "console/e2e/video-capture.ts"
       - "console/playwright.video.config.ts"
@@ -54,7 +60,7 @@ concurrency:
 env:
   # The cap, pinned here, in ci/video/sync_gate.py and in ci/fixtures/video/gate_cases.json.
   VIDEO_CAP_SECONDS: "115"
-  REHEARSAL_BEATS: verify
+  REHEARSAL_BEATS: all
 
 jobs:
   selftest:
@@ -128,6 +134,12 @@ jobs:
         run: |
           python ci/video/narrate.py --beats video/beats.json --out "$RUNNER_TEMP/narration" \
             --only "$REHEARSAL_BEATS" --engine espeak --summary "$GITHUB_STEP_SUMMARY"
+      - name: Build the stills and report their facts
+        env:
+          RELEASE_SHA: ${{ steps.live.outputs.sha }}
+        run: |
+          python ci/video/stills.py --beats video/beats.json --release-sha "$RELEASE_SHA" \
+            --out "$RUNNER_TEMP/stills" --only "$REHEARSAL_BEATS" --facts report
       - name: Exact pins, and the lock agrees with package.json
         working-directory: console
         run: node scripts/check-deps.mjs --lock
@@ -137,13 +149,15 @@ jobs:
       - name: Chromium for Playwright (here only)
         working-directory: console
         run: npx --no-install playwright install --with-deps chromium
-      - name: Record the rehearsal clip from the live site
+      - name: Record the rehearsal clips and stills from the live site
         working-directory: console
         env:
           AGON_VIDEO_BEATS: ${{ github.workspace }}/video/beats.json
           AGON_VIDEO_RELEASE_SHA: ${{ steps.live.outputs.sha }}
           AGON_VIDEO_ONLY: ${{ env.REHEARSAL_BEATS }}
           AGON_VIDEO_CLIPS: ${{ runner.temp }}/clips
+          AGON_VIDEO_STILLS: ${{ runner.temp }}/stills
+          AGON_VIDEO_FACTS: report
         run: npx --no-install playwright test -c playwright.video.config.ts
       - name: Compose the rehearsal preview
         env:
@@ -151,7 +165,16 @@ jobs:
         run: |
           python ci/video/compose.py --beats video/beats.json --narration "$RUNNER_TEMP/narration" \
             --clips "$RUNNER_TEMP/clips" --release-sha "$RELEASE_SHA" --out "$RUNNER_TEMP/preview" \
-            --summary "$GITHUB_STEP_SUMMARY"
+            --rehearsal --summary "$GITHUB_STEP_SUMMARY"
+      - name: Warn on every narrated fact that does not hold on the live site
+        run: |
+          python - "$RUNNER_TEMP/preview/receipt.json" <<'PY'
+          import json, sys
+          receipt = json.load(open(sys.argv[1], encoding="utf-8"))
+          for line in receipt.get("facts_failed", []):
+              print(f"::warning title=Narrated fact not on the live site::{line}")
+          print(f"{len(receipt.get('facts_failed', []))} narrated facts do not hold on the live site")
+          PY
       - name: The sync gate on the composed mp4
         run: |
           python ci/video/sync_gate.py "$RUNNER_TEMP/preview/agon-video-preview.mp4" \
@@ -169,6 +192,7 @@ jobs:
             ${{ runner.temp }}/preview/captions.srt
             ${{ runner.temp }}/preview/gate.json
             ${{ runner.temp }}/clips/*.webm
+            ${{ runner.temp }}/clips/*.png
             ${{ runner.temp }}/clips/*.json
           if-no-files-found: warn
           retention-days: 14

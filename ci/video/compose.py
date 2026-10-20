@@ -22,6 +22,13 @@ Modes:
            --blur card-arrives:X,Y,W,H blurs a box of a Teams clip, in that clip's own
            pixels, for example the owner's name. The owner decides whether to use it.
 
+Inputs are held to the capture receipts: every clip and still must have been made
+for this release on a page serving it, all of them must show the same run, and a
+clip whose narrated facts did not hold is refused unless --rehearsal (the pull
+request rehearsal only) composes it and lists the facts in the receipt. A still
+is clips/still-<name>.png from the capture (or video/stills/<name>.png); a still
+or clip receipt with a placeholder becomes a labelled card, never a stand-in picture.
+
 Segments are cached by a hash of their inputs and filter graph, so changing one
 beat's words re-renders that segment only, then the join and the audio.
 
@@ -110,29 +117,30 @@ def segment_ass(cues: list[dict[str, Any]], start_ms: int, cards: list[tuple[int
         )
     centre = bs.VISUAL_HEIGHT // 2
     for a, b, title, note in cards:
-        lines.append(f"Dialogue: 1,{_ass_time(a)},{_ass_time(b)},Card,,0,0,0,,{{\\pos({bs.WIDTH // 2},{centre - 30})}}{_ass_text(title)}")
-        lines.append(f"Dialogue: 1,{_ass_time(a)},{_ass_time(b)},CardNote,,0,0,0,,{{\\pos({bs.WIDTH // 2},{centre + 50})}}{_ass_text(note)}")
+        lines.append(f"Dialogue: 1,{_ass_time(a)},{_ass_time(b)},Card,,0,0,0,,{{\\an2\\pos({bs.WIDTH // 2},{centre + 10})}}{_ass_text(title)}")
+        lines.append(f"Dialogue: 1,{_ass_time(a)},{_ass_time(b)},CardNote,,0,0,0,,{{\\an8\\pos({bs.WIDTH // 2},{centre + 36})}}{_ass_text(note)}")
     return "\n".join(lines) + "\n"
 
 
 # --------------------------------------------------------------------- inputs
 
 
-def clip_receipt(clips: Path, beat_id: str, release_sha: str) -> tuple[Path, dict[str, Any]]:
-    meta_path = clips / f"{beat_id}.json"
+def clip_receipt(clips: Path, name: str, release_sha: str, *, media: str = ".webm") -> tuple[Path, dict[str, Any]]:
+    """The capture receipt <name>.json and its media file; the release and the served commit must be this compose's."""
+    meta_path = clips / f"{name}.json"
     if not meta_path.is_file():
-        raise ComposeError(f"{beat_id}: no capture receipt {meta_path.name} in {clips}; run the capture for this beat")
+        raise ComposeError(f"{name}: no capture receipt {meta_path.name} in {clips}; run the capture for this beat")
     meta = json.loads(meta_path.read_text(encoding="utf-8"))
-    if meta.get("format") != bs.CLIP_FORMAT or meta.get("beat") != beat_id:
-        raise ComposeError(f"{beat_id}: {meta_path.name} is not a capture receipt for this beat")
+    if meta.get("format") != bs.CLIP_FORMAT or meta.get("beat") != name:
+        raise ComposeError(f"{name}: {meta_path.name} is not a capture receipt for it")
     if meta.get("release_sha") != release_sha or meta.get("data_commit") != release_sha:
         raise ComposeError(
-            f"{beat_id}: the clip was recorded with release {meta.get('release_sha')} on a page serving "
+            f"{name}: the clip was recorded with release {meta.get('release_sha')} on a page serving "
             f"{meta.get('data_commit')}; this compose is for {release_sha}"
         )
-    video = clips / f"{beat_id}.webm"
+    video = clips / f"{name}{media}"
     if not meta.get("placeholder") and not video.is_file():
-        raise ComposeError(f"{beat_id}: no clip {video.name} in {clips}")
+        raise ComposeError(f"{name}: no {video.name} in {clips}")
     return video, meta
 
 
@@ -206,6 +214,7 @@ def render_segment(
     boxes: dict[str, list[Box]],
     trims: dict[str, float],
     seg_dir: Path,
+    rehearsal: bool = False,
 ) -> dict[str, Any]:
     window = int(row["window_frames"])
     frames = part_frames(beat, window)
@@ -220,6 +229,7 @@ def render_segment(
         seconds = count / bs.FPS
         info: dict[str, Any] = {"source": f"{part.kind}:{part.target}", "frames": count, "clip": None, "placeholder": None}
         card: tuple[str, str] | None = None
+        meta: dict[str, Any] = {}
         if part.kind == "web":
             video, meta = clip_receipt(clips, beat.id, release_sha)
             if meta.get("placeholder"):
@@ -258,13 +268,30 @@ def render_segment(
                 hashed.append(bs.sha256_file(video))
                 info.update({"clip": video.name, "trim_start": start, "blur_boxes": len(boxes.get(part.target, []))})
         else:
-            still = next((d / f"{part.target}.png" for d in (clips, stills) if (d / f"{part.target}.png").is_file()), None)
-            if still is None:
-                raise ComposeError(f"{beat.id}: still {part.target}.png is in neither {clips} nor {stills}")
-            inputs += ["-loop", "1", "-framerate", str(bs.FPS), "-i", str(still.resolve())]
-            graph.append(f"[{index}:v]fps={bs.FPS},trim=end_frame={count},setpts=PTS-STARTPTS,{FIT}[p{k}]")
-            hashed.append(bs.sha256_file(still))
-            info["clip"] = still.name
+            still: Path | None = None
+            if (clips / f"still-{part.target}.json").is_file():
+                still, meta = clip_receipt(clips, f"still-{part.target}", release_sha, media=".png")
+                if meta.get("placeholder"):
+                    card = (str(meta["placeholder"]), f"placeholder: not built at {release_sha[:7]}")
+                    info["placeholder"] = meta["placeholder"]
+                    still = None
+            elif (stills / f"{part.target}.png").is_file():
+                still = stills / f"{part.target}.png"
+            else:
+                raise ComposeError(f"{beat.id}: no still-{part.target}.json in {clips} and no {part.target}.png in {stills}")
+            if still is not None:
+                inputs += ["-loop", "1", "-framerate", str(bs.FPS), "-i", str(still.resolve())]
+                graph.append(f"[{index}:v]fps={bs.FPS},trim=end_frame={count},setpts=PTS-STARTPTS,{FIT}[p{k}]")
+                hashed.append(bs.sha256_file(still))
+                info["clip"] = still.name
+        info["run_id"] = meta.get("run_id")
+        info["facts_checked"] = meta.get("facts_checked", [])
+        info["facts_failed"] = meta.get("facts_failed", [])
+        if info["facts_failed"] and not rehearsal:
+            raise ComposeError(
+                f"{beat.id}: narrated facts did not hold on the live site: {'; '.join(info['facts_failed'])}; "
+                "only a rehearsal may compose such a clip"
+            )
         if card is not None:
             inputs += ["-f", "lavfi", "-i", f"color=c={bs.CARD_BACKGROUND}:s={bs.WIDTH}x{bs.VISUAL_HEIGHT}:r={bs.FPS}:d={seconds + 1:.3f}"]
             graph.append(f"[{index}:v]trim=end_frame={count},setpts=PTS-STARTPTS,setsar=1[p{k}]")
@@ -369,15 +396,22 @@ def compose(args: argparse.Namespace) -> dict[str, Any]:
     for row in timing["beats"]:
         beat = by_id[row["id"]]
         seg = render_segment(beat, row, sheet=sheet, clips=args.clips, teams_dir=args.teams_dir, stills=args.stills,
-                             release_sha=args.release_sha, boxes=boxes, trims=trims, seg_dir=seg_dir)
+                             release_sha=args.release_sha, boxes=boxes, trims=trims, seg_dir=seg_dir,
+                             rehearsal=args.rehearsal)
         segments.append(seg["file"])
         beats_out.append({
             "id": beat.id, "index": beat.index, "start_ms": row["start_ms"], "window_ms": row["window_ms"],
             "window_frames": row["window_frames"], "audio_ms": row["audio_ms"], "narrated": True,
             "captions_burned": bool(row["cues"]), "cues": len(row["cues"]), "parts": seg["parts"], "segment_reused": seg["reused"],
+            "facts_failed": [f for p in seg["parts"] for f in p.get("facts_failed", [])],
         })
         print(f"{beat.stem}: {row['window_frames']} frames, {'reused' if seg['reused'] else 'rendered'}"
               + "".join(f"; {p['source']}{' (placeholder)' if p['placeholder'] else ''}" for p in seg["parts"]))
+
+    run_ids = {p["run_id"] for b in beats_out for p in b["parts"] if p.get("run_id")}
+    if len(run_ids) > 1:
+        raise ComposeError(f"the clips show different runs: {', '.join(sorted(run_ids))}; capture them again together")
+    run_id = run_ids.pop() if run_ids else sheet.run_id
 
     (seg_dir / "concat.txt").write_text("".join(f"file '{name}'\n" for name in segments), encoding="utf-8")
     video_only = out / "video-only.mp4"
@@ -402,7 +436,9 @@ def compose(args: argparse.Namespace) -> dict[str, Any]:
         "file": name,
         "mode": mode,
         "release_sha": args.release_sha,
-        "run_id": sheet.run_id,
+        "run_id": run_id,
+        "rehearsal": bool(args.rehearsal),
+        "facts_failed": [f"{b['id']}: {f}" for b in beats_out for f in b["facts_failed"]],
         "site": sheet.site,
         "narration": {"engine": timing.get("engine"), "voice": timing.get("voice"), "stand_in": bool(timing.get("stand_in"))},
         "fps": bs.FPS, "width": bs.WIDTH, "height": bs.HEIGHT,
@@ -434,6 +470,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", type=Path, required=True)
     parser.add_argument("--blur", action="append", default=[], help="CLIP:X,Y,W,H, repeatable")
     parser.add_argument("--trim", action="append", default=[], help="CLIP=SECONDS, overrides the sheet's trim_start")
+    parser.add_argument("--rehearsal", action="store_true",
+                        help="pull request rehearsal only: compose clips whose narrated facts did not hold, and say so")
     parser.add_argument("--summary", type=Path)
     args = parser.parse_args(argv)
     try:
@@ -452,6 +490,14 @@ def main(argv: list[str] | None = None) -> int:
                      f"{receipt['total_seconds']:.3f} s, {len(receipt['beats'])} beats, release `{receipt['release_sha']}`, "
                      f"sha256 `{receipt['sha256']}`, narration {receipt['narration']['engine']}"
                      f"{' (stand-in, not the submitted voice)' if receipt['narration']['stand_in'] else ''}.\n")
+    if receipt["facts_failed"]:
+        print("narrated facts not on the live site (rehearsal only):")
+        for line in receipt["facts_failed"]:
+            print(f"  {line}")
+        if args.summary:
+            with args.summary.open("a", encoding="utf-8") as fh:
+                fh.write("\n**Narrated facts not on the live site (rehearsal only; video.yml refuses these):**\n\n")
+                fh.write("".join(f"- {line}\n" for line in receipt["facts_failed"]))
     return 0
 
 

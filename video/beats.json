@@ -4,42 +4,100 @@
   "locale": "en-GB",
   "rate": "0%",
   "site": "https://jolly-stone-0c9c8a003.4.azurestaticapps.net",
-  "run_id": "run-c8a19020c98a",
+  "run_id": "default",
   "theme": "dark",
-  "target_seconds": [105, 112],
+  "target_seconds": [
+    105,
+    112
+  ],
   "beats": [
     {
       "id": "card-arrives",
       "narration": "Full time. Agon has written the club's match report in four languages, and nothing is published until the media officer approves this exact bundle in Microsoft Teams.",
-      "visual": [{"source": "teams:card-arrives", "actions": "the approval card arrives in the Match Day channel, unasked"}],
+      "visual": [
+        {
+          "source": "teams:card-arrives",
+          "actions": "the approval card arrives in the Match Day channel, unasked"
+        }
+      ],
       "min_seconds": 9,
       "max_seconds": 12.5
     },
     {
       "id": "match-centre",
       "narration": "The match is synthetic, from our own seeded league. Home and away are clear at a glance, and Agon's interpret model turns the event log into expected goals, pressure and win probability.",
-      "visual": [{"source": "web:#/", "viewport": "phone", "actions": "Match Centre at 375 px on the recorded run's match: scoreboard, home and away timeline, then the win probability chart if shipped"}],
+      "visual": [
+        {
+          "source": "web:#/",
+          "viewport": "phone",
+          "actions": "Match Centre at 375 px on the recorded run's match: the scoreboard with home and away, the replay at 60x, then what the newsroom reads (and the interpret charts once lane D4 ships them)",
+          "facts": [
+            {
+              "text": "Synthetic match, .*seed \\d+"
+            },
+            {
+              "text": "\\(home\\) attack"
+            },
+            {
+              "text": "computed by agon\\.interpret from the synthetic event log"
+            }
+          ]
+        }
+      ],
       "min_seconds": 12,
       "max_seconds": 15
     },
     {
       "id": "newsroom",
       "narration": "At the whistle, Microsoft Foundry agents in a Microsoft Agent Framework workflow pick the turning points and write the report. Code checks every number and name; here the Fact Gate sent a wrong score back to the writer, once.",
-      "visual": [{"source": "web:#/newsroom/{run_id}", "actions": "Newsroom Wall at 1920 on the recorded run, stepping to the Fact Gate line"}],
+      "visual": [
+        {
+          "source": "web:#/newsroom/{run_id}",
+          "actions": "Newsroom Wall at 1920 on the recorded run: Replay the run, so each desk fills step by step",
+          "facts": [
+            {
+              "text": "by a Microsoft Foundry agent",
+              "within": "[data-view=\"newsroom\"]"
+            },
+            {
+              "text": "Checked every number, name and minute",
+              "within": "[data-view=\"newsroom\"]"
+            },
+            {
+              "file": "runs/{run_id}/card.json",
+              "text": "\"code\":\\s*\"factgate_retry\""
+            },
+            {
+              "file": "runs/{run_id}/card.json",
+              "text": "sent back to the Writer once: s\\d+: score written as"
+            }
+          ]
+        }
+      ],
       "min_seconds": 14,
       "max_seconds": 17
     },
     {
       "id": "officer-approves",
       "narration": "The card arrives without anyone asking. The officer reads the report they attest, ticks the flagged sentence, leaves Instagram out, and approves.",
-      "visual": [{"source": "teams:officer-approves", "actions": "the officer reads the attested report, ticks the flagged row, unticks Instagram, taps Approve"}],
+      "visual": [
+        {
+          "source": "teams:officer-approves",
+          "actions": "the officer reads the attested report, ticks the flagged row, unticks Instagram, taps Approve"
+        }
+      ],
       "min_seconds": 13,
       "max_seconds": 15
     },
     {
       "id": "worker-resumes",
       "narration": "While the card waited, the worker process ended. The approval woke a new one, which resumed from the durable checkpoint and published exactly once.",
-      "visual": [{"source": "web:#/verify", "actions": "the media office operations view if shipped, otherwise the Verify custody trail: the two worker executions, ended and resumed"}],
+      "visual": [
+        {
+          "source": "still:executions",
+          "actions": "a timeline drawn from evidence/<run>.executions.json: the first worker process ends, the card waits, the intake verifies, a new worker resumes, one publish (until the operations view is live)"
+        }
+      ],
       "min_seconds": 11,
       "max_seconds": 14
     },
@@ -47,8 +105,45 @@
       "id": "published",
       "narration": "The same card now says where the report went: the club site, the feeds, Greek, Spanish, French, an easy-read edition and audio, from one approval.",
       "visual": [
-        {"source": "teams:card-published", "seconds": 6, "actions": "the card updated in place to Published, naming the destinations"},
-        {"source": "web:#/recap/{run_id}", "actions": "Recap edition tabs EN, EL, ES, FR and easy-read, with audio"}
+        {
+          "source": "teams:card-published",
+          "seconds": 6,
+          "actions": "the card updated in place to Published, naming the destinations"
+        },
+        {
+          "source": "web:#/recap/{run_id}",
+          "actions": "Recap at 1920: the EN, EL, ES, FR and Easy-read edition tabs in turn",
+          "facts": [
+            {
+              "text": "EL",
+              "within": "[role=\"tablist\"][aria-label=\"Editions\"]"
+            },
+            {
+              "text": "ES",
+              "within": "[role=\"tablist\"][aria-label=\"Editions\"]"
+            },
+            {
+              "text": "FR",
+              "within": "[role=\"tablist\"][aria-label=\"Editions\"]"
+            },
+            {
+              "text": "Easy-read",
+              "within": "[role=\"tablist\"][aria-label=\"Editions\"]"
+            },
+            {
+              "file": "runs/{run_id}.json",
+              "text": "Club website \\(CMS feed\\) and RSS and JSON Feed received the approved bytes"
+            },
+            {
+              "file": "runs/{run_id}/manifest.json",
+              "text": "audio-el\\.mp3"
+            },
+            {
+              "file": "runs/{run_id}/manifest.json",
+              "text": "audio-easy\\.mp3"
+            }
+          ]
+        }
       ],
       "min_seconds": 13,
       "max_seconds": 16
@@ -62,10 +157,19 @@
           "viewport": "desktop",
           "actions": "open Verify at 1920 so the recomputation runs on camera, then bring the recorded run's approved and published comparison into view",
           "facts": [
-            {"text": "Recomputed in your browser: the bundle hash equals the hash on the approval card"},
-            {"text": "(\\d+) of \\1 published files match the sealed manifest"},
-            {"text": "Recomputed in your browser: (\\d+) of \\1 files match\\."},
-            {"text": "The approved hash equals the published hash", "within": "section[data-run-id=\"{run_id}\"]"}
+            {
+              "text": "Recomputed in your browser: the bundle hash equals the hash on the approval card"
+            },
+            {
+              "text": "(\\d+) of \\1 published files match the sealed manifest"
+            },
+            {
+              "text": "Recomputed in your browser: (\\d+) of \\1 files match\\."
+            },
+            {
+              "text": "The approved hash equals the published hash",
+              "within": "section[data-run-id=\"{run_id}\"]"
+            }
           ]
         }
       ],
@@ -75,14 +179,38 @@
     {
       "id": "data-lab",
       "narration": "The data is ours: a deterministic season, the same on every machine, with realism bands frozen before calibration.",
-      "visual": [{"source": "web:#/data-lab", "actions": "Data Lab: the season table, then the determinism figures"}],
+      "visual": [
+        {
+          "source": "web:#/data-lab",
+          "actions": "Data Lab at 1920: the final table of the season, then where the numbers come from (determinism, frozen bands)",
+          "facts": [
+            {
+              "text": "Final table"
+            },
+            {
+              "text": "the same seed always gives the same bytes"
+            },
+            {
+              "text": "The realism bands, frozen and hashed before calibration"
+            },
+            {
+              "text": "Determinism check on main"
+            }
+          ]
+        }
+      ],
       "min_seconds": 7.5,
       "max_seconds": 10
     },
     {
       "id": "close",
       "narration": "Take Foundry out and no report exists. Take the checkpoint out and an approval cannot survive a restart. Take Teams out and nothing publishes. Agon: the demo and the code are linked below.",
-      "visual": [{"source": "still:architecture", "actions": "the architecture frame with the load-bearing sentence, the live URL and the repo URL"}],
+      "visual": [
+        {
+          "source": "still:architecture",
+          "actions": "the architecture frame with the load-bearing sentence, the live URL and the repo URL (video/stills/architecture.html)"
+        }
+      ],
       "min_seconds": 13,
       "max_seconds": 16
     }
