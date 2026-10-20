@@ -641,7 +641,7 @@ export function approveAttempt(run: Run, tickedRowIds: string[], destinationLabe
 
 export function destinationsSentence(labels: string[]): string {
   if (!labels.length) {
-    return "No destination is ticked, and the verifier refuses an approval that ticks none of the destinations the bundle offers.";
+    return "No destination is ticked. If the bundle offers destinations, the verifier refuses an approval that ticks none of them; a bundle that offers none publishes to the club feed only.";
   }
   return `It would have gone to ${labels.length === 1 ? "one destination" : `${labels.length} destinations`}: ${joinLabels(labels)}. None of them received anything.`;
 }

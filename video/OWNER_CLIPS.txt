@@ -27,7 +27,7 @@ before every drill and tells the owner.
    The approval card arriving in the Match Day channel after the run has been
    started; the officer did not ask for it: the report headline, the hash, the
    editions.
-   Narration over it: "When the match is over, Agon writes the club's match
+   Narration over it: "Once a run is started, Agon writes the club's match
    report in four languages, and nothing is published until the media officer
    approves this exact bundle in Microsoft Teams."
    Needs at least 14 seconds of picture after its trim point (the beat may run

@@ -126,9 +126,9 @@ export const PIPELINE: PipelineNode[] = [
     id: "interpret",
     stage: "Read",
     title: "Match model",
-    status: "ci",
+    status: "live",
     statusText:
-      "In the repo, tested in CI, and the Match Centre shows its numbers. The fleet calls it now, but no published run has used it yet: the recorded run's manifest names a stand-in interpret step, fleet-local-standin/1, that ranks only goals and red cards.",
+      "Live on this site: the Match Centre's numbers are computed by it from the served event logs when the site is built. The deployed fleet calls it too, but no published run has used it yet: the recorded run's manifest names a stand-in interpret step, fleet-local-standin/1, that ranks only goals and red cards.",
     summary:
       "Plain code turns the log into xG, xT, PPDA, control vs chaos and win probability, so the writers can cite numbers instead of guessing them.",
     evidence: [
@@ -267,7 +267,7 @@ export const PIPELINE: PipelineNode[] = [
     statusText:
       "Ran in Azure for the recorded run: the Publisher job published the approved bundle to the public feed, with the club website recap, JSON Feed and RSS. This site publishes nothing.",
     summary:
-      "Publishes the approved bytes and only those, create-only. Instagram and YouTube get previews that are never posted, and the newsroom and journalist messages are written, not sent. The Publisher code also accepts an erratum bundle that names its parent; no erratum run path is deployed.",
+      "Writes the sealed bundle unchanged to the feed archive and renders only the approved payloads for the club website and the feeds, create-only. Instagram and YouTube get previews that are never posted, and the newsroom and journalist messages are written, not sent. The Publisher code also accepts an erratum bundle that names its parent; no erratum run path is deployed.",
     evidence: [
       { kind: "file", label: "The publisher", path: "src/agon/governance/publisher.py", line: 230, snippet: "class Publisher:" },
       executions(39, "publisher: recomputed the hash, published create-only to the feed", "The Publisher job's execution for the recorded run, read from Azure"),

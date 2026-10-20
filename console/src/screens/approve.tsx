@@ -359,7 +359,7 @@ export function Approve({ active, loaded, error, blownSeed, onDecided }: Props) 
                 </li>
                 <li>
                   <strong className="text-fg">Resume and publish.</strong> The waiting workflow resumes from its checkpoint, and the Publisher writes
-                  those bytes, and only those, to the club website and the feeds. Instagram and YouTube get previews that are not posted; the
+                  the sealed bundle, unchanged, to the feed archive and renders only the approved payloads for the club website and the feeds. Instagram and YouTube get previews that are not posted; the
                   newsroom and journalist messages are written, not sent.
                 </li>
               </ol>
