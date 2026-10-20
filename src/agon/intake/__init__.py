@@ -28,7 +28,10 @@ Outcomes of one message:
   A refusal never burns the nonce (see verifier), so the officer can still decide on another
   channel;
 * redelivered after a crash between `verify` and the send: `verify` answers "already_consumed",
-  and if this route's own approval record exists the pointer is sent again ("verified_replay");
+  and if this route's own approval record exists the pointer is sent again ("verified_replay").
+  A crash between the nonce write and the approval record inside `verify` ends the same way: the
+  redelivery's own `verify` completes the record from the consumed nonce first (same channel and
+  bundle only; see the verifier);
 * any exception (store or queue outage): the message is left in place and comes back after its
   visibility timeout. After `MAX_ATTEMPTS` deliveries it moves to `intake-poison`, never dropped.
 
@@ -170,9 +173,11 @@ def _replay(adapter: ModuleType, payload: dict[str, Any], store: Any, now: datet
 
     If the process died after `verify` consumed the nonce and before the pointer reached the
     `decisions` queue, the redelivered message now meets "already_consumed". The approval record
-    written by that earlier `verify` is the only evidence used here: it must exist, name this
-    route's channel and the same bundle hash. A message for a nonce another channel consumed, or
-    any message without a record, stays refused. The worker deduplicates pointers by approval id.
+    is the only evidence used here (written by that earlier `verify`, or by this redelivery's own
+    `verify` when the first pass stopped between the nonce write and the record): it must exist,
+    name this route's channel and the same bundle hash. A message for a nonce another channel
+    consumed, or any message without a record, stays refused. The worker deduplicates pointers by
+    approval id. This function only reads; it never writes the store.
     """
     try:
         decision = adapter.parse(payload, received_at=now)
