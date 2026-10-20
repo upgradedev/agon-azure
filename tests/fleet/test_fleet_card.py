@@ -22,6 +22,7 @@ from fleet_reference import run_to_request
 from fleet_support import OFFICER, REPO, run, run_input
 
 from agon.fleet import card
+from agon.governance import destinations as dest_mod
 from agon.fleet.local import fake_deps
 from agon.governance import verifier
 
@@ -134,7 +135,9 @@ def test_the_teams_payload_is_filled_from_the_sealed_bundle(sealed_run):
     assert [row["id"] for row in payload["confirm_rows"]] == list(ref.request.confirm_rows)
     assert all(row["text"] == english[row["id"]] for row in payload["confirm_rows"])
     assert payload["published_url"] == f"{CONTEXT.feed_base_url}{ref.request.bundle_sha256}/manifest.json"
-    assert payload["destinations"] == [{"id": d["id"], "label": d["label"]} for d in ref.request.destinations]
+    assert payload["destinations"] == [
+        {"id": d["id"], "label": d["label"], "delivery": dest_mod.DELIVERY[d["id"]]} for d in ref.request.destinations
+    ]
     assert len(payload["destinations"]) == len(inputs.manifest["destinations"]) == 6
     # Every sealed flag reaches the card as a line; a flag never becomes a Confirm row.
     expected_flags = card.flag_lines(inputs.card, card.ROW_TEXT_MAX)
@@ -262,7 +265,7 @@ def test_url_fingerprint_hides_the_path():
 
 
 def test_offered_destinations_become_card_toggles_in_every_shape(sealed_run):
-    """Lane C6 offers destinations on the request or in the manifest; the card renders {id, label}."""
+    """Lane C6 offers destinations on the request or in the manifest; the card renders {id, label, delivery}."""
     import dataclasses
 
     _, ri, ref, inputs = sealed_run
@@ -270,8 +273,8 @@ def test_offered_destinations_become_card_toggles_in_every_shape(sealed_run):
     as_list = {**inputs.manifest, "destinations": ["club_site", {"id": "feeds", "label": "RSS and JSON Feed"}]}
     as_table = {**inputs.manifest, "destinations": {"feeds": {"artifact": "destination-feeds.json"}, "club_site": {}}}
     for manifest, expected in (
-        (as_list, [{"id": "club_site", "label": "Club site"}, {"id": "feeds", "label": "RSS and JSON Feed"}]),
-        (as_table, [{"id": "club_site", "label": "Club site"}, {"id": "feeds", "label": "Feeds"}]),
+        (as_list, [{"id": "club_site", "label": "Club site", "delivery": "written"}, {"id": "feeds", "label": "RSS and JSON Feed", "delivery": "written"}]),
+        (as_table, [{"id": "club_site", "label": "Club site", "delivery": "written"}, {"id": "feeds", "label": "Feeds", "delivery": "written"}]),
     ):
         payload = card.teams_payload(bare, card.CardInputs(manifest, inputs.record, inputs.report_en), ri.match_ref, CONTEXT)
         assert payload["destinations"] == expected
@@ -280,7 +283,36 @@ def test_offered_destinations_become_card_toggles_in_every_shape(sealed_run):
     class WithDestinations:
         destinations: list
 
-    assert card._destinations(WithDestinations([{"id": "youtube", "label": "YouTube"}]), as_list) == [{"id": "youtube", "label": "YouTube"}]
+    assert card._destinations(WithDestinations([{"id": "youtube", "label": "YouTube"}]), as_list) == [
+        {"id": "youtube", "label": "YouTube", "delivery": "preview"}
+    ]
+
+
+def test_every_destination_says_what_the_publisher_does_with_it(sealed_run):
+    """The Published card may only call a destination published when the Publisher writes it.
+
+    Previews are never posted and the outbox sends are not deployed, so the flow lists them as
+    prepared or recorded. An id outside the registry is never called published.
+    """
+    import dataclasses
+
+    _, ri, ref, inputs = sealed_run
+    payload = card.teams_payload(ref.request, inputs, ri.match_ref, CONTEXT)
+    delivery = {d["id"]: d["delivery"] for d in payload["destinations"]}
+    assert delivery == {
+        "club_site": "written",
+        "feeds": "written",
+        "instagram": "preview",
+        "youtube": "preview",
+        "newsroom_teams": "outbox",
+        "journalist_email": "outbox",
+    }
+
+    @dataclasses.dataclass
+    class WithDestinations:
+        destinations: list
+
+    assert card._destinations(WithDestinations(["somewhere_new"]), inputs.manifest)[0]["delivery"] == "outbox"
 
 
 def test_the_report_text_is_shortened_out_loud_never_silently():
