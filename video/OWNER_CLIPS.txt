@@ -18,31 +18,39 @@ WHAT EACH CLIP SHOWS (recorded during the second real approval, 2026-10-20)
 Use only the team "agon" and its channel "Match Day". Fictional clubs and players
 only. No other team, chat or company content may be on screen.
 
+Precondition: record only after the Logic App la-agon-teams-approval has been
+deployed from main acc2bb9 or later, the commit that names previews and unsent
+sends as such on the Published card. The build session checks its changedTime
+before every drill and tells the owner.
+
 1. card-arrives (beat 1, "card-arrives")
-   The approval card arriving in the Match Day channel at full time, without
-   anyone asking: the report headline, the hash, the editions.
-   Narration over it: "Full time. Agon has written the club's match report in
-   four languages, and nothing is published until the media officer approves
-   this exact bundle in Microsoft Teams."
+   The approval card arriving in the Match Day channel after the run has been
+   started; the officer did not ask for it: the report headline, the hash, the
+   editions.
+   Narration over it: "When the match is over, Agon writes the club's match
+   report in four languages, and nothing is published until the media officer
+   approves this exact bundle in Microsoft Teams."
    Needs at least 14 seconds of picture after its trim point (the beat may run
    up to 12.5 seconds).
 
 2. officer-approves (beat 4, "officer-approves")
-   The officer reading the report they attest, ticking the sentence the card
-   flags for a person (the Confirm row), unticking Instagram in the
-   destinations, and tapping Approve.
-   Narration over it: "The card arrives without anyone asking. The officer reads
-   the report they attest, ticks the flagged sentence, leaves Instagram out, and
-   approves."
+   The officer reading the report they attest, ticking the Confirm row (the
+   sentence code cannot check), unticking the destination toggle that reads
+   "Instagram (preview only, not posted)", and tapping Approve.
+   Narration over it: "The officer asks for nothing: the card is already in the
+   channel. They read the report they attest, tick the Confirm row, leave
+   Instagram out, and approve."
    Needs at least 16 seconds of picture after its trim point (the beat may run
    up to 15 seconds). Keep the actions in the first 13 seconds.
 
 3. card-published (first part of beat 6, "published")
-   The same card after the run publishes, updated in place: what was
-   published, what was prepared as a preview and not posted, what was recorded
-   for sending while the send flow is not deployed, and what the officer chose
-   not to send (Instagram). Keep its lines readable; the narration vouches only
-   for what the card shows.
+   The same card after the run publishes, updated in place. With Instagram
+   unticked, its destination lines read exactly:
+     Published to: Club website (CMS feed), RSS and JSON Feed.
+     Prepared as a preview, not posted: YouTube.
+     Recorded for sending; the send flow is not deployed yet: Internal newsroom (Teams), Journalist email digest.
+     Not sent, as you chose: Instagram.
+   Keep these lines readable; the narration vouches only for what they say.
    Narration over it and the Recap that follows: "The same card now says what
    was published, what was only prepared, and what the officer left out. One
    approval covers every edition: Greek, Spanish, French and easy-read."

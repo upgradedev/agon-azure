@@ -13,11 +13,11 @@
   "beats": [
     {
       "id": "card-arrives",
-      "narration": "Full time. Agon has written the club's match report in four languages, and nothing is published until the media officer approves this exact bundle in Microsoft Teams.",
+      "narration": "When the match is over, Agon writes the club's match report in four languages, and nothing is published until the media officer approves this exact bundle in Microsoft Teams.",
       "visual": [
         {
           "source": "teams:card-arrives",
-          "actions": "the approval card arrives in the Match Day channel, unasked"
+          "actions": "the approval card arrives in the Match Day channel; the officer did not ask for it"
         }
       ],
       "min_seconds": 9,
@@ -64,7 +64,7 @@
     },
     {
       "id": "newsroom",
-      "narration": "At the whistle, Microsoft Foundry agents in a Microsoft Agent Framework workflow pick the turning points and write the report. Code checks every number, name and minute against the event log, and a failing sentence goes back to the writer once before the officer sees anything.",
+      "narration": "In a Microsoft Agent Framework workflow, Microsoft Foundry agents pick the turning points and write the report. Code checks every number, and every name and minute it claims, against the event log; a failing sentence goes back to the writer once before the officer sees anything.",
       "visual": [
         {
           "source": "web:#/newsroom/{run_id}",
@@ -83,6 +83,10 @@
               "within": "[data-view=\"newsroom\"]"
             },
             {
+              "file": "runs/{run_id}/card.json",
+              "text": "\"turning_points\":\\s*\\[[^\\]]*\"author\":\\s*\"model\""
+            },
+            {
               "repo": "src/agon/fleet/steps.py",
               "text": "a Fact Gate mismatch: one retry through the Writer, then a template line with corrected claims"
             },
@@ -93,20 +97,28 @@
             {
               "repo": "src/agon/fleet/contracts.py",
               "text": "MAX_WRITER_ATTEMPTS = 2[^0-9]"
+            },
+            {
+              "repo": "src/agon/governance/factgate.py",
+              "text": "recompute every claimed number, name, minute and score from the event log"
+            },
+            {
+              "repo": "src/agon/governance/factgate.py",
+              "text": "A number in the\\s+prose that no claim carries is a mismatch"
             }
           ]
         }
       ],
       "min_seconds": 14,
-      "max_seconds": 18.5
+      "max_seconds": 19
     },
     {
       "id": "officer-approves",
-      "narration": "The card arrives without anyone asking. The officer reads the report they attest, ticks the flagged sentence, leaves Instagram out, and approves.",
+      "narration": "The officer asks for nothing: the card is already in the channel. They read the report they attest, tick the Confirm row, leave Instagram out, and approve.",
       "visual": [
         {
           "source": "teams:officer-approves",
-          "actions": "the officer reads the attested report, ticks the flagged row, unticks Instagram, taps Approve"
+          "actions": "the officer reads the attested report, ticks the Confirm row, unticks \"Instagram (preview only, not posted)\", taps Approve"
         }
       ],
       "min_seconds": 13,
@@ -131,7 +143,7 @@
         {
           "source": "teams:card-published",
           "seconds": 6,
-          "actions": "the card updated in place: what was published, what was prepared and not posted or not sent, and what the officer left out"
+          "actions": "the card updated in place: Published to, Prepared as a preview, not posted, Recorded for sending, Not sent, as you chose"
         },
         {
           "source": "web:#/recap/{run_id}",

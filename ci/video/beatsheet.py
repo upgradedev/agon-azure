@@ -411,19 +411,24 @@ def build_timing(beats: list[Beat], audio_ms: dict[str, int]) -> dict[str, Any]:
     """The timeline for the selected beats from their measured narration lengths (ms)."""
     rows = []
     at_frames = 0
+    long_beats = []
     for beat in beats:
         if beat.id not in audio_ms or audio_ms[beat.id] <= 0:
             raise BeatSheetError(f"{beat.id}: no measured narration length")
-        speech_ms = audio_ms[beat.id]
-        need = frames_up(LEAD_IN_MS + speech_ms + TAIL_MS)
-        least = frames_up(beat.min_seconds * 1000)
-        most = math.floor(beat.max_seconds * FPS + 1e-9)
-        window = max(need, least)
-        if window > most:
-            raise BeatSheetError(
-                f"{beat.id}: the narration measures {speech_ms} ms, so the beat needs {window * FRAME_MS} ms with lead-in "
-                f"and tail, over its max_seconds {beat.max_seconds}; shorten the narration or raise max_seconds"
+        need = frames_up(LEAD_IN_MS + audio_ms[beat.id] + TAIL_MS)
+        if need > math.floor(beat.max_seconds * FPS + 1e-9):
+            long_beats.append(
+                f"{beat.id}: the narration measures {audio_ms[beat.id] / 1000:.3f} s, so the beat needs "
+                f"{need * FRAME_MS / 1000:.2f} s with lead-in and tail, {need * FRAME_MS / 1000 - beat.max_seconds:.2f} s "
+                f"over its max_seconds {beat.max_seconds}"
             )
+    if long_beats:
+        raise BeatSheetError(
+            f"{len(long_beats)} beat(s) run past max_seconds; shorten the narration or raise max_seconds: " + "; ".join(long_beats)
+        )
+    for beat in beats:
+        speech_ms = audio_ms[beat.id]
+        window = max(frames_up(LEAD_IN_MS + speech_ms + TAIL_MS), frames_up(beat.min_seconds * 1000))
         start_ms = at_frames * FRAME_MS
         speech_start = start_ms + LEAD_IN_MS
         speech_end = speech_start + speech_ms

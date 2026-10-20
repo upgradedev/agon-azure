@@ -421,7 +421,7 @@ def test_the_newsroom_beat_narrates_the_gate_rule_not_one_run_s_retry():
     beat = next(b for b in bs.load_sheet(SHEET_PATH).beats if b.id == "newsroom")
     assert "goes back to the writer once" in beat.narration
     assert "sent a wrong score back" not in beat.narration
-    assert not any("card.json" in f.get("file", "") for p in beat.parts for f in p.facts)
+    assert not any("factgate_retry" in f["text"] for p in beat.parts for f in p.facts if f.get("file")),         "no fact needs this run's own retry"
 
 
 def test_the_match_centre_beat_checks_the_seed_and_clubs_of_the_run_it_shows():
@@ -434,3 +434,29 @@ def test_a_repository_fact_names_a_path_inside_the_repository():
     bs.parse_sheet(_broken(lambda d: d["beats"][6]["visual"][0]["facts"].append({"repo": "src/agon/fleet/steps.py", "text": "x"})))
     with pytest.raises(bs.BeatSheetError, match="a path in this repository"):
         bs.parse_sheet(_broken(lambda d: d["beats"][6]["visual"][0]["facts"].append({"repo": "../etc/passwd", "text": "x"})))
+
+
+def test_no_beat_implies_an_automatic_trigger_at_the_end_of_the_match():
+    sheet = bs.load_sheet(SHEET_PATH)
+    for beat in sheet.beats:
+        text = " ".join([beat.narration, *(p.actions for p in beat.parts)]).lower()
+        for phrase in ("full time.", "at the whistle", "unasked", "without anyone asking"):
+            assert phrase not in text, (beat.id, phrase)
+
+
+def test_the_officer_ticks_the_confirm_row_and_the_gate_claims_only_what_it_checks():
+    beats = {b.id: b for b in bs.load_sheet(SHEET_PATH).beats}
+    assert "tick the Confirm row" in beats["officer-approves"].narration
+    assert "every number, and every name and minute it claims" in beats["newsroom"].narration
+    files = [f for p in beats["newsroom"].parts for f in p.facts if f.get("file")]
+    assert any("turning_points" in f["text"] and "model" in f["text"] for f in files), "a model-authored turning point is checked"
+
+
+def test_every_long_beat_is_reported_at_once():
+    sheet = bs.load_sheet(SHEET_PATH)
+    beats = sheet.select("card-arrives,newsroom,verify")
+    with pytest.raises(bs.BeatSheetError) as err:
+        bs.build_timing(beats, {"card-arrives": 13_000, "newsroom": 19_500, "verify": 3_000})
+    message = str(err.value)
+    assert message.startswith("2 beat(s) run past max_seconds")
+    assert "card-arrives: the narration measures 13.000 s" in message and "newsroom: the narration measures 19.500 s" in message
