@@ -9,7 +9,7 @@ Agon (the contest) is our entry to the Microsoft Inside the Game developer hacka
 ## Who it is for, where it lands, what it replaces
 
 * **Who:** the one to three people in a club media office who must publish the match report, translated supporter bulletins, accessible versions and a feed item for the club website in the hour after full time.
-* **Where it lands:** the media office's Microsoft Teams channel. At the final whistle an approval card arrives there without anyone asking for it. It shows the bundle hash, the editions, the English report the officer attests, the sentences that need a tick, and the destinations to publish to. One tap publishes those exact bytes to the club's own channels.
+* **Where it lands:** the media office's Microsoft Teams channel. When a match is over, a run starts (today an operator dispatches it, because there is no live match feed) and an approval card arrives there; the officer asks for nothing. It shows the bundle hash, the editions, the English report the officer attests, the sentences that need a tick, and the destinations to publish to. One tap publishes those exact bytes to the club's own channels.
 * **What it replaces:** writing the report by hand after the match while copying numbers from a stats sheet, waiting for volunteer translators, and skipping easy-read and audio editions.
 
 ## Why Microsoft is load-bearing
