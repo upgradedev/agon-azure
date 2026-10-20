@@ -21,7 +21,7 @@ for (const viewport of [
     await expect(page.getByText(/The worker that posted the approval card ended at 21:21:36 UTC\./)).toBeVisible();
     await expect(page.getByText(/a new worker process started at 21:25:06 UTC/)).toBeVisible();
     await expect(page.getByText("Approved hash equals published hash")).toBeVisible();
-    await expect(page.getByText("not measured yet")).toBeVisible();
+    await expect(page.getByText("not measured yet", { exact: true })).toBeVisible();
     await expectNoHorizontalScroll(page);
     await expectNoSeriousAxe(page, `media office ${viewport.width}`);
     await page.screenshot({ path: `screenshots/35-media-office-${viewport.width}-light.png`, fullPage: true });
