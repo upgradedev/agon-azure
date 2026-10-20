@@ -7,7 +7,9 @@
 
   Steps, each a hard failure:
   1. copy the static data the console reads from web/ (one source of truth):
-     web/runs and web/data-fixture into dist/;
+     web/runs and web/data-fixture into dist/, and web/cues when lane C9 has
+     exported cues under an approved charter (ci/stamp_web.py validates and
+     lists them);
   2. render the app through dist-ssr/entry-server.js, which loads those files
      with the same loader and validators the browser uses;
   3. put the markup into the one <!--app-html--> slot of dist/index.html;
@@ -94,6 +96,13 @@ for (const [folder, from] of [
   }
   rmSync(join(dist, folder), { recursive: true, force: true });
   cpSync(from, join(dist, folder), { recursive: true });
+}
+
+/* Optional: web/cues exists only once a charter is approved and its cues exported. */
+const cuesSource = join(repo, "web", "cues");
+rmSync(join(dist, "cues"), { recursive: true, force: true });
+if (existsSync(cuesSource)) {
+  cpSync(cuesSource, join(dist, "cues"), { recursive: true });
 }
 
 /* The loader asks for relative URLs such as runs/index.json; answer from dist. */

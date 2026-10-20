@@ -22,6 +22,7 @@ async function openAtFullTime(page: Page, width: number, height: number): Promis
 test("fan mode tells the story in words, with the scoreboard, timeline and star player", async ({ page }) => {
   await openAtFullTime(page, 375, 812);
   await expect(page.getByRole("heading", { name: "The match, told for a fan" })).toBeVisible();
+  await expect(page.getByText(/Live cues: there is no approved charter and no cue file for seed 1 yet/)).toBeVisible();
   await expect(page.getByRole("heading", { name: "The story so far" })).toBeVisible();
   await expect(page.getByText(/Goal for Pellmoor Harriers \(home\): Arno Quenrick scores\./)).toBeVisible();
   await page.getByRole("button", { name: /Show all \d+ moments so far/ }).click();

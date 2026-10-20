@@ -198,6 +198,14 @@ CUES_SCHEMA = "agon.cues/1"
 CUE_FILE = re.compile(r"^[0-9]{1,9}\.json$")
 
 
+def _cue_ok(cue: object) -> bool:
+    if not isinstance(cue, dict):
+        return False
+    at, until, text = cue.get("at_s"), cue.get("until_s"), cue.get("text")
+    ints = all(isinstance(v, int) and not isinstance(v, bool) for v in (at, until))
+    return ints and until >= at and isinstance(cue.get("kind"), str) and isinstance(text, dict) and isinstance(text.get("en"), str)  # type: ignore[operator]
+
+
 def stamp_cues(web_dir: Path) -> str:
     """Write web_dir/cues/manifest.json listing the cue files present (none until a charter is approved).
 
@@ -223,6 +231,9 @@ def stamp_cues(web_dir: Path) -> str:
             raise StampError(f"cues: {path.name} is not {CUES_SCHEMA} for seed {seed}")
         if not isinstance(charter, str) or not re.fullmatch(r"[0-9a-f]{64}", charter):
             raise StampError(f"cues: {path.name} names no approved charter hash")
+        cues = body.get("cues")
+        if not isinstance(cues, list) or not all(_cue_ok(c) for c in cues):
+            raise StampError(f"cues: {path.name} needs cues with integer at_s and until_s (until_s not before at_s), a kind and an English text")
         files.append({"name": path.name, "seed": seed, "sha256": hashlib.sha256(data).hexdigest(), "charter_sha256": charter})
     manifest = {"schema": CUES_MANIFEST_SCHEMA, "files": files}
     (cues_dir / "manifest.json").write_bytes(json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode("ascii") + b"\n")

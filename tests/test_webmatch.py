@@ -217,6 +217,8 @@ def test_a_cue_file_under_a_charter_is_listed_with_its_hash(tmp_path):
         ("1.json", {"schema": "agon.cues/1", "seed": 1, "charter_sha256": "nope", "cues": []}, "no approved charter"),
         ("1.json", {"schema": "agon.cues/1", "seed": 2, "charter_sha256": "a" * 64, "cues": []}, "for seed 1"),
         ("one.json", {"schema": "agon.cues/1", "seed": 1, "charter_sha256": "a" * 64, "cues": []}, "unexpected file"),
+        ("1.json", {"schema": "agon.cues/1", "seed": 1, "charter_sha256": "a" * 64, "cues": [{"at_s": 9, "until_s": 3, "kind": "k", "text": {"en": "x"}}]}, "needs cues"),
+        ("1.json", {"schema": "agon.cues/1", "seed": 1, "charter_sha256": "a" * 64, "cues": [{"at_s": 1, "until_s": 3, "kind": "k", "text": {"el": "x"}}]}, "needs cues"),
     ],
 )
 def test_a_cue_file_without_a_charter_or_for_another_seed_stops_the_stamp(tmp_path, name, body, problem):
@@ -225,3 +227,10 @@ def test_a_cue_file_without_a_charter_or_for_another_seed_stops_the_stamp(tmp_pa
     (web / "cues" / name).write_bytes(json.dumps(body).encode("ascii"))
     with pytest.raises(stamp_web.StampError, match=problem):
         stamp_web.stamp_cues(web)
+
+
+def test_the_rehearsal_cue_fixture_passes_the_stamp(tmp_path):
+    web, _ = _stamped(tmp_path)
+    (web / "cues").mkdir()
+    shutil.copy(ROOT / "tests" / "fixtures" / "cues" / "1.json", web / "cues" / "1.json")
+    assert stamp_web.stamp_cues(web).startswith("listed 1 cue files")
