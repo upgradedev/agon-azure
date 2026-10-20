@@ -229,6 +229,34 @@ def test_a_cue_file_without_a_charter_or_for_another_seed_stops_the_stamp(tmp_pa
         stamp_web.stamp_cues(web)
 
 
+def test_the_stamp_copies_an_exported_cue_file_into_the_site_and_lists_it(tmp_path, capsys):
+    web, data = _stamped(tmp_path)
+    source = tmp_path / "export"
+    source.mkdir()
+    shutil.copy(ROOT / "tests" / "fixtures" / "cues" / "1.json", source / "1.json")
+    (source / "manifest.json").write_bytes(b"{}\n")
+    code = stamp_web.main([str(web), "--sha", SHA, "--data-dir", str(data), "--seeds", "1", "--cues-dir", str(source)])
+    assert code == 0
+    assert "listed 1 cue files" in capsys.readouterr().out
+    assert (web / "cues" / "1.json").read_bytes() == (source / "1.json").read_bytes()
+    listed = json.loads((web / "cues" / "manifest.json").read_text(encoding="ascii"))
+    assert [f["name"] for f in listed["files"]] == ["1.json"]
+
+
+def test_with_no_exported_cues_the_stamp_copies_nothing(tmp_path):
+    web, _ = _stamped(tmp_path)
+    assert stamp_web.stamp_cues(web, tmp_path / "absent") == f"listed 0 cue files under {(web / 'cues').as_posix()}"
+
+
+def test_a_stray_file_in_the_export_stops_the_stamp(tmp_path):
+    web, _ = _stamped(tmp_path)
+    source = tmp_path / "export"
+    source.mkdir()
+    (source / "notes.txt").write_bytes(b"x")
+    with pytest.raises(stamp_web.StampError, match="unexpected file notes.txt"):
+        stamp_web.stamp_cues(web, source)
+
+
 def test_the_rehearsal_cue_fixture_passes_the_stamp(tmp_path):
     web, _ = _stamped(tmp_path)
     (web / "cues").mkdir()

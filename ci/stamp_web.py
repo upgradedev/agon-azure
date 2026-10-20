@@ -206,14 +206,27 @@ def _cue_ok(cue: object) -> bool:
     return ints and until >= at and isinstance(cue.get("kind"), str) and isinstance(text, dict) and isinstance(text.get("en"), str)  # type: ignore[operator]
 
 
-def stamp_cues(web_dir: Path) -> str:
-    """Write web_dir/cues/manifest.json listing the cue files present (none until a charter is approved).
+def stamp_cues(web_dir: Path, source_dir: Path | None = None) -> str:
+    """Copy the exported cues into web_dir/cues and write the list of cue files present.
 
-    The console fetches the list and only then a seed's cue file, so a seed without cues costs no
-    failed request. A cue file must be agon.cues/1 for its own seed and name a 64-hex charter hash.
+    `source_dir` is the committed export (web/cues, written by agon.cues once a charter is approved;
+    absent until then): every <seed>.json in it is copied into the site byte for byte, so the stamp
+    itself guarantees an exported cue reaches the page; its manifest.json is not copied, because the
+    list is rewritten here from the files present. The console fetches the list and only then a
+    seed's cue file, so a seed without cues costs no failed request. A cue file must be agon.cues/1
+    for its own seed, name a 64-hex charter hash, and hold well-formed cues.
     """
     cues_dir = web_dir / CUES_DIR
     cues_dir.mkdir(parents=True, exist_ok=True)
+    copied = 0
+    if source_dir is not None and source_dir.is_dir():
+        for path in sorted(source_dir.iterdir()):
+            if path.name == "manifest.json":
+                continue
+            if not path.is_file() or not CUE_FILE.match(path.name):
+                raise StampError(f"cues: unexpected file {path.name} in {source_dir.as_posix()}")
+            (cues_dir / path.name).write_bytes(path.read_bytes())
+            copied += 1
     files = []
     for path in sorted(cues_dir.iterdir()):
         if path.name == "manifest.json":
@@ -237,7 +250,8 @@ def stamp_cues(web_dir: Path) -> str:
         files.append({"name": path.name, "seed": seed, "sha256": hashlib.sha256(data).hexdigest(), "charter_sha256": charter})
     manifest = {"schema": CUES_MANIFEST_SCHEMA, "files": files}
     (cues_dir / "manifest.json").write_bytes(json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode("ascii") + b"\n")
-    return f"listed {len(files)} cue files under {cues_dir.as_posix()}"
+    source = f" ({copied} copied from {source_dir.as_posix()})" if copied and source_dir is not None else ""
+    return f"listed {len(files)} cue files under {cues_dir.as_posix()}{source}"
 
 
 def stamp_intel(web_dir: Path, data_dir: Path, seeds: list[int]) -> str:
@@ -285,6 +299,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--sha", required=True, help="full commit sha to stamp")
     parser.add_argument("--data-dir", type=Path, help="generated data directory to verify")
     parser.add_argument("--seeds", default="", help="published seeds the manifest must list, e.g. 1,2,3")
+    parser.add_argument("--cues-dir", type=Path, default=Path(__file__).resolve().parent.parent / "web" / "cues",
+                        help="exported live cues to copy into the site (default: web/cues in the repository; absent until a charter is approved)")
     parser.add_argument("--evidence-dir", type=Path, default=Path(__file__).resolve().parent.parent / "evidence",
                         help="recorded run execution evidence (default: evidence/ in the repository)")
     args = parser.parse_args(argv)
@@ -296,7 +312,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"verified {count} data files against {args.data_dir.as_posix()}/manifest.json")
             print(stamp_season(args.web_dir))
             print(stamp_match(args.web_dir, args.data_dir))
-            print(stamp_cues(args.web_dir))
+            print(stamp_cues(args.web_dir, args.cues_dir))
             print(stamp_intel(args.web_dir, args.data_dir, parse_seeds(args.seeds)))
             print(stamp_kinematics(args.web_dir, args.data_dir))
         runs = verify_runs(args.web_dir)
