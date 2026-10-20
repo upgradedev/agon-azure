@@ -13,31 +13,39 @@ season hash stays byte-identical. Its only random draws are on its own stream
 It is a simple, documented motion model, not a physics or biomechanics simulation and not a
 measurement of real players.
 
-Ball. Every pass (complete, incomplete or out) and every shot gets a ball speed drawn from the
-distance, type and pressure (constants below), within stated bounds. The flight time is the
+Ball. Every pass (complete, incomplete or out) and every shot gets a drawn ball speed, within
+stated bounds (`drawn_speed_kmh_x10`). A pass speed reads its distance and whether it was played
+under pressure. A shot speed does NOT read distance: it is a base per shot type (open play, header,
+penalty, free kick), plus `SHOT_PER_FINISHING_KMH_X10` per point of the shooter's finishing above
+60, plus `SHOT_PRESSURE_KMH_X10` under pressure; both carry uniform noise. The flight time is the
 distance over that speed, and it must fit inside the gap to the next event; when it would not, the
 flight is shortened to the gap and the published speed is the faster average that results. The
 published `speed_kmh_x10` is always distance over flight time, so the two never disagree.
 
 Players. One position per second (1 Hz) for every player on the pitch, ball included, in the fixed
 frame `home_attacks_high_x_both_periods` (agon.synth.schema.FIXED_FRAME), in decimetres. Internally
-the model steps once per second in millimetres:
+the model steps at 10 Hz (`SUBSTEPS`) in units of 0.1 mm (`UNITS_PER_DM` units per decimetre):
 - Team shape: each club keeps a fixed 4-3-3 (`FORMATION`, in its own attacking frame). The block
   shifts with the ball (`BLOCK_FOLLOW_X_PCT`, `BLOCK_FOLLOW_Y_PCT`), pushes up and widens in
   possession and drops and narrows out of it (`POSSESSION_PUSH_MM`, `DEFENCE_DROP_MM`,
   `WIDTH_IN_POSSESSION_PCT`, `WIDTH_OUT_OF_POSSESSION_PCT`). Each player has a personal offset of up
   to `PERSONAL_OFFSET_MM` per axis, drawn once per match. Keepers track the ball in their own box.
-- Anchors: the actor of every event (passer, carrier, shooter, presser, tackler, fouler, set-piece
-  taker) must be at the event location at the event second, and the receiver of a completed pass
-  must be at the pass end at the second the ball arrives. A player heads for his next anchor when
-  the deadline requires it (`APPROACH_SLACK_S`); otherwise he follows the shape.
+- Anchors: the model steers the actor of every event (passer, carrier, shooter, presser, tackler,
+  fouler, set-piece taker) to the event location at the event second, and the receiver of a
+  completed pass to the pass end at the second the ball arrives. A player heads for his next anchor
+  when it is close in time or the deadline requires it (`APPROACH_HORIZON_S`, `APPROACH_SLACK_S`);
+  otherwise he follows the shape. He arrives carrying the velocity toward the anchor after it when
+  that one is within `LEAD_HORIZON_S` (`_leave_velocity`), so he does not stop dead between two
+  actions; when that following action is itself out of reach, this pull can make him miss the
+  nearer anchor instead.
 - Caps: speed at most `PLAYER_VMAX_MM_S` (per player, from pace: `VMAX_BASE_MM_S` plus
   `VMAX_PER_PACE_MM_S` per pace point) and a change of velocity vector of at most
-  `PLAYER_AMAX_MM_S2` per second. The model never breaks a cap to reach an anchor. When an anchor
-  cannot be reached, the player gets as close as he can and the miss is reported, never hidden: see
-  `anchor_misses`. Some misses are physically impossible actions (the engine picks some actors at
-  random, so one player can be asked to cover more than the speed cap allows); most of the misses
-  of 1 m or more are limits of this simple model, and `miss_summary` counts the two apart.
+  `PLAYER_AMAX_MM_S2` per second. The model never breaks a cap to reach an anchor, so some anchors
+  are missed. `anchor_misses` lists every missed actor event and `receiver_misses` every missed pass
+  arrival; `miss_summary` splits the actor misses into those under 1 m, those next to an action no
+  capped path can reach (the engine picks some actors at random, so one player can be asked to
+  cover more than the speed cap allows, from his previous action or to his next one), and the rest,
+  which are limits of this simple model.
 - Substitutes start where the player they replace stood; a sent-off player's track ends at the
   card. Each period runs from its kick-off second to its last event second.
 
@@ -533,58 +541,119 @@ def check(record: Mapping[str, Any]) -> list[str]:
     return problems
 
 
-def anchor_misses(record: Mapping[str, Any], events: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """Every event whose actor is not at the event location at the event second.
+IMPOSSIBLE_MM_S = 10**9  # the need recorded for two different places in the same second
 
-    Each miss carries its distance (`miss_dm`) and `need_mm_s`: the average speed the player needed
-    from his previous action in the same period (None for his first). A need above
-    PLAYER_VMAX_MM_S means no path within the speed cap reaches the event; a smaller need means the
-    miss is a limit of this simple motion model (acceleration cap, approach rules), not of physics.
-    """
-    tracks: dict[tuple[int, str], list[tuple[int, list[int]]]] = {}
+
+def _actor_events(events: Sequence[Mapping[str, Any]]) -> list[Mapping[str, Any]]:
+    return [e for e in events if e["type"] not in ("sub", "possession_change") and e["player"]]
+
+
+def _need(a: tuple[int, int, int], b: tuple[int, int, int]) -> int:
+    """Average speed (mm/s) to get from (second, x_dm, y_dm) a to b."""
+    dist_mm = isqrt((b[1] - a[1]) ** 2 + (b[2] - a[2]) ** 2) * 100
+    if b[0] == a[0]:
+        return 0 if dist_mm == 0 else IMPOSSIBLE_MM_S
+    return dist_mm // (b[0] - a[0])
+
+
+def _sample(tracks: Mapping[tuple[int, str], list[tuple[int, list[int]]]], period: int, player: str, s: int) -> tuple[int, int] | None:
+    at = None
+    for start, xy in tracks.get((period, player), []):
+        k = s - start
+        if 0 <= k < len(xy) // 2:
+            at = (xy[2 * k], xy[2 * k + 1])
+    return at
+
+
+def _tracks(record: Mapping[str, Any]) -> dict[tuple[int, str], list[tuple[int, list[int]]]]:
+    out: dict[tuple[int, str], list[tuple[int, list[int]]]] = {}
     for per in record["periods"]:
         for t in per["players"]:
-            tracks.setdefault((per["period"], t["player_id"]), []).append((t["start_s"], t["xy"]))
-    previous: dict[tuple[int, str], tuple[int, int, int]] = {}
-    misses: list[dict[str, Any]] = []
-    for e in events:
-        if e["type"] in ("sub", "possession_change") or not e["player"]:
-            continue
+            out.setdefault((per["period"], t["player_id"]), []).append((t["start_s"], t["xy"]))
+    return out
+
+
+def anchor_misses(record: Mapping[str, Any], events: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Every actor event whose actor is not at the event location at the event second.
+
+    Each miss carries its distance (`miss_dm`, None when the player has no sample then) and the
+    average speed he needed from his action at the previous second (`need_mm_s`) and to his action
+    at the next second (`need_next_mm_s`) in the same period, None where there is none.
+    """
+    tracks = _tracks(record)
+    acts = _actor_events(events)
+    points: dict[tuple[int, str], list[tuple[int, int, int]]] = {}
+    for e in acts:
         x, y, _, _ = to_fixed_frame(e, record["home"])
-        s = _second(e)
+        points.setdefault((e["period"], e["player"]), []).append((_second(e), x, y))
+    seen: dict[tuple[int, str], int] = {}
+    misses: list[dict[str, Any]] = []
+    for e in acts:
         key = (e["period"], e["player"])
-        prev = previous.get(key)
-        previous[key] = (s, x, y)
-        need = None
-        if prev is not None and s > prev[0]:
-            need = isqrt((x - prev[1]) ** 2 + (y - prev[2]) ** 2) * 100 // (s - prev[0])
-        at = None
-        for start, xy in tracks.get(key, []):
-            k = s - start
-            if 0 <= k < len(xy) // 2:
-                at = (xy[2 * k], xy[2 * k + 1])
-        if at is None:
-            misses.append({"event_id": e["event_id"], "player": e["player"], "miss_dm": None, "need_mm_s": need})
-            continue
-        d = isqrt((at[0] - x) ** 2 + (at[1] - y) ** 2)
-        if d > 0:
-            misses.append({"event_id": e["event_id"], "player": e["player"], "miss_dm": d, "need_mm_s": need})
+        i = seen.get(key, 0)
+        seen[key] = i + 1
+        row = points[key]
+        here = row[i]
+        # Neighbours are his actions at an EARLIER and a LATER second: a corner kick and the corner
+        # pass share one second and one spot, and the action that matters is the one after both.
+        earlier = [r for r in row[:i] if r[0] < here[0]]
+        later = [r for r in row[i + 1:] if r[0] > here[0]]
+        need_prev = _need(earlier[-1], here) if earlier else None
+        need_next = _need(here, later[0]) if later else None
+        if any(r[0] == here[0] and (r[1], r[2]) != (here[1], here[2]) for r in row):
+            need_next = IMPOSSIBLE_MM_S
+        at = _sample(tracks, e["period"], e["player"], here[0])
+        d = None if at is None else isqrt((at[0] - here[1]) ** 2 + (at[1] - here[2]) ** 2)
+        if d is None or d > 0:
+            misses.append({
+                "event_id": e["event_id"], "player": e["player"], "miss_dm": d,
+                "need_mm_s": need_prev, "need_next_mm_s": need_next,
+            })
     return misses
 
 
 def miss_summary(misses: Sequence[Mapping[str, Any]]) -> dict[str, int]:
-    """Counts of anchor misses: under 1 m, 1 m or more needing more than the speed cap, and the rest."""
+    """Actor misses: under 1 m; 1 m or more next to an action beyond the speed cap (from the previous
+    action or to the next one); and the rest, the model's own limits."""
+    def beyond(m: Mapping[str, Any]) -> bool:
+        needs = [v for v in (m["need_mm_s"], m.get("need_next_mm_s")) if v is not None]
+        return any(v > PLAYER_VMAX_MM_S for v in needs)
+
     under = sum(1 for m in misses if m["miss_dm"] is not None and m["miss_dm"] < 10)
-    beyond = sum(
-        1 for m in misses
-        if not (m["miss_dm"] is not None and m["miss_dm"] < 10) and m["need_mm_s"] is not None and m["need_mm_s"] > PLAYER_VMAX_MM_S
-    )
+    beyond_cap = sum(1 for m in misses if not (m["miss_dm"] is not None and m["miss_dm"] < 10) and beyond(m))
     return {
         "misses": len(misses),
         "under_1m": under,
-        "beyond_cap": beyond,
-        "model_limit": len(misses) - under - beyond,
+        "beyond_cap": beyond_cap,
+        "model_limit": len(misses) - under - beyond_cap,
         "max_miss_dm": max((m["miss_dm"] or 0 for m in misses), default=0),
+    }
+
+
+def receiver_arrivals(record: Mapping[str, Any], events: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Every completed pass: its receiver, the second the ball arrives and the receiver's distance from
+    the pass end then (`miss_dm`, None when he has no sample at that second)."""
+    flight = {f["event_id"]: f["flight_ms"] for f in record["ball_flights"]}
+    tracks = _tracks(record)
+    out: list[dict[str, Any]] = []
+    for e in events:
+        if e["type"] != "pass" or e["outcome"] != "complete" or not e["related_player"]:
+            continue
+        _, _, fx, fy = to_fixed_frame(e, record["home"])
+        arrive = _second(e) + max(1, -(-flight[e["event_id"]] // 1000))
+        at = _sample(tracks, e["period"], e["related_player"], arrive)
+        d = None if at is None else isqrt((at[0] - fx) ** 2 + (at[1] - fy) ** 2)
+        out.append({"event_id": e["event_id"], "player": e["related_player"], "arrive_s": arrive, "miss_dm": d})
+    return out
+
+
+def receiver_summary(arrivals: Sequence[Mapping[str, Any]]) -> dict[str, int]:
+    misses = [a for a in arrivals if a["miss_dm"] is None or a["miss_dm"] > 0]
+    return {
+        "arrivals": len(arrivals),
+        "misses": len(misses),
+        "no_sample": sum(1 for a in misses if a["miss_dm"] is None),
+        "max_miss_dm": max((a["miss_dm"] or 0 for a in misses), default=0),
     }
 
 
@@ -625,12 +694,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             record = mutate(record)
         problems = check(record)
         summary = miss_summary(anchor_misses(record, events))
+        arrivals = receiver_summary(receiver_arrivals(record, events))
         violations += len(problems)
         tracks = sum(len(p["players"]) for p in record["periods"])
         lines.append(
             f"seed {seed} match_index {args.match_index} tracks {tracks} flights {len(record['ball_flights'])}"
             f" violations {len(problems)} anchor_misses {summary['misses']} (under_1m {summary['under_1m']}"
             f" beyond_cap {summary['beyond_cap']} model_limit {summary['model_limit']}) max_miss_dm {summary['max_miss_dm']}"
+            f" receiver_misses {arrivals['misses']} of {arrivals['arrivals']} (no_sample {arrivals['no_sample']})"
+            f" max_receiver_miss_dm {arrivals['max_miss_dm']}"
             f" sha256 {record_sha256(record)}"
         )
         for p in problems[:5]:

@@ -83,44 +83,55 @@ synthetic tracking layer on top of a finished event log. It reads the events and
 is unchanged (`tests/test_synth_additive.py` and `tests/test_synth_season.py` stay green). It is a
 simple, documented motion model, not a physics or biomechanics simulation and not a measurement.
 
-- **Ball.** Every pass and shot gets a speed from its distance, type and pressure (constants in the
-  module), inside bounds of 15 to 115 km/h for passes and 30 to 135 km/h for shots. The flight is
+- **Ball.** Every pass and shot gets a drawn speed inside bounds of 15 to 115 km/h for passes and
+  30 to 135 km/h for shots. A pass speed reads the pass distance and whether it was played under
+  pressure. A shot speed does not read distance: it is a base per shot type (open play 70, header
+  42, penalty 88, free kick 82 km/h), plus 0.4 km/h per point of the shooter's finishing above 60,
+  minus 6 km/h under pressure. Both carry uniform noise (constants in the module). The flight is
   distance over speed and always ends before the next event; when it would not, the flight is
   shortened and the published speed is the faster average, so speed always equals distance over
   flight time.
 - **Players.** One position per second for every player on the pitch and the ball, in decimetres,
   frame `home_attacks_high_x_both_periods`. Each club keeps a fixed 4-3-3 that shifts with the ball,
   pushes up and widens in possession and drops and narrows out of it; each player has a personal
-  offset; keepers track the ball in their box. The actor of every event is placed at the event
-  location at the event second, and the receiver of a completed pass at the pass end when the ball
-  arrives. Internally the model steps at 10 Hz with a speed cap of 9.5 m/s (34.2 km/h; lower for
-  slower players: 7.8 m/s plus 0.02 m/s per pace point) and an acceleration cap of 4.5 m/s^2, and it
-  never breaks a cap to reach an anchor. Substitutes start where the player they replace stood; a
-  sent-off player's track ends at the card.
+  offset; keepers track the ball in their box. The model steers the actor of every event to the
+  event location at the event second, and the receiver of a completed pass to the pass end when the
+  ball arrives. A player arrives carrying his velocity toward his next action when it is at most
+  10 s away, so he does not stop dead between two actions. Internally the model steps at 10 Hz in
+  units of 0.1 mm, with a speed cap of 9.5 m/s (34.2 km/h; lower for slower players: 7.8 m/s plus
+  0.02 m/s per pace point) and an acceleration cap of 4.5 m/s^2, and it never breaks a cap to reach
+  an anchor, so some actors and some receivers miss theirs (counted below). Substitutes start where
+  the player they replace stood; a sent-off player's track ends at the card.
 - **Triggers.** `agon.interpret.kinematics.triggers_from_segments` reads the published 1 Hz samples,
   one stream per period: sprint at 25.2 km/h or more, top-speed trigger at 30 km/h or more, a
   milestone every 2 km across the match. At 1 Hz every speed is a 1-second average.
 
 **Metric M9 and anchors.** Self-measured, Windows 11, Python 3.11, branch `b/kinematics`, command
-`python -m agon.synth.kinematics --seeds 1,2,3` (exit 0, about 17 s total wall time) for the cap
-violations and `python -m agon.webkinematics --seeds 1,2,3 --out build/kinematics` for the rest:
+`python -m agon.synth.kinematics --seeds 1,2,3` (exit 0, about 30 s total wall time) for the cap
+violations and the misses, and `python -m agon.webkinematics --seeds 1,2,3 --out build/kinematics`
+for the rest:
 
-| Seed | Cap violations | Actors not at their event location (under 1 m; 1 m or more beyond the speed cap; 1 m or more, model limit) | Largest miss | Outfield players on all match: mean distance, mean sprints, top speeds |
-|---|---|---|---|---|
-| 1 | 0 | 99 of 1647 (67; 2; 30) | 19.4 m | 11 players: 8.16 km, 25 sprints, 25.5 to 33.4 km/h |
-| 2 | 0 | 103 of 1622 (80; 0; 23) | 4.1 m | 12 players: 7.21 km, 25 sprints, 31.6 to 33.1 km/h |
-| 3 | 0 | 78 of 1587 (59; 0; 19) | 30.0 m | 12 players: 7.71 km, 25 sprints, 31.6 to 33.1 km/h |
+| Seed | Cap violations | Actors not at their event location (under 1 m; 1 m or more next to an action beyond the speed cap; 1 m or more, model limit) | Largest actor miss | Receivers not at the pass end on arrival (no position then) | Largest receiver miss | Outfield players on all match: mean distance, mean sprints, top speeds |
+|---|---|---|---|---|---|---|
+| 1 | 0 | 99 of 1647 (67; 5; 27) | 19.4 m | 14 of 731 (1) | 9.6 m | 11 players: 8.16 km, 25 sprints, 25.5 to 33.4 km/h |
+| 2 | 0 | 103 of 1622 (80; 0; 23) | 4.1 m | 9 of 795 (2) | 5.9 m | 12 players: 7.21 km, 25 sprints, 31.6 to 33.1 km/h |
+| 3 | 0 | 78 of 1587 (59; 2; 17) | 30.0 m | 11 of 678 (1) | 9.6 m | 12 players: 7.71 km, 25 sprints, 31.6 to 33.1 km/h |
 
 The check reads the published decimetre samples: step speed at most 9.7 m/s, change of step at most
 4.8 m/s^2 (the model caps plus the worst-case decimetre rounding of a difference and of a second
 difference), positions within 10 m of the lines, ball speeds in bounds and flights inside their gap.
 `python -m agon.synth.kinematics --seeds 1 --mutate` plants one 15 m teleport and must exit 1; the
-determinism workflow runs both. Most misses are under 1 m. Of the misses of 1 m or more, only a
-few are actions no capped path can reach (the player needed an average speed above 9.5 m/s from his
-previous action, because the engine picks some actors at random); most are limits of this simple
-motion model, which plans toward one anchor at a time under an acceleration cap. Both commands
-print that split (`agon.synth.kinematics.miss_summary`); the misses are listed per event id by
-`anchor_misses` and counted in every web file, never hidden.
+determinism workflow runs both. Most actor misses are under 1 m. A miss of 1 m or more counts as
+next to an action beyond the speed cap when the player needed an average speed above 9.5 m/s from
+his action at the previous second or to his action at the next second (the engine picks some
+actors at random). The look forward matters because a player carries his velocity toward his next
+action through an anchor: the two largest misses are corner takers pulled off the corner flag by a
+press the engine gives them right after the corner, 40.0 m away 3 s later (seed 1, event
+b9d1b782ee765d99, 19.4 m) and 36.3 m away 2 s later (seed 3, event e8c62c818678cf34, 30.0 m), which
+no capped path reaches. The remaining misses of 1 m or more are limits of this simple motion model.
+Both commands print the split (`agon.synth.kinematics.miss_summary` and `receiver_summary`); the
+misses are listed per event id by `anchor_misses` and `receiver_arrivals` and counted in every web
+file.
 
 **Brief-field mapping.**
 
@@ -431,8 +442,9 @@ https://github.com/upgradedev/agon-azure/actions/runs/39277712146 (ubuntu season
 - Engine constants fitted by hand on calibration seeds; M2 held-out is 18 of 22 (section 4).
 - No measured tracking and no video. Positions come from the synthetic kinematics layer (section
   2): a simple motion model, 1 Hz published. About 6% of actors miss their event location on seeds 1
-  to 3: a few because the engine's choice of actor is physically impossible, most because of the
-  model's own limits, and two thirds of the misses are under 1 m. The sprint and distance bands stay NOT
+  to 3 (two thirds of those misses are under 1 m; a few sit next to an action no capped path
+  reaches; the rest are the model's own limits), and about 1.5% of pass receivers are not at the
+  pass end when the ball arrives. The sprint and distance bands stay NOT
   MEASURABLE in M2, and on seeds 1 to 3 the layer's distances are below the distance band.
 - Storyline labels cover injected interventions only; counterfactual twins are not built.
 - The sub marker location described in section 2.

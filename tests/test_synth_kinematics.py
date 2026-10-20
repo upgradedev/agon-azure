@@ -213,6 +213,31 @@ def test_misses_are_split_by_cause():
     assert kin.miss_summary(planted) == {"misses": 4, "under_1m": 1, "beyond_cap": 1, "model_limit": 2, "max_miss_dm": 50}
 
 
+def test_a_miss_next_to_an_unreachable_action_is_filed_beyond_the_cap():
+    # Seed 1: a corner taker is pulled off the flag by a press 40 m away 3 s later (looking forward).
+    misses = {m["event_id"]: m for m in kin.anchor_misses(kinkit.record(), kinkit.events())}
+    corner = misses["b9d1b782ee765d99"]
+    assert corner["miss_dm"] >= 10 and corner["need_next_mm_s"] > kin.PLAYER_VMAX_MM_S
+    assert corner["need_mm_s"] is not None and corner["need_mm_s"] <= kin.PLAYER_VMAX_MM_S
+    only_forward = [{"event_id": "x", "player": "p", "miss_dm": 40, "need_mm_s": 2000, "need_next_mm_s": kin.PLAYER_VMAX_MM_S + 1}]
+    assert kin.miss_summary(only_forward)["beyond_cap"] == 1
+
+
+def test_receiver_arrivals_are_checked_and_a_planted_miss_is_counted():
+    rec, evs = kinkit.record(), kinkit.events()
+    arrivals = kin.receiver_arrivals(rec, evs)
+    assert len(arrivals) == sum(1 for e in evs if e["type"] == "pass" and e["outcome"] == "complete" and e["related_player"])
+    before = kin.receiver_summary(arrivals)
+    assert before["misses"] * 100 <= before["arrivals"] * 4  # regression floor: 14 of 731 when written
+    hit = next(a for a in arrivals if a["miss_dm"] == 0)
+    e = next(x for x in evs if x["event_id"] == hit["event_id"])
+    t = kinkit.track(rec, e["period"], hit["player"])
+    k = hit["arrive_s"] - t["start_s"]
+    t["xy"][2 * k] += 30
+    after = kin.receiver_summary(kin.receiver_arrivals(rec, evs))
+    assert after["misses"] == before["misses"] + 1
+
+
 def test_tracks_cover_each_period_at_one_hertz_with_subs_and_a_sending_off():
     rec, evs = kinkit.record(RED_CARD_SEED), kinkit.events(RED_CARD_SEED)
     for per in rec["periods"]:

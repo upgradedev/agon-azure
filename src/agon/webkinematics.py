@@ -24,7 +24,9 @@ README.txt beside them.
         players                  per player: distance_dm, top_speed_kmh_x10, sprints,
                                  top_speed_triggers and distance_milestones (period plus t_s)
         checks                   cap_violations (metric M9, must be 0), anchors, anchor_misses and
-                                 its split (under_1m, beyond_cap, model_limit), max_anchor_miss_dm
+                                 its split (under_1m, beyond_cap, model_limit), max_anchor_miss_dm,
+                                 receiver_arrivals, receiver_misses, receiver_no_sample,
+                                 max_receiver_miss_dm
     README.txt
 
 The triggers come from `agon.interpret.kinematics.triggers_from_segments` over the published 1 Hz
@@ -75,7 +77,8 @@ FLIGHT_KEYS = frozenset({
 })
 CHECK_KEYS = frozenset({
     "cap_violations", "anchors", "anchor_misses", "anchor_misses_under_1m", "anchor_misses_beyond_cap",
-    "anchor_misses_model_limit", "max_anchor_miss_dm",
+    "anchor_misses_model_limit", "max_anchor_miss_dm", "receiver_arrivals", "receiver_misses",
+    "receiver_no_sample", "max_receiver_miss_dm",
 })
 UNITS = {
     "position": "decimetres, fixed frame: the home club attacks towards x = 1050 in both periods",
@@ -89,10 +92,12 @@ README_TEXT = """Agon synthetic kinematics: what these files are
 
 These files are SYNTHETIC. The match engine produces events, not tracking. agon.synth.kinematics
 derives positions from a finished event log with a simple motion model: each club keeps a 4-3-3
-shape that follows the ball and the phase of play, the actor of every event is placed at the event
-location at the event second (and the receiver of a completed pass at the pass end when the ball
-arrives), and every player stays within a speed cap of at most 9.5 m/s (34.2 km/h, lower for slower
-players) and an acceleration cap of 4.5 m/s^2. They are not measured positions of real players.
+shape that follows the ball and the phase of play, the model steers the actor of every event to the
+event location at the event second (and the receiver of a completed pass to the pass end when the
+ball arrives), and every player stays within a speed cap of at most 9.5 m/s (34.2 km/h, lower for
+slower players) and an acceleration cap of 4.5 m/s^2. Because the caps always win, some actors and
+some receivers are not where their event says; the Checks section below counts them. These are
+not measured positions of real players.
 
 Files
   manifest.json            lists every kinematics file with its sha256, its seed and the sha256
@@ -126,9 +131,12 @@ Triggers (agon.interpret.kinematics.triggers_from_segments, one segment per peri
   milestone          every 2 km of the player's distance, counted across both periods
 
 Ball speed
-  speed_kmh_x10 is the pass or shot distance over its flight time. The flight always ends before
-  the next event; when the drawn speed would not get there in time, the flight is shortened and the
-  published speed is the faster average that results.
+  speed_kmh_x10 is the pass or shot distance over its flight time. The drawn speed of a pass reads
+  its distance and whether it was under pressure; the drawn speed of a shot does not read distance:
+  it is a base per shot type (open play 70, header 42, penalty 88, free kick 82 km/h), plus 0.4 km/h
+  per point of the shooter's finishing above 60, minus 6 km/h under pressure, with uniform noise.
+  The flight always ends before the next event; when the drawn speed would not get there in time,
+  the flight is shortened and the published speed is the faster average that results.
 
 Checks (metric M9)
   cap_violations     published steps over 9.7 m/s, changes of step over 4.8 m/s^2, positions
@@ -137,10 +145,15 @@ Checks (metric M9)
   anchor_misses      events whose actor is not at the event location at the event second; the
                      model never breaks a cap to reach one. Split three ways:
   anchor_misses_under_1m       misses shorter than 1 m
-  anchor_misses_beyond_cap     misses of 1 m or more where the player needed an average speed above
-                               the 9.5 m/s cap from his previous action (the engine picks some
-                               actors at random, so these actions are physically impossible)
+  anchor_misses_beyond_cap     misses of 1 m or more next to an action no capped path reaches: the
+                               player needed an average speed above the 9.5 m/s cap from his
+                               previous action or to his next one (the engine picks some actors at
+                               random). A player carries his velocity toward his next action through
+                               an anchor, so an unreachable next action can pull him off this one.
   anchor_misses_model_limit    the other misses of 1 m or more: limits of this simple motion model
+  receiver_misses    completed passes whose receiver is not at the pass end at the second the ball
+                     arrives (receiver_no_sample: he has no position at that second, for example
+                     after the period's last event)
 """
 
 
@@ -184,6 +197,7 @@ def kinematics_payload(seed: int, events: Sequence[Mapping[str, Any]], events_sh
     record = kin.simulate_tracking(league, events, home, away, seed, match_index)
     problems = kin.check(record)
     summary = kin.miss_summary(kin.anchor_misses(record, events))
+    arrivals = kin.receiver_summary(kin.receiver_arrivals(record, events))
     anchors = sum(1 for e in events if e["player"] and e["type"] not in ("sub", "possession_change"))
     return {
         "schema": SCHEMA,
@@ -221,6 +235,10 @@ def kinematics_payload(seed: int, events: Sequence[Mapping[str, Any]], events_sh
             "anchor_misses_beyond_cap": summary["beyond_cap"],
             "anchor_misses_model_limit": summary["model_limit"],
             "max_anchor_miss_dm": summary["max_miss_dm"],
+            "receiver_arrivals": arrivals["arrivals"],
+            "receiver_misses": arrivals["misses"],
+            "receiver_no_sample": arrivals["no_sample"],
+            "max_receiver_miss_dm": arrivals["max_miss_dm"],
         },
     }
 
@@ -479,7 +497,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"{entry['name']} sha256 {entry['sha256']} events_sha256 {entry['events_sha256']}"
             f" cap_violations {c['cap_violations']} anchor_misses {c['anchor_misses']} of {c['anchors']}"
             f" (under_1m {c['anchor_misses_under_1m']} beyond_cap {c['anchor_misses_beyond_cap']}"
-            f" model_limit {c['anchor_misses_model_limit']}) max_miss_dm {c['max_anchor_miss_dm']}\n"
+            f" model_limit {c['anchor_misses_model_limit']}) max_miss_dm {c['max_anchor_miss_dm']}"
+            f" receiver_misses {c['receiver_misses']} of {c['receiver_arrivals']} (no_sample {c['receiver_no_sample']})"
+            f" max_receiver_miss_dm {c['max_receiver_miss_dm']}\n"
         )
         s = full_match_summary(body)
         sys.stdout.write(
