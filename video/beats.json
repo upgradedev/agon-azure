@@ -45,7 +45,7 @@
               "text": "Under pressure"
             },
             {
-              "text": "Expected goals \\(xG\\)"
+              "text": "^xG$"
             },
             {
               "text": "[Cc]omputed by agon\\.interpret from the synthetic event log"
