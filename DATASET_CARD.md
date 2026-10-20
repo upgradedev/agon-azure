@@ -5,7 +5,11 @@ player or match data was used to build, seed or calibrate it.
 
 Sections that describe parts not built yet say so. Nothing below is a claim about real football:
 the realism bands in section 4 are ranges we chose as sanity checks, and every number is
-self-measured with the command printed beside it.
+self-measured with the command printed beside it, except two counts in section 5 (52 of 161) that
+say they have no command on the current code.
+
+Run every command in this card from the repository root with `src` on the import path: prefix it
+with `PYTHONPATH=src` in bash, or run `$env:PYTHONPATH = 'src'` once in PowerShell.
 
 ## 1. Motivation
 
@@ -63,9 +67,11 @@ Worked example, home club `C1`, away club `C2`:
 | `C1` pass from | (300, 200) | (300, 200) |
 
 The carrier and the presser land on the same spot only after conversion. `tests/test_synth_frame.py`
-pins this example. It also checks all 1198 pressure, tackle and foul events of generated seeds 11
+pins this example. It also checks every pressure, tackle and foul event of generated seeds 11
 to 15 (match index 0, generator `synth-v0.2`) against the carrier's spot, with none skipped, and every interception
-restart against the end of the intercepted pass.
+restart against the end of the intercepted pass. The test asserts that none is skipped and that
+there are more than 200; the count is 1198 (self-measured, not pinned by the test), printed by
+`python -c "from agon.synth.engine import simulate_match; from agon.synth.world import build_world; print(sum(e.type in ('pressure', 'tackle', 'foul') for s in range(11, 16) for e in simulate_match(build_world(s), 0).events))"`.
 
 Known quirk: a `sub` event is stored at `(525, 0)`, a fixed marker on the `y_dm = 0` touchline of the
 substituting team's frame. In the fixed frame the two clubs' substitutions therefore appear on
@@ -338,9 +344,10 @@ A plan carries a `period` as well as a minute: minutes 0 to 44 are period 1 and 
 period 2, and the engine activates a plan only once both its period and its clock are reached.
 Without that, 52 of the 161 red-card and tactical-shift plans in seeds 2001 to 2400 with a planned
 minute of 45 to 52 fired in first-half added time (for example seed 2006, a red card planned for 48
-shown at 48:17 of the first half). That count was measured on commit a59658b with the same counting
-rule (anchor event in period 1); the sweep below cannot run on that commit, whose plans have no
-period. After the fix, `python -m agon.referee.period_sweep --seeds 2001-2400` reports 0 of the 600
+shown at 48:17 of the first half). Both numbers are self-measured on commit a59658b with the same
+counting rule (anchor event in period 1), but the counting command was not recorded, so they have
+no command that reproduces them: the sweep below cannot run on that commit, whose plans have no
+period, and on the current code the bug is fixed. After the fix, `python -m agon.referee.period_sweep --seeds 2001-2400` reports 0 of the 600
 period-2 red-card and tactical-shift plans activating in period 1 (56 of them planned for minutes 45
 to 52), the two label paths agreeing on all 600, and exit 0 (self-measured, about 88 s). The test
 suite runs it on seeds 2006, 2034 and 2003, holds the seed 2006 and 2034 repros as regression tests,
@@ -429,9 +436,12 @@ trusted). A table position, a streak or a player total is a fact about this fict
 
 ## 7. Distribution
 
-Seeds are stored, not generated files. To regenerate and hash:
+Seeds are stored, not generated files. To regenerate and hash, from the repository root with
+`src` on the import path (bash shown; in PowerShell run `$env:PYTHONPATH = 'src'` once and drop
+the first line):
 
 ```
+export PYTHONPATH=src
 python -m agon.synth.manifest --seeds 1,2,3 --print-hash
 python -m agon.synth.manifest --seeds 1,2,3 --out build/synth
 python -m agon.synth.fixtures --seeds 1,2,3 --out build/fixtures.json
@@ -444,6 +454,9 @@ python -m agon.synth.bands --seeds 1001-1200 --json-out build/bands-heldout.json
 python -m agon.synth.kinematics --seeds 1,2,3 --print-hash
 python -m agon.webkinematics --seeds 1,2,3 --out build/kinematics
 ```
+
+Every line exits 0 except the bands line, which writes `build/bands-heldout.json` and then exits 1
+because M2 is below its threshold (section 4).
 
 At deploy, `ci/stamp_web.py` also writes `web/kinematics/` from the event files it has just
 verified in `web/data/`; each kinematics file names the sha256 of its event file, and the README
@@ -492,6 +505,7 @@ https://github.com/upgradedev/agon-azure/actions/runs/39277712146 (ubuntu season
   floored and leave added time out.
 - Player speed in the season files is the events-only carry proxy, not running speed.
 - The storyline index points at storyline runs of seeds 2001 and up, not at season matches.
-- `web/season/` is a new folder: until `web/staticwebapp.config.json` excludes `/season/*.json`
-  from the navigation fallback, a missing season file would be served as the page with status 200
-  (an existing file is served normally). That config belongs to the web lane.
+- The site is built from `console/`, and `console/public/staticwebapp.config.json` excludes
+  `/season/*` from the navigation fallback, so a missing season file is a real 404, not the page
+  (checked on 2026-10-20 with `curl -s -o /dev/null -w "%{http_code}"`: `/season/nope.json` on the
+  live site gave 404 and `/season/manifest.json` gave 200).
