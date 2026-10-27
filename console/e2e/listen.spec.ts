@@ -130,7 +130,7 @@ test("a hidden tab stops Pitch Sound, since the replay freezes there", async ({ 
   await expect(start).toHaveAttribute("data-ticking", "false");
 });
 
-test("the players appear only when asked for, with name tags from the synthetic tracking", async ({ page }) => {
+test("at 1280 px the players appear without a click, with name tags from the synthetic tracking, and the button hides them", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.emulateMedia({ colorScheme: "light", reducedMotion: "reduce" });
   const asked: string[] = [];
@@ -142,11 +142,12 @@ test("the players appear only when asked for, with name tags from the synthetic 
   await page.goto("/");
   await appReady(page);
   await expect(page.locator('[data-view="home"] section[data-analysis="ready"]')).toBeAttached({ timeout: 30_000 });
-  expect(asked, "no tracking file is fetched on first paint").toEqual([]);
-  await page.getByLabel("Match time").fill("1500");
-  await page.getByRole("button", { name: "Show the players" }).click();
-  await expect(page.getByText(/Synthetic tracking, modelled from the event log within speed and acceleration caps, not measured/)).toBeVisible({ timeout: 30_000 });
+  const show = page.getByRole("button", { name: "Show the players" });
+  await expect(show).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator('[data-view="home"] section[data-tracking="ready"]')).toBeAttached({ timeout: 30_000 });
   expect(asked.some((u) => /kinematics\/1\.kinematics\.json$/.test(u))).toBe(true);
+  await page.getByLabel("Match time").fill("1500");
+  await expect(page.getByText(/Synthetic tracking, modelled from the event log within speed and acceleration caps, not measured/)).toBeVisible();
   const pitch = page.locator('[data-view="home"] figure').first();
   await expect.poll(() => pitch.locator("circle[data-player]").count()).toBeGreaterThanOrEqual(20);
   await expect(pitch.locator("svg text").first()).toBeAttached();
@@ -154,6 +155,38 @@ test("the players appear only when asked for, with name tags from the synthetic 
   await expect(page.getByText(/Positions are modelled and can miss the event spot/)).toBeVisible();
   await expectNoSeriousAxe(page, "players on the pitch 1280");
   await pitch.screenshot({ path: "screenshots/42-players-on-pitch-1280-light.png" });
+  await show.click();
+  await expect(show).toHaveAttribute("aria-pressed", "false");
+  await expect(pitch.locator("circle[data-player]")).toHaveCount(0);
+});
+
+test("at 375 px the players wait for the button, and no tracking file is fetched before it", async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.emulateMedia({ colorScheme: "light", reducedMotion: "reduce" });
+  const asked: string[] = [];
+  page.on("request", (r) => {
+    if (r.url().includes("/kinematics/")) {
+      asked.push(r.url());
+    }
+  });
+  await page.goto("/");
+  await appReady(page);
+  await expect(page.locator('[data-view="home"] section[data-analysis="ready"]')).toBeAttached({ timeout: 30_000 });
+  const show = page.getByRole("button", { name: "Show the players" });
+  await expect(show).toBeVisible();
+  await expect(show).toHaveAttribute("aria-pressed", "false");
+  await expect(page.getByText(/about 1\.3 MB a match, loaded with the match on a screen 1024 px wide or wider and only when you ask on a narrower one\./)).toBeVisible();
+  expect(asked, "no tracking file is fetched before the button is pressed").toEqual([]);
+  const pitch = page.locator('[data-view="home"] figure').first();
+  await expect(pitch.locator("circle[data-player]")).toHaveCount(0);
+  await page.getByLabel("Match time").fill("1500");
+  await show.click();
+  await expect(show).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator('[data-view="home"] section[data-tracking="ready"]')).toBeAttached({ timeout: 30_000 });
+  expect(asked.some((u) => /kinematics\/1\.kinematics\.json$/.test(u))).toBe(true);
+  await expect.poll(() => pitch.locator("circle[data-player]").count()).toBeGreaterThanOrEqual(20);
+  await expectNoHorizontalScroll(page);
+  await expectNoSeriousAxe(page, "players on the pitch 375");
 });
 
 test("without the match file the players control says why and stays off", async ({ page }) => {

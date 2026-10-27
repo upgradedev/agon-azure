@@ -8,6 +8,11 @@
   raw ids appear only in the "Ids in the event log" row. Under reduced motion
   the ball jumps from event to event and nothing starts on its own.
 
+  The synthetic players load with each match on a screen 1024 px wide or
+  wider, decided in the browser after hydration (never in the prerender); on a
+  narrower screen Show the players loads them on demand. On every width the
+  same button hides and shows them. The dots move only with the replay clock.
+
   The header's lead says in one sentence what Agon produces and that a person
   approves it in Microsoft Teams before anything is published. Match setup says
   where live runs start (not from this page) instead of showing a switch that
@@ -82,6 +87,8 @@ const MAX_STEP_SECONDS = 0.25;
    .../kinematics/<seed>.kinematics.json gave 1287728, 1260667 and 1265783 bytes for seeds 1 to 3.
    The hint says "about 1.3 MB"; the measurement sits behind its Source disclosure. */
 const TRACKING_SIZE = "1.26 to 1.29 MB a match before compression (curl size_download on the live site, 2026-10-20)";
+/* At this width and wider the players load with the match; below it, only when the viewer asks. */
+const PLAYERS_AUTO_QUERY = "(min-width: 1024px)";
 
 const TYPE_WORDS: Record<string, string> = {
   pass: "pass",
@@ -288,7 +295,23 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
     };
   }, [match]);
 
-  /* Synthetic tracking (1.26 to 1.29 MB a match, see TRACKING_SIZE): fetched only once the viewer asks for the players. */
+  /* On a screen 1024 px wide or wider the players are shown once each seed's match is ready and the
+     Match Centre is on screen: read here, in the browser after hydration, so the server and a phone never
+     fetch the tracking by themselves. Once per seed, so a viewer who hid them keeps that until the seed changes. */
+  const readySeed = match.status === "ready" ? match.seed : null;
+  const autoSeed = useRef<number | null>(null);
+  useEffect(() => {
+    if (readySeed === null || !active || autoSeed.current === readySeed) {
+      return;
+    }
+    autoSeed.current = readySeed;
+    if (typeof window.matchMedia === "function" && window.matchMedia(PLAYERS_AUTO_QUERY).matches) {
+      setTracking(true);
+    }
+  }, [readySeed, active]);
+
+  /* Synthetic tracking (1.26 to 1.29 MB a match, see TRACKING_SIZE): fetched only while the players are
+     asked for, by the button or, at 1024 px and wider, by the effect above. */
   useEffect(() => {
     if (!tracking) {
       setKin({ status: "off" });
@@ -669,7 +692,7 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
       <GuideCard progress={progress} />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_22rem] lg:items-start">
-        <Card aria-labelledby="h-replay" data-state={ready ? "ready" : match.status} className="min-w-0">
+        <Card aria-labelledby="h-replay" data-state={ready ? "ready" : match.status} data-tracking={kin.status} className="min-w-0">
           <CardHeader>
             <CardTitle id="h-replay">Replay</CardTitle>
             {dataChip}
@@ -815,7 +838,7 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
                 {manifestError || match.status === "error"
                   ? "The synthetic tracking needs the match file, which could not be read, so the players cannot be shown."
                   : kin.status === "off"
-                    ? "Shows all 22 players, with name tags for the player in the latest event and the one you follow. The tracks are synthetic, modelled from the event log within speed and acceleration caps, not measured; about 1.3 MB a match, loaded only when you ask."
+                    ? "Shows all 22 players, with name tags for the player in the latest event and the one you follow. The tracks are synthetic, modelled from the event log within speed and acceleration caps, not measured; about 1.3 MB a match, loaded with the match on a screen 1024 px wide or wider and only when you ask on a narrower one."
                     : kin.status === "loading"
                       ? "Loading the synthetic tracking for this match."
                       : kin.status === "ready"

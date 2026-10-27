@@ -3,8 +3,9 @@
   written at deploy by agon.webkinematics from the exact event log the site
   serves). Positions for all 22 players at 1 Hz, modelled from the event log
   by agon.synth.kinematics within speed and acceleration caps: SYNTHETIC, not
-  measured. Each file is 1.26 to 1.29 MB (curl size_download on the live site, 2026-10-20), so it is fetched only when the viewer
-  asks for the players on the pitch, never on first paint.
+  measured. Each file is 1.26 to 1.29 MB (curl size_download on the live site, 2026-10-20), so it is never
+  part of the prerendered page: the Match Centre fetches it once the match is ready on a screen 1024 px
+  wide or wider, and on a narrower screen only when the viewer asks for the players on the pitch.
 
   The browser reads positions, triggers and totals and draws them; it computes
   no speed or distance of its own.
