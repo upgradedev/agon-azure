@@ -46,10 +46,11 @@ Video (1:51, English captions): https://youtu.be/Kq4-5EawTNY. It opens with the 
 8. [Real, simulated, not deployed](#real-simulated-not-deployed)
 9. [Numbers (self-measured)](#numbers-self-measured)
 10. [How to judge Agon against the rubric](#how-to-judge-agon-against-the-rubric)
-11. [Run it](#run-it)
-12. [Honest limits](#honest-limits)
-13. [Documentation map](#documentation-map)
-14. [Open-source tooling](#open-source-tooling)
+11. [How Agon fits each prize](#how-agon-fits-each-prize)
+12. [Run it](#run-it)
+13. [Honest limits](#honest-limits)
+14. [Documentation map](#documentation-map)
+15. [Open-source tooling](#open-source-tooling)
 
 ## Who it is for, where it lands, what it replaces
 
@@ -371,6 +372,16 @@ Pointers only: where each criterion can be checked in this repository, on the li
 | Real-World Impact and Applicability | [Who it is for](#who-it-is-for-where-it-lands-what-it-replaces), the three real-run timelines with `evidence/` and the public manifests, [Real, simulated, not deployed](#real-simulated-not-deployed), [Honest limits](#honest-limits), identities and grants in `infra/rbac.bicep`. On the site: Media office. |
 | User Experience and Presentation | The [Try it in 2 minutes](#try-it-in-2-minutes) path on the live demo; the console source in `console/`; its end-to-end tests (Playwright, axe-core, keyboard path, content security policy) in `console.yml`; the Teams card in `src/agon/fleet/card.py` and `infra/flows.bicep`; the video, linked from the project page once public. |
 | Adherence to the hackathon category | Synthetic data: `src/agon/synth/`, [DATASET_CARD.md](DATASET_CARD.md), the determinism run in [Numbers](#numbers-self-measured). Match insights: `src/agon/interpret/` and [docs/INTERPRET.md](docs/INTERPRET.md), Match Centre in Analyst mode, the timed cues in `web/cues/1.json` described in [web/cues-format/README.txt](web/cues-format/README.txt). Fictional names only: the Rights Guard and the real-name scan in `ci/readiness.py`. |
+
+## How Agon fits each prize
+
+Agon enters the Enterprise Solution category. A person approves the exact sealed hash in Microsoft Teams, and one verifier consumes that approval once; the workflow waits in an Azure Cosmos DB checkpoint, so the wait outlives the worker process; the Publisher recomputes the hash and writes the bundle create-only, and anyone can re-hash a public manifest; each Azure Container Apps job runs under its own managed identity, and GitHub Actions signs in to Azure with OIDC.
+
+* **Azure Cloud Native Integration:** Four Container Apps jobs start only when KEDA sees a message on their Storage queues, and exit when idle. A Logic App queues each Teams answer and polls the published manifest to confirm publication. CI deploys core, AI, flows and jobs as separate Bicep deployments, each after a what-if, and checks the live site serves the deployed commit. An operator starts each run.
+* **Multi-Agent System:** The full-time Microsoft Agent Framework graph passes typed messages between steps calling three Foundry agents, two structured model roles and code gates; four edition branches rejoin at one check; workflow state holds the sealed manifest. Refused sentences return to the Writer once, then become template lines; invalid analyst picks return once, then code picks; a translation outage marks that edition unavailable.
+* **Microsoft Foundry:** A Foundry project runs three versioned prompt agents and two structured-output calls on two pinned model deployments. At startup the worker finds or creates each agent version from its pinned prompt, reads it back and stops on any hash mismatch; each sealed report names the agent versions it used. CI calls gpt-5.6-luna after each AI deploy.
+
+What is not deployed for these categories is listed in [Real, simulated, not deployed](#real-simulated-not-deployed): the agents call no tools, the matchfacts MCP server is not used by the fleet, and Foundry evaluations do not run yet.
 
 ## Run it
 
