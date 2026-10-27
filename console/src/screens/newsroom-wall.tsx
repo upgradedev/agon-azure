@@ -3,6 +3,13 @@
   bundle, the bundle state walking DRAFT, CHECKED, SEALED, AWAITING_APPROVAL,
   and the verdict of every deterministic gate.
 
+  The Analyst desk shows the turning points a pipeline run's sealed card.json
+  carries: the minute code read from the event, the theme and the why the agent
+  wrote, each labelled by who wrote it. The run trace records no step for the
+  Analyst, so its desk stands outside the replay: after the desk grid on a
+  wider screen, after the Timeline on a phone. A run without turning points
+  (the hand-written sample) shows none.
+
   Replay reveals the run one step at a time. Under reduced motion it never
   advances on its own: Next step moves it. State changes are announced in a
   polite live region, only while replaying. The run label sits in the header
@@ -17,11 +24,17 @@ import { Notice } from "../components/ui/notice";
 import { LabelLine, ScreenHeader, SeedNotice, StepNav, View } from "../components/screen";
 import {
   DESIGN_PREVIEW_LABEL,
+  THEME_WORDS,
   VERDICT_WORDS,
   WALL_STATES,
+  aiWritten,
+  analystSource,
+  analystSummary,
+  clubKey,
   deskNames,
   lastStep,
   matchLine,
+  pickAuthorWords,
   stateAt,
   stateWords,
   wallItems,
@@ -29,7 +42,7 @@ import {
 import { hrefFor } from "../lib/router";
 import { cn } from "../lib/cn";
 import { useReducedMotion } from "../hooks/stores";
-import type { BundleState, GateVerdict, LoadedRun, Run } from "../lib/types";
+import type { AnalystNotes, BundleState, GateVerdict, LoadedRun, Run } from "../lib/types";
 
 const STEP_MS = 1100;
 type Step = number | "all";
@@ -67,6 +80,45 @@ function StepBadge({ step }: { step: number }) {
 
 function Arrow() {
   return <ArrowRight className="size-3.5 shrink-0 text-muted" aria-hidden="true" />;
+}
+
+/* The Analyst's turning points, as sealed in the run's card.json. */
+function AnalystDesk({ notes, run }: { notes: AnalystNotes; run: Run }) {
+  const key = clubKey(notes, run);
+  /* One label for the desk when the agent wrote every pick, else one per pick. */
+  const allAi = aiWritten(notes);
+  return (
+    <section
+      aria-labelledby="h-analyst"
+      data-desk="analyst"
+      className="order-last mt-6 rounded-xl border border-line bg-surface p-4 shadow-card md:order-none"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 id="h-analyst" className="text-sm font-semibold text-fg">
+          Analyst desk: turning points
+        </h2>
+        {allAi ? <Badge tone="info">AI-written</Badge> : null}
+      </div>
+      <p className="mt-1 text-sm leading-6 text-fg">{analystSummary(notes)}</p>
+      <ol className="mt-3 space-y-2" aria-label="Turning points">
+        {notes.picks.map((pick, i) => (
+          <li key={`${i}-${pick.event_id}`} data-pick={pick.event_id} className="rounded-lg border border-line px-3 py-2.5">
+            <p className="flex flex-wrap items-center gap-2 text-sm font-medium text-fg">
+              <span className="tabular-nums">Minute {pick.minute}</span>
+              <Badge tone="neutral">{THEME_WORDS[pick.theme]}</Badge>
+              {allAi ? null : <Badge tone={pick.author === "model" ? "info" : "neutral"}>{pickAuthorWords(pick)}</Badge>}
+            </p>
+            <p className="mt-1 text-sm leading-6 text-fg">{pick.why}</p>
+            <p className="mt-1 text-xs text-muted">
+              Event <code className="font-mono break-all">{pick.event_id}</code>
+            </p>
+          </li>
+        ))}
+      </ol>
+      {key ? <p className="mt-3 text-xs leading-5 text-muted">{key}</p> : null}
+      <p className="mt-2 text-xs leading-5 text-muted">{analystSource(notes, run)}</p>
+    </section>
+  );
 }
 
 interface Props {
@@ -239,7 +291,7 @@ export function NewsroomWall({ active, loaded, error, blownSeed, replayRequest }
           </p>
 
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
-            <div className="min-w-0">
+            <div className="flex min-w-0 flex-col">
               <section aria-labelledby="h-desks" className="hidden md:block">
                 <h2 id="h-desks" className="mb-3 text-sm font-semibold text-fg">
                   Desks
@@ -277,7 +329,14 @@ export function NewsroomWall({ active, loaded, error, blownSeed, replayRequest }
                     );
                   })}
                 </div>
+              </section>
 
+              {/* After the desk grid on a wider screen, so the replay keeps its place. On a phone only the
+                  Timeline shows the replay, so the desk moves below it (order-last) and the Timeline stays
+                  right under the replay controls. It holds nothing focusable, so focus order is unchanged. */}
+              {loaded?.analyst ? <AnalystDesk notes={loaded.analyst} run={run} /> : null}
+
+              <section aria-labelledby="h-handoffs" className="hidden md:block">
                 <h2 id="h-handoffs" className="mt-6 mb-3 text-sm font-semibold text-fg">
                   Handoffs into the bundle
                 </h2>

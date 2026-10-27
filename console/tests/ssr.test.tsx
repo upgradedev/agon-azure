@@ -34,6 +34,7 @@ describe.each(SOURCES)("prerendered markup, %s", (_name, fetchText, committed) =
   let html = "";
   let labels: string[] = [];
   let decided = false;
+  let picks: string[] = [];
   let flagHeadings: string[] = [];
 
   beforeAll(async () => {
@@ -44,7 +45,20 @@ describe.each(SOURCES)("prerendered markup, %s", (_name, fetchText, committed) =
     const run = data.runs[data.defaultRunId].run;
     labels = [`id="wall-label">${run.label}`, `id="approve-label">${run.label}`, `id="recap-label">${editionLabel(run)}`];
     decided = decidedMessage(run) !== null;
+    picks = (data.runs[data.defaultRunId].analyst?.picks ?? []).map((p) => p.event_id);
     flagHeadings = flagGroups(run).map((g) => `${g.name} flags`);
+  });
+
+  /* The committed default run's sealed card carries the Analyst's turning points; the
+     recorded-run fixture's card carries none, so its wall shows no Analyst desk. */
+  it("shows the Analyst desk with every turning point the default run's sealed card carries, and none without them", () => {
+    expect(picks.length > 0).toBe(committed);
+    expect(html.includes('data-desk="analyst"')).toBe(picks.length > 0);
+    expect([...html.matchAll(/\sdata-pick="([^"]+)"/g)].map((m) => m[1])).toEqual(picks);
+    if (picks.length) {
+      expect(html).toContain('<h2 id="h-analyst" class="text-sm font-semibold text-fg">Analyst desk: turning points</h2>');
+      expect(html).toContain(">AI-written<");
+    }
   });
 
   it("puts every flag on the approval card under the step that raised it", () => {

@@ -1,5 +1,5 @@
 /*
-  The match charts, hand-drawn SVG: win probability with the turning points,
+  The match charts, hand-drawn SVG: win probability with the candidate moments,
   the xG race, momentum with the 5-minute control and pressure bands, the shot
   map and the territory grid. Every value is read from the match analysis
   (agon.webmatch, computed by agon.interpret); the charts only scale and draw.
@@ -135,7 +135,7 @@ export function possessive(name: string): string {
   return name.endsWith("s") ? `${name}'` : `${name}'s`;
 }
 
-/* Turning point markers keep at least `gap` apart; a leader line points to the real minute. */
+/* Candidate moment markers keep at least `gap` apart; a leader line points to the real minute. */
 function spread(xs: number[], gap: number, right: number): number[] {
   const out: number[] = [];
   for (const x of xs) {
@@ -166,7 +166,7 @@ export function WinProbabilityChart({ file, nowS, names, compact = false }: { fi
   return (
     <ChartFrame
       title="Win probability"
-      sentence="Each club's chance to win, and the chance of a draw, minute by minute; the numbered marks are the turning points."
+      sentence="Each club's chance to win, and the chance of a draw, minute by minute; the numbered marks are the candidate moments with the largest win-probability swing, computed by code."
       label="Win probability chart"
       footer={
         <div className="space-y-2 text-xs">

@@ -15,15 +15,22 @@ import {
   DESTINATION_LABELS,
   OUTBOX_LABEL,
   PREVIEW_LABEL,
+  aiWritten,
+  analystPicks,
+  analystSource,
+  analystSummary,
   approveAttempt,
   attestation,
   bundleCheck,
+  clubKey,
   compareApproved,
   decidedMessage,
   editionLabel,
   flagGroups,
   isApproved,
   lastStep,
+  pickAuthorWords,
+  picksCited,
   stateAt,
   validateDestinations,
   validateIndex,
@@ -35,7 +42,7 @@ import {
 } from "../src/lib/runs";
 import { chipsFor } from "../src/lib/destinations";
 import { loadRunsData, type FetchText } from "../src/lib/loader";
-import type { BundleManifest, Destination, Run } from "../src/lib/types";
+import type { AnalystNotes, BundleManifest, Destination, Run } from "../src/lib/types";
 import { CASES, RECORDED, WEB, afterFetch, diskFetch, diskFetchAt, readJson } from "./helpers";
 
 type Op = { path: (string | number)[]; delete?: boolean; value?: unknown; from?: (string | number)[] };
@@ -411,6 +418,109 @@ describe("Blow full time", () => {
     expect(runForBlow(data, 1)?.run.run_id).toBe("run-afc16bdd87a7");
     expect(runForBlow(data, 3)?.run.run_id).toBe("run-afc16bdd87a7");
     expect(Object.keys(data.runs)).toContain("sample-s1");
+  });
+});
+
+/* The Analyst's turning points, read from the sealed card.json of a pipeline run
+   (agon.fleet.steps.analyst writes them), never from the run trace. */
+describe("the Analyst's turning points", () => {
+  const DEFAULT = "run-0e16414b71d7";
+  const card = (): Record<string, unknown> => readJson<Record<string, unknown>>(join(WEB, "runs", DEFAULT, "card.json"));
+
+  function notesOf(notes: AnalystNotes | null): AnalystNotes {
+    expect(notes, "the run carries the Analyst's turning points").not.toBeNull();
+    return notes as AnalystNotes;
+  }
+
+  it("parses the sealed card, and an unexpected item empties the list", () => {
+    const sealed = card();
+    const picks = analystPicks(sealed);
+    expect(picks.map((p) => p.minute)).toEqual(["4", "81", "84", "90+1"]);
+    expect(picks.map((p) => p.theme)).toEqual(["control_vs_chaos", "tactical_pressure", "game_rhythm", "game_rhythm"]);
+    expect(picks.every((p) => p.author === "model")).toBe(true);
+    const first = (sealed.turning_points as Record<string, unknown>[])[0];
+    for (const bad of [
+      { ...first, theme: "momentum" },
+      { ...first, author: "hand" },
+      { ...first, minute: "four" },
+      { ...first, why: " " },
+      { ...first, extra: 1 },
+      "2053eaedb10a5255",
+    ]) {
+      expect(analystPicks({ ...sealed, turning_points: [first, bad] }), JSON.stringify(bad)).toEqual([]);
+    }
+    expect(analystPicks({ ...sealed, turning_points: [] })).toEqual([]);
+    expect(analystPicks({})).toEqual([]);
+    expect(analystPicks(null)).toEqual([]);
+  });
+
+  it("loads them for every pipeline run whose card carries them, and none for the sample", async () => {
+    const data = await loadRunsData(diskFetch);
+    expect(data.defaultRunId).toBe(DEFAULT);
+    const latest = notesOf(data.runs[DEFAULT].analyst);
+    expect(latest.agent).toBe("agon-analyst:2");
+    expect(latest.interpretSource).toBe("agon.interpret/7ab5e12ab86e");
+    expect(latest.picks.map((p) => p.event_id)).toEqual(["2053eaedb10a5255", "cc9e7f9c36283e82", "a0db65b6d45376e8", "40db2e7a55fc2f11"]);
+    /* The 2026-10-19 run's agent wrote its picks too; only its candidate moments came from a stand-in. */
+    const first = notesOf(data.runs["run-c8a19020c98a"].analyst);
+    expect(first.agent).toBe("agon-analyst:1");
+    expect(first.interpretSource).toBe("fleet-local-standin/1");
+    expect(first.picks).toHaveLength(2);
+    expect(data.runs["sample-s1"].analyst).toBeNull();
+  });
+
+  it("shows no Analyst desk for the recorded-run fixture, whose card carries no turning point", async () => {
+    const data = await loadRunsData(afterFetch);
+    expect(data.runs[data.defaultRunId].analyst).toBeNull();
+  });
+
+  it("says who wrote the words, what code checked, where they are sealed and which club each id is", async () => {
+    const data = await loadRunsData(diskFetch);
+    const loaded = data.runs[DEFAULT];
+    const notes = notesOf(loaded.analyst);
+    expect(aiWritten(notes)).toBe(true);
+    expect(analystSummary(notes)).toBe(
+      "Before the Writer started, the Analyst agent read the candidate moments that code (agon.interpret/7ab5e12ab86e) computed from the event log, " +
+        "picked 4 turning points, and wrote a theme and why each one matters. The picks went to the Writer with the match facts.",
+    );
+    expect(analystSource(notes, loaded.run)).toBe(
+      "Written by the Microsoft Foundry agent agon-analyst:2. Code checked that each pick is an event in the log and read its minute " +
+        "from that event. The why and the theme are the agent's own words: the Fact Gate and the Rights Guard check the report's " +
+        "sentences, not this text. Sealed in card.json in bundle 0e16414b71d7; Verify recomputes its hash.",
+    );
+    expect(clubKey(notes, loaded.run)).toBe("The agent names the clubs by id: C1 is Pellmoor Harriers and C6 is Zennmark Town.");
+    const other = data.runs["run-14f4694e45c9"];
+    expect(clubKey(notesOf(other.analyst), other.run)).toBeNull();
+    /* Code's fallback picks are never called AI-written. */
+    const fallback: AnalystNotes = { ...notes, picks: notes.picks.map((p) => ({ ...p, author: "template" as const })) };
+    expect(aiWritten(fallback)).toBe(false);
+    expect(pickAuthorWords(fallback.picks[0])).toBe("Chosen by code");
+    /* True whether the agent was unavailable or its answers failed code's checks. */
+    expect(analystSummary(fallback)).toBe(
+      "No pick from the agent was used, so before the Writer started, code took 4 turning points from the top of the candidate list. " +
+        "They went to the Writer with the match facts.",
+    );
+    expect(analystSource(fallback, loaded.run)).toBe(
+      "Chosen by code, not written by a model. Sealed in card.json in bundle 0e16414b71d7; Verify recomputes its hash.",
+    );
+  });
+
+  it("gives the Why drawer the picks whose event a sentence cites, and which club each id in their why is", async () => {
+    const data = await loadRunsData(diskFetch);
+    const loaded = data.runs[DEFAULT];
+    const notes = notesOf(loaded.analyst);
+    const en = loaded.editions.en;
+    const picksOf = (index: number) => picksCited(notes, why(loaded.run, en.meta, en.data.sentences[index], index).eventIds);
+    const cited = (index: number): string[] => picksOf(index).map((p) => p.minute);
+    expect(cited(0)).toEqual([]);
+    expect(cited(1)).toEqual(["4"]);
+    expect(cited(3)).toEqual(["81"]);
+    expect(picksCited(null, ["2053eaedb10a5255"])).toEqual([]);
+    /* The key covers only the clubs the cited whys name, as the Recap passes it to the drawer. */
+    expect(clubKey({ ...notes, picks: picksOf(1) }, loaded.run)).toBe("The agent names the clubs by id: C6 is Zennmark Town.");
+    expect(clubKey({ ...notes, picks: picksOf(3) }, loaded.run)).toBe(
+      "The agent names the clubs by id: C1 is Pellmoor Harriers and C6 is Zennmark Town.",
+    );
   });
 });
 

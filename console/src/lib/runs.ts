@@ -13,6 +13,8 @@
   flagGroups groups them for the approval card.
 */
 import type {
+  AnalystNotes,
+  AnalystPick,
   BundleArtifact,
   BundleManifest,
   BundleState,
@@ -28,6 +30,7 @@ import type {
   RunsData,
   Sentence,
   SentenceType,
+  TurningPointTheme,
 } from "./types";
 import { isInt, isObject } from "./core";
 
@@ -628,6 +631,133 @@ export function stateAt(run: Run, step: number): BundleState | "" {
 
 export function stateWords(state: BundleState | ""): string {
   return state ? STATE_WORDS[state] ?? state : "No bundle yet";
+}
+
+/* ------------------------------------------------------------- analyst */
+
+/* A pipeline bundle seals the Analyst's turning points in this artifact. */
+export const CARD_FILE = "card.json";
+const THEMES: TurningPointTheme[] = ["control_vs_chaos", "tactical_pressure", "game_rhythm"];
+/* The rules' terms, as the glossary names control vs chaos. */
+export const THEME_WORDS: Record<TurningPointTheme, string> = {
+  control_vs_chaos: "Control vs chaos",
+  tactical_pressure: "Tactical pressure",
+  game_rhythm: "Game rhythm",
+};
+const PICK_KEYS = ["author", "event_id", "minute", "theme", "why"];
+const PICK_EVENT_ID = /^[A-Za-z0-9_-]{1,64}$/;
+/* agon.governance.recompute.display_minute: 4, 81, 45+2, 90+1. */
+const PICK_MINUTE = /^[0-9]{1,3}(?:\+[0-9]{1,2})?$/;
+/* A deployment or code id as a sealed manifest names it: agon-analyst:2, agon.interpret/7ab5e12ab86e. */
+const SOURCE_ID = /^[A-Za-z0-9][A-Za-z0-9:./_-]{0,63}$/;
+
+/* The turning points in a sealed card.json, each exactly {author, event_id, minute, theme, why}
+   as agon.fleet.steps.analyst writes it. One unexpected item and the list is empty, so a screen
+   never shows a partial or unknown list. */
+export function analystPicks(card: unknown): AnalystPick[] {
+  const found = isObject(card) ? card.turning_points : null;
+  if (!Array.isArray(found)) {
+    return [];
+  }
+  const list: unknown[] = found;
+  const picks: AnalystPick[] = [];
+  for (const item of list) {
+    if (!keysAre(item, PICK_KEYS)) {
+      return [];
+    }
+    const { author, event_id: eventId, minute, theme, why: text } = item;
+    if (
+      (author !== "model" && author !== "template") ||
+      typeof eventId !== "string" ||
+      !PICK_EVENT_ID.test(eventId) ||
+      typeof minute !== "string" ||
+      !PICK_MINUTE.test(minute) ||
+      typeof theme !== "string" ||
+      !THEMES.includes(theme as TurningPointTheme) ||
+      !nonEmpty(text)
+    ) {
+      return [];
+    }
+    picks.push({ author, event_id: eventId, minute, theme: theme as TurningPointTheme, why: text });
+  }
+  return picks;
+}
+
+/* The Analyst's notes for a run: its picks, the agent the sealed manifest names and the code
+   that computed the candidate moments; null when the card carries no turning point. */
+export function analystNotes(card: unknown, manifest: BundleManifest): AnalystNotes | null {
+  const picks = analystPicks(card);
+  if (!picks.length) {
+    return null;
+  }
+  const ids = manifest.deployment_ids;
+  const named = isObject(ids) ? ids["agent.analyst"] : null;
+  const computed = isObject(card) ? card.interpret_source : null;
+  return {
+    picks,
+    agent: typeof named === "string" && SOURCE_ID.test(named) ? named : null,
+    interpretSource: typeof computed === "string" && SOURCE_ID.test(computed) ? computed : null,
+  };
+}
+
+export function aiWritten(notes: AnalystNotes): boolean {
+  return notes.picks.every((p) => p.author === "model");
+}
+
+export function pickAuthorWords(pick: AnalystPick): string {
+  return pick.author === "model" ? "AI-written" : "Chosen by code";
+}
+
+/* What the Analyst did, in the order agon.fleet.workflow runs it: code computes the candidate
+   moments (interpret), the agent reads them and picks events (analyst; code checks each pick is
+   in the event log, not that it is a candidate), and the picks go into the Writer's brief
+   (agon.fleet.templates.writer_brief). */
+export function analystSummary(notes: AnalystNotes): string {
+  const n = notes.picks.length;
+  const points = `${n} turning point${n === 1 ? "" : "s"}`;
+  if (aiWritten(notes)) {
+    const by = notes.interpretSource ? ` (${notes.interpretSource})` : "";
+    return `Before the Writer started, the Analyst agent read the candidate moments that code${by} computed from the event log, picked ${points}, and wrote a theme and why each one matters. The picks went to the Writer with the match facts.`;
+  }
+  /* agon.fleet.steps.analyst falls back when the agent was unavailable or neither of its two answers passed code's checks. */
+  return `No pick from the agent was used, so before the Writer started, code took ${points} from the top of the candidate list. They went to the Writer with the match facts.`;
+}
+
+/* Who wrote the words, what code checked, and where they are sealed. */
+export function analystSource(notes: AnalystNotes, run: Run): string {
+  const sealed = `Sealed in ${CARD_FILE} in bundle ${shortHash(run.bundle.sha256)}; Verify recomputes its hash.`;
+  if (!notes.picks.some((p) => p.author === "model")) {
+    return `Chosen by code, not written by a model. ${sealed}`;
+  }
+  const agent = notes.agent ? `the Microsoft Foundry agent ${notes.agent}` : "a Microsoft Foundry agent";
+  return (
+    `Written by ${agent}. Code checked that each pick is an event in the log and read its minute from that event. ` +
+    `The why and the theme are the agent's own words: the Fact Gate and the Rights Guard check the report's sentences, not this text. ${sealed}`
+  );
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/* The agent sometimes names the clubs by id (C6's early breakthrough); this says which club each id is. */
+export function clubKey(notes: AnalystNotes, run: Run): string | null {
+  const sides = [run.home, run.away].filter((side) =>
+    notes.picks.some((p) => new RegExp(`\\b${escapeRegExp(side.club_id)}\\b`).test(p.why)),
+  );
+  if (!sides.length) {
+    return null;
+  }
+  return `The agent names the clubs by id: ${joinLabels(sides.map((side) => `${side.club_id} is ${side.name}`))}.`;
+}
+
+/* The picks whose event a sentence cites, for the Why drawer. */
+export function picksCited(notes: AnalystNotes | null, eventIds: string[]): AnalystPick[] {
+  if (!notes) {
+    return [];
+  }
+  const cited = new Set(eventIds);
+  return notes.picks.filter((p) => cited.has(p.event_id));
 }
 
 /* ------------------------------------------------------------- approval */

@@ -19,8 +19,9 @@ import {
   parseWorldText,
   worldUrl,
 } from "./core";
-import { BUNDLE_MANIFEST, INDEX_NAME, RUNS_BASE, bundleFileUrl, runUrl, validateIndex, validateRun } from "./runs";
+import { BUNDLE_MANIFEST, CARD_FILE, INDEX_NAME, RUNS_BASE, analystNotes, bundleFileUrl, runUrl, validateIndex, validateRun } from "./runs";
 import type {
+  AnalystNotes,
   BundleManifest,
   DataManifest,
   EditionFile,
@@ -78,6 +79,20 @@ function checkBundleManifest(value: unknown, url: string): BundleManifest {
   return value as unknown as BundleManifest;
 }
 
+/* The Analyst's turning points, read from the sealed card.json of a pipeline run whose manifest
+   lists it. They never stop the run from loading: a card that is missing, unreadable or carries
+   no turning point gives no Analyst desk, and Verify still reports the file by its hash. */
+async function loadAnalyst(fetchText: FetchText, run: Run, manifest: BundleManifest): Promise<AnalystNotes | null> {
+  if (run.provenance !== "pipeline" || !Object.prototype.hasOwnProperty.call(manifest.artifacts, CARD_FILE)) {
+    return null;
+  }
+  try {
+    return analystNotes(await fetchJson(fetchText, bundleFileUrl(run, CARD_FILE)), manifest);
+  } catch {
+    return null;
+  }
+}
+
 export async function loadRun(fetchText: FetchText, runId: string): Promise<LoadedRun> {
   const raw = await fetchJson(fetchText, runUrl(runId));
   const problems = validateRun(raw);
@@ -98,7 +113,7 @@ export async function loadRun(fetchText: FetchText, runId: string): Promise<Load
     }
     editions[meta.edition] = { meta, data: data as unknown as EditionFile };
   }
-  return { run, manifest, editions };
+  return { run, manifest, editions, analyst: await loadAnalyst(fetchText, run, manifest) };
 }
 
 export async function loadRunsIndex(fetchText: FetchText): Promise<RunsIndex> {
