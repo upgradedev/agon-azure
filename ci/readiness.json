@@ -18,9 +18,9 @@
         "Agon",
         "Match Centre",
         "Newsroom Wall",
-        "id=\"wall-label\">Recorded run, 2026-10-27, commit 2c22db8",
-        "id=\"approve-label\">Recorded run, 2026-10-27, commit 2c22db8",
-        "id=\"recap-label\">AI-drafted. Numbers and names checked by code. Headline report and flagged sentences approved by the club media office at 14:49 UTC on 2026-10-27."
+        "id=\"wall-label\">Recorded run, 2026-10-27, commit 42bd5bc",
+        "id=\"approve-label\">Recorded run, 2026-10-27, commit 42bd5bc",
+        "id=\"recap-label\">AI-drafted. Numbers and names checked by code. Headline report and flagged sentences approved by the club media office at 15:46 UTC on 2026-10-27."
       ],
       "scan_assets": true
     },
@@ -59,18 +59,18 @@
     },
     {
       "name": "demo-recorded",
-      "url": "https://__AGON_SWA_HOSTNAME__/runs/run-6bb5b655464f.json",
+      "url": "https://__AGON_SWA_HOSTNAME__/runs/run-0e16414b71d7.json",
       "markers": [
-        "\"run_id\":\"run-6bb5b655464f\"",
+        "\"run_id\":\"run-0e16414b71d7\"",
         "\"provenance\":\"pipeline\"",
-        "Recorded run, 2026-10-27, commit 2c22db8",
-        "\"approved_bundle_sha256\":\"6bb5b655464f33e3dce6bd0d605c73205a7dfeab74b4254408963a401b6c683c\""
+        "Recorded run, 2026-10-27, commit 42bd5bc",
+        "\"approved_bundle_sha256\":\"0e16414b71d73a7c6a014f0fb5223db18dacfc64fa487fb0a90a09d3bbca1e5f\""
       ],
       "scan_assets": false
     },
     {
       "name": "demo-recorded-bundle",
-      "url": "https://__AGON_SWA_HOSTNAME__/runs/run-6bb5b655464f/manifest.json",
+      "url": "https://__AGON_SWA_HOSTNAME__/runs/run-0e16414b71d7/manifest.json",
       "markers": [
         "\"schema\":\"agon.bundle/1\"",
         "\"report-en.json\":"
