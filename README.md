@@ -77,7 +77,7 @@ Microsoft Foundry agents (analyst, writer, localiser-editor), run as a Microsoft
 Only deployed parts are drawn. Each Container Apps job and the Logic App runs under its own managed identity, named on the second line of its box; the table under the diagram names each resource.
 
 ```mermaid
-flowchart TB
+flowchart LR
   subgraph GH["GitHub Actions, OIDC sign-in"]
     DRILL["fleet-run drill"]
     CI["ci, console, deploy"]
