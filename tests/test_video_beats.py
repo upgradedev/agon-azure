@@ -34,6 +34,11 @@ def _sheet_data() -> dict:
     return json.loads(SHEET_PATH.read_text(encoding="utf-8"))
 
 
+def _at(data: dict, beat_id: str) -> dict:
+    """A beat of a decoded sheet by id, so a test does not depend on the beats' order."""
+    return next(b for b in data["beats"] if b["id"] == beat_id)
+
+
 # --------------------------------------------------------------------- the cap, three copies
 
 
@@ -117,15 +122,39 @@ def _broken(mutate) -> dict:
         (lambda d: d["beats"][0].update(narration="Full time " + EM + " the report."), "dash"),
         (lambda d: d["beats"][1].update(id=d["beats"][0]["id"]), "unique"),
         (lambda d: d["beats"][1].update(visual=[{"source": "web:verify"}]), "starts with #/"),
-        (lambda d: d["beats"][6].update(visual=[{"source": "web:#/verify", "seconds": 3}]), "last part"),
+        (lambda d: _at(d, "verify").update(visual=[{"source": "web:#/verify", "seconds": 3}]), "last part"),
         (lambda d: d["beats"][0].update(visual=[{"source": "teams:card-arrives", "facts": [{"text": "x"}]}]), "only a web part"),
-        (lambda d: d["beats"][6].update(visual=[{"source": "web:#/", "seconds": 2}, {"source": "web:#/verify"}]), "at most one web"),
+        (lambda d: _at(d, "verify").update(visual=[{"source": "web:#/", "seconds": 2}, {"source": "web:#/verify"}]), "at most one web"),
         (lambda d: d["beats"][2].update(min_seconds=20, max_seconds=10), "min_seconds <= max_seconds"),
         (lambda d: d.update(voice="en-GB-SoniaHDNeural"), "never an HD"),
         (lambda d: d.update(site="http://example.com"), "https origin"),
     ],
 )
 def test_the_beat_sheet_refuses_each_broken_rule(mutate, words):
+    with pytest.raises(bs.BeatSheetError, match=re.escape(words)):
+        bs.parse_sheet(_broken(mutate))
+
+
+def test_the_sheet_opens_on_the_animated_opening_and_has_no_data_lab_beat():
+    sheet = bs.load_sheet(SHEET_PATH)
+    ids = [b.id for b in sheet.beats]
+    assert ids[0] == "opening" and "data-lab" not in ids
+    assert [(p.kind, p.target, p.animate) for p in sheet.beats[0].parts] == [("still", "opening", True)]
+    animated = [(b.id, p.target) for b in sheet.beats for p in b.parts if p.animate]
+    assert animated == [("opening", "opening")], "only the opening is recorded as a clip"
+    close = next(b for b in sheet.beats if b.id == "close").part("still")
+    assert close is not None and close.target == "architecture" and not close.animate
+
+
+@pytest.mark.parametrize(
+    "mutate, words",
+    [
+        (lambda d: _at(d, "verify")["visual"][0].update(animate=True), "only a still part can be animate"),
+        (lambda d: _at(d, "card-arrives")["visual"][0].update(animate=True), "only a still part can be animate"),
+        (lambda d: _at(d, "opening")["visual"][0].update(animate="yes"), "animate must be true or false"),
+    ],
+)
+def test_animate_belongs_to_a_still_part_and_is_true_or_false(mutate, words):
     with pytest.raises(bs.BeatSheetError, match=re.escape(words)):
         bs.parse_sheet(_broken(mutate))
 
@@ -227,7 +256,7 @@ def test_ssml_escapes_text_and_names_the_voice():
 def test_the_cache_key_changes_only_for_the_edited_beat():
     data = _sheet_data()
     before = bs.parse_sheet(data)
-    data["beats"][6]["narration"] = data["beats"][6]["narration"].replace("Anyone", "Everyone")
+    _at(data, "verify")["narration"] = _at(data, "verify")["narration"].replace("Anyone", "Everyone")
     after = bs.parse_sheet(data)
     keys = [(narrate.cache_key("azure", before, a), narrate.cache_key("azure", after, b)) for a, b in zip(before.beats, after.beats)]
     changed = [before.beats[i].id for i, (x, y) in enumerate(keys) if x != y]
@@ -332,20 +361,21 @@ def _fake_site(commit: str, first_provenance: str = "pipeline"):
 
 def _repo(tmp_path: Path, with_evidence: bool) -> Path:
     (tmp_path / "video" / "stills").mkdir(parents=True)
-    (tmp_path / "video" / "stills" / "architecture.html").write_text(
-        (ROOT / "video" / "stills" / "architecture.html").read_text(encoding="utf-8"), encoding="utf-8")
+    for name in ("architecture", "opening"):
+        (tmp_path / "video" / "stills" / f"{name}.html").write_text(
+            (ROOT / "video" / "stills" / f"{name}.html").read_text(encoding="utf-8"), encoding="utf-8")
     if with_evidence:
         (tmp_path / "evidence").mkdir()
         (tmp_path / "evidence" / "run-c8a19020c98a.executions.json").write_text(json.dumps(EVIDENCE), encoding="utf-8")
     return tmp_path
 
 
-def test_stills_build_both_pages_for_the_live_default_run(tmp_path):
+def test_stills_build_every_page_for_the_live_default_run(tmp_path):
     out = tmp_path / "out"
     code = stills.main(["--beats", str(SHEET_PATH), "--release-sha", LIVE_SHA, "--out", str(out),
                         "--repo", str(_repo(tmp_path / "repo", True))], fetch=_fake_site(LIVE_SHA))
     assert code == 0
-    for name in ("architecture", "executions"):
+    for name in ("opening", "architecture", "executions"):
         meta = json.loads((out / f"still-{name}.meta.json").read_text(encoding="utf-8"))
         assert meta["placeholder"] is None and meta["run_id"] == RUN["run_id"] and not meta["facts_failed"]
         assert (out / f"still-{name}.html").is_file()
@@ -376,14 +406,122 @@ def test_architecture_still_names_the_live_url_the_repo_and_the_load_bearing_sen
     assert EM not in text and EN not in text
 
 
+def test_the_opening_still_holds_every_fact():
+    _, facts = stills.build_opening(ROOT, bs.load_sheet(SHEET_PATH), RUN)
+    assert len(facts) >= 10 and all(ok for _, ok in facts), [f for f, ok in facts if not ok]
+
+
+@pytest.mark.parametrize(
+    "edit, broken",
+    [
+        (lambda t: t.replace("Code checks the claims", "Code checks every number"), "no check of every number"),
+        (lambda t: t.replace("One run<", "The first run<"), "no superlative"),
+        (lambda t: t.replace("One run<", "One run " + EM + " end to end<"), "no em or en dash"),
+        (lambda t: t.replace("Microsoft Teams card", "Teams card").replace("approves in Microsoft Teams", "approves in Teams"),
+         "names Microsoft Teams"),
+        (lambda t: t.replace("Fictional clubs", "Clubs"), "clubs are fictional"),
+        (lambda t: t.replace("@keyframes", "@x-keyframes"), "CSS keyframes"),
+        (lambda t: t.replace("</style>", "</style><script>document.title = 1</script>"), "loads nothing"),
+        (lambda t: t.replace("background: #0b0f14;", "background: url(bg.png);", 1), "loads nothing"),
+        (lambda t: t.replace("<title>", '<link rel="stylesheet" href="https://example.com/a.css"><title>'), "loads nothing"),
+    ],
+)
+def test_each_broken_opening_fact_is_named(tmp_path, edit, broken):
+    page = tmp_path / "video" / "stills" / "opening.html"
+    page.parent.mkdir(parents=True)
+    page.write_text(edit((ROOT / "video" / "stills" / "opening.html").read_text(encoding="utf-8")), encoding="utf-8")
+    failed = [f for f, ok in stills.build_opening(tmp_path, bs.load_sheet(SHEET_PATH), RUN)[1] if not ok]
+    assert any(broken in f for f in failed), failed
+
+
+def test_the_opening_narration_states_the_problem_and_the_flow_in_plain_words():
+    beats = {b.id: b for b in bs.load_sheet(SHEET_PATH).beats}
+    opening, card = beats["opening"].narration, beats["card-arrives"].narration
+    assert 30 <= len(opening.split()) <= 38, len(opening.split())
+    for phrase in ("club media office", "four languages", "one wrong number", "Microsoft Foundry agents", "code checks",
+                   "approves in Teams"):
+        assert phrase in opening, phrase
+    assert len(card.split()) < 24 and "approval card arrives" in card, "the opening states the problem, so the card beat is short"
+    for text in (opening, card):
+        assert "every number" not in text.lower()
+        assert stills.SUPERLATIVES.search(text) is None, text
+
+
+def _compose_still(tmp_path: Path, monkeypatch, beat_id: str, receipt: dict | None, media: str | None,
+                   have: float = 16.0) -> tuple[list[str], dict]:
+    """render_segment for a still beat, ffmpeg stubbed out: returns the ffmpeg command and the segment result."""
+    sheet = bs.load_sheet(SHEET_PATH)
+    beat = next(b for b in sheet.beats if b.id == beat_id)
+    target = beat.parts[0].target
+    clips, seg = tmp_path / "clips", tmp_path / "seg"
+    clips.mkdir(parents=True)
+    seg.mkdir()
+    if receipt is not None:
+        (clips / f"still-{target}.json").write_text(json.dumps({
+            "format": bs.CLIP_FORMAT, "beat": f"still-{target}", "release_sha": LIVE_SHA, "data_commit": LIVE_SHA,
+            "run_id": RUN["run_id"], "placeholder": None, **receipt}), encoding="utf-8")
+    if media:
+        (clips / f"still-{target}{media}").write_bytes(b"recorded")
+    window, calls = 350, []
+    monkeypatch.setattr(compose.bs, "run", lambda cmd, **kwargs: calls.append(cmd))
+    monkeypatch.setattr(compose.bs, "counted_frames", lambda path: window)
+    monkeypatch.setattr(compose, "usable_seconds", lambda path, start: have)
+    row = {"window_frames": window, "start_ms": 0, "cues": [{"start_ms": 320, "end_ms": 2_000, "text": "A caption."}]}
+    result = compose.render_segment(beat, row, sheet=sheet, clips=clips, teams_dir=None, stills=tmp_path / "none",
+                                    release_sha=LIVE_SHA, boxes={}, trims={}, seg_dir=seg)
+    return calls[0], result
+
+
+def test_compose_trims_the_animated_still_clip_after_its_lead_like_a_web_clip(tmp_path, monkeypatch):
+    cmd, result = _compose_still(tmp_path, monkeypatch, "opening", {"animated": True, "lead_seconds": 0.84}, ".webm")
+    at = cmd.index("-i")
+    assert cmd[at - 2:at] == ["-ss", "0.840"] and cmd[at + 1].endswith("still-opening.webm")
+    assert "-loop" not in cmd
+    graph = cmd[cmd.index("-filter_complex") + 1]
+    assert graph.startswith(f"[0:v]fps={bs.FPS},trim=end_frame=350,")
+    assert result["parts"][0]["clip"] == "still-opening.webm" and result["parts"][0]["lead_seconds"] == 0.84
+
+
+def test_compose_still_holds_a_picture_for_a_still_that_is_not_animated(tmp_path, monkeypatch):
+    cmd, result = _compose_still(tmp_path, monkeypatch, "close", {"animated": False}, ".png")
+    at = cmd.index("-i")
+    assert cmd[at - 4:at] == ["-loop", "1", "-framerate", str(bs.FPS)] and cmd[at + 1].endswith("still-architecture.png")
+    assert "-ss" not in cmd and result["parts"][0]["clip"] == "still-architecture.png"
+
+
+@pytest.mark.parametrize(
+    "receipt, media, have, words",
+    [
+        ({"animated": True, "lead_seconds": 0.5}, None, 16.0, "no still-opening.webm"),
+        (None, None, 16.0, "no still-opening.json"),
+        ({"animated": False}, ".webm", 16.0, "not a recorded clip"),
+        ({"animated": True, "lead_seconds": 0.5}, ".webm", 5.0, "the animated still clip has 5.00 s"),
+    ],
+)
+def test_compose_refuses_an_animated_still_without_a_long_enough_recorded_clip(tmp_path, monkeypatch, receipt, media, have, words):
+    with pytest.raises(compose.ComposeError, match=re.escape(words)):
+        _compose_still(tmp_path, monkeypatch, "opening", receipt, media, have)
+
+
+def test_the_capture_records_an_animated_still_as_the_clip_and_receipt_compose_reads():
+    ts = (ROOT / "console" / "e2e" / "video-capture.ts").read_text(encoding="utf-8")
+    assert "part.animate === true" in ts
+    assert 'recordVideo: { dir: join(clipsDir, "raw"), size: STILL }' in ts
+    assert "saveAs(join(clipsDir, `still-${name}.webm`))" in ts
+    for field in ("animated,", "lead_seconds: Number(lead.toFixed(3))", "hold_seconds: hold"):
+        assert field in ts, field
+    assert "animation.pause()" in ts and "animation.play()" in ts, "animations wait at zero until the lead mark"
+    assert '"data-lab"' not in ts, "the data-lab beat and its script are gone"
+
+
 def test_a_served_file_fact_needs_a_path_and_cannot_also_scope_to_the_page():
-    good = _broken(lambda d: d["beats"][6]["visual"][0]["facts"].append({"file": "runs/{run_id}/card.json", "text": "x"}))
+    good = _broken(lambda d: _at(d, "verify")["visual"][0]["facts"].append({"file": "runs/{run_id}/card.json", "text": "x"}))
     bs.parse_sheet(good)
     with pytest.raises(bs.BeatSheetError, match="at most one of within, file or repo"):
-        bs.parse_sheet(_broken(lambda d: d["beats"][6]["visual"][0]["facts"].append(
+        bs.parse_sheet(_broken(lambda d: _at(d, "verify")["visual"][0]["facts"].append(
             {"file": "runs/x.json", "within": "body", "text": "x"})))
     with pytest.raises(bs.BeatSheetError, match="a path the live site serves"):
-        bs.parse_sheet(_broken(lambda d: d["beats"][6]["visual"][0]["facts"].append({"file": "../secret", "text": "x"})))
+        bs.parse_sheet(_broken(lambda d: _at(d, "verify")["visual"][0]["facts"].append({"file": "../secret", "text": "x"})))
 
 
 def test_the_closing_narration_says_the_sentence_the_still_shows():
@@ -431,9 +569,9 @@ def test_the_match_centre_beat_checks_the_seed_and_clubs_of_the_run_it_shows():
 
 
 def test_a_repository_fact_names_a_path_inside_the_repository():
-    bs.parse_sheet(_broken(lambda d: d["beats"][6]["visual"][0]["facts"].append({"repo": "src/agon/fleet/steps.py", "text": "x"})))
+    bs.parse_sheet(_broken(lambda d: _at(d, "verify")["visual"][0]["facts"].append({"repo": "src/agon/fleet/steps.py", "text": "x"})))
     with pytest.raises(bs.BeatSheetError, match="a path in this repository"):
-        bs.parse_sheet(_broken(lambda d: d["beats"][6]["visual"][0]["facts"].append({"repo": "../etc/passwd", "text": "x"})))
+        bs.parse_sheet(_broken(lambda d: _at(d, "verify")["visual"][0]["facts"].append({"repo": "../etc/passwd", "text": "x"})))
 
 
 def test_no_beat_implies_an_automatic_trigger_at_the_end_of_the_match():
@@ -447,7 +585,9 @@ def test_no_beat_implies_an_automatic_trigger_at_the_end_of_the_match():
 def test_the_officer_ticks_the_confirm_row_and_the_gate_claims_only_what_it_checks():
     beats = {b.id: b for b in bs.load_sheet(SHEET_PATH).beats}
     assert "tick the Confirm row" in beats["officer-approves"].narration
-    assert "every number, and every name and minute it claims" in beats["newsroom"].narration
+    assert "every claimed number, name and minute against the event log" in beats["newsroom"].narration
+    for beat in beats.values():
+        assert "every number" not in beat.narration.lower(), (beat.id, "the Fact Gate checks the claims, not every number")
     files = [f for p in beats["newsroom"].parts for f in p.facts if f.get("file")]
     assert any("turning_points" in f["text"] and "model" in f["text"] for f in files), "a model-authored turning point is checked"
 

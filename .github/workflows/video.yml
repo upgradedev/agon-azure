@@ -23,7 +23,8 @@
 #   capture  ci/video/stills.py builds the still beats' HTML from committed files
 #            and the live run and checks their facts; then Playwright from console/
 #            (its committed lock, its pinned Chromium) records each web beat from the
-#            live site and renders each still. Each clip first asserts the page's
+#            live site and renders each still: one screenshot, or a clip for a still
+#            part marked "animate": true (the opening). Each clip first asserts the page's
 #            data-commit equals release_sha, and every narrated fact must hold
 #            (AGON_VIDEO_FACTS=enforce): a false sentence fails here. Clips hold
 #            max_seconds plus a margin, so capture does not wait for the narration
@@ -197,7 +198,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
-      - name: Build and check the stills (architecture, executions) from the repository and the live run
+      - name: Build and check the stills (opening, architecture, executions) from the repository and the live run
         working-directory: ${{ github.workspace }}
         env:
           RELEASE_SHA: ${{ needs.plan.outputs.release_sha }}
@@ -211,7 +212,7 @@ jobs:
         run: npm ci --ignore-scripts --no-audit --no-fund
       - name: Chromium for Playwright (here only)
         run: npx --no-install playwright install --with-deps chromium
-      - name: Record one clip per web beat from the live site at the release SHA
+      - name: Record one clip per web beat from the live site at the release SHA, and per animated still
         env:
           AGON_VIDEO_BEATS: ${{ github.workspace }}/video/beats.json
           AGON_VIDEO_RELEASE_SHA: ${{ needs.plan.outputs.release_sha }}
