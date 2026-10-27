@@ -15,7 +15,7 @@
 
 [Live demo](https://jolly-stone-0c9c8a003.4.azurestaticapps.net) · [Try it in 2 minutes](#try-it-in-2-minutes) · [Architecture](#architecture) · [Process flow](#process-flow-of-one-run) · [Agents and checks](#the-agents-and-who-checks-them) · [How to judge](#how-to-judge-agon-against-the-rubric) · [Documentation map](#documentation-map)
 
-Agon (the contest) is our entry to the Microsoft Inside the Game developer hackathon, in its Synthetic Match Insights Engine category. It serves the small media office of a professional football club. Every club, player and match in it is synthetic and fictional. MIT licence.
+Agon (the contest) is our entry to the Microsoft Inside the Game developer hackathon. It serves the small media office of a professional football club. Every club, player and match in it is synthetic and fictional. MIT licence.
 
 ## Try it in 2 minutes
 
@@ -243,7 +243,7 @@ Each `localise_` step calls Azure AI Translator, then the localiser-editor agent
 
 ### Model roles
 
-| Role | How it runs | Version in the published runs | What it does | What checks it |
+| Role | How it runs | Version in the published full-time runs | What it does | What checks it |
 |---|---|---|---|---|
 | Analyst | Foundry prompt agent `agon-analyst`, prompt `analyst.v1.md` | `agon-analyst:1` on 2026-10-19; `agon-analyst:2` on 2026-10-20 and 2026-10-27 | picks up to 5 turning points from the interpret step's candidates | code rejects an event id that is not in the event log, more than 5 picks, or no pick when candidates exist; it sends the problems back once, then falls back to the 4 largest win-probability swings, chosen by code |
 | Writer | Foundry prompt agent `agon-writer`, prompt `writer.v1.md` | `agon-writer:1` | writes the English report, each sentence with machine-readable claims | the Fact Gate; one retry (`MAX_WRITER_ATTEMPTS = 2`), then a template line built from the claims for each sentence still refused |
