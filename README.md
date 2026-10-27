@@ -77,7 +77,6 @@ Microsoft Foundry agents (analyst, writer, localiser-editor), run as a Microsoft
 Only deployed parts are drawn. Each Container Apps job and the Logic App runs under its own managed identity, named on the second line of its box; the table under the diagram names each resource.
 
 ```mermaid
-%%{init: {"flowchart": {"rankSpacing": 40, "nodeSpacing": 30}}}%%
 flowchart TB
   subgraph GH["GitHub Actions, OIDC sign-in"]
     DRILL["fleet-run drill"]
@@ -101,26 +100,26 @@ flowchart TB
   TEAMS["Microsoft Teams<br/>media office"]
   SWA["Static Web Apps<br/>React console"]
 
-  DRILL -->|"send only"| RUNS
+  DRILL --> RUNS
   RUNS --> FLEET
   FLEET --> FOUNDRY
   FLEET --> TRS
   FLEET <--> COSMOS
   FLEET --> ART
-  FLEET -->|"card"| LA
+  FLEET --> LA
   LA <--> TEAMS
-  LA -->|"decision"| DQT
+  LA --> DQT
   DQT --> INTAKE
-  INTAKE -->|"verify, consume"| COSMOS
-  INTAKE -->|"pointer"| DQ
+  INTAKE --> COSMOS
+  INTAKE --> DQ
   DQ --> FLEET
   FLEET --> PQ
   PQ --> PUB
   COSMOS --> PUB
   ART --> PUB
-  PUB -->|"create-only"| FEED
-  LA -.->|"polls"| FEED
-  FEED -.->|"export to web/runs"| CI
+  PUB --> FEED
+  LA -.-> FEED
+  FEED -.-> CI
   CI --> SWA
 ```
 
@@ -211,28 +210,33 @@ The Instagram and YouTube previews are written to the feed and never posted; the
 The full-time workflow is one Microsoft Agent Framework `WorkflowBuilder` graph (`src/agon/fleet/workflow.py`). Models write and label; deterministic code recomputes every number and name and decides what reaches the card.
 
 ```mermaid
-%%{init: {"flowchart": {"rankSpacing": 30, "nodeSpacing": 24}}}%%
-flowchart TB
-  A["ingest, interpret (code)"]
-  B["analyst (Foundry agent)"]
-  C["writer (Foundry agent)"]
-  D["triage (model label, code route)"]
-  E["factgate (code)"]
-  F["desk_editor (model critic)"]
-  G1["localise_el"]
-  G2["localise_es"]
-  G3["localise_fr"]
-  G4["easy_read (code)"]
-  H["factgate_lang (code)"]
-  I["rights (code), audio (Speech), seal (code)"]
-  J["approval (request_info pause)"]
-  K["publish_request"]
-  A --> B --> C --> D --> E
-  E -->|"refused, retry once"| C
-  E --> F
-  F --> G1 & G2 & G3 & G4
-  G1 & G2 & G3 & G4 --> H
-  H --> I --> J --> K
+flowchart LR
+  subgraph W1["write and check"]
+    direction TB
+    A["ingest, interpret<br/>code"]
+    B["analyst<br/>Foundry agent"]
+    C["writer<br/>Foundry agent"]
+    D["triage<br/>model label, code route"]
+    E["factgate<br/>code"]
+    A --> B --> C --> D --> E
+    E -->|"refused, retry once"| C
+  end
+  subgraph W2["editions, seal, approval"]
+    direction TB
+    F["desk_editor<br/>model critic"]
+    G1["localise_el"]
+    G2["localise_es"]
+    G3["localise_fr"]
+    G4["easy_read<br/>code"]
+    H["factgate_lang<br/>code"]
+    I["rights, audio, seal<br/>code, Speech, code"]
+    J["approval<br/>request_info pause"]
+    K["publish_request"]
+    F --> G1 & G2 & G3 & G4
+    G1 & G2 & G3 & G4 --> H
+    H --> I --> J --> K
+  end
+  W1 -->|"checked"| W2
 ```
 
 Each `localise_` step calls Azure AI Translator, then the localiser-editor agent. The node names are the executor ids in the code.
