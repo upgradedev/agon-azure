@@ -10,8 +10,11 @@
 #                      infra/rbac.bicep deploy grants CI its inference role. That
 #                      dispatched run is the gate C2 evidence the first time.
 #
-# Expect HTTP 401 or 403 with error code PermissionDenied until infra/rbac.bicep
-# has been deployed with the ciPrincipalId output of agon-main (docs/OPERATIONS.md,
+# Gate C2 passed on 2026-10-19:
+# https://github.com/upgradedev/agon-azure/actions/runs/39276078687.
+#
+# On a fresh deploy, expect HTTP 401 or 403 with error code PermissionDenied until
+# infra/rbac.bicep has been deployed with the ciPrincipalId output of agon-main (docs/OPERATIONS.md,
 # owner step 3) and the grant has propagated. With a Microsoft Entra token a
 # missing data-action role is often reported as 401, so ci/foundry_smoke.py reads
 # the error code before the status: PermissionDenied prints the rbac step, and

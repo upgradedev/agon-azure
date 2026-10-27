@@ -310,7 +310,8 @@ resource registry 'Microsoft.ContainerRegistry/registries@2023-07-01' existing =
 }
 
 // Every job identity pulls the one image (infra/apps.bicep) with its own identity.
-// id-api runs the intake today; the fleet and publisher jobs follow.
+// That is id-api for the intake, id-fleet for the fleet worker, and id-publisher and
+// id-publisher-sandbox for the two Publishers.
 var registryPullers = [
   {
     principalId: apiPrincipalId

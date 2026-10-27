@@ -13,10 +13,13 @@
 #   narrate  Azure AI Speech, keyless: the CI identity's Entra token as
 #            "Bearer aad#<Speech resource id>#<token>" (ci/video/narrate.py). The
 #            only job that logs in to Azure (environment azure, id-token write).
-#            Until the owner deploys infra/rbac.bicep with the CI identity's
-#            Cognitive Services User grant on the Speech account
-#            (https://github.com/upgradedev/agon-azure/pull/37), this job fails with
-#            HTTP 401 or 403 and the step summary says so.
+#            The CI identity's Cognitive Services User grant on the Speech account
+#            (infra/rbac.bicep, https://github.com/upgradedev/agon-azure/pull/37)
+#            was deployed owner-side on 2026-10-20, and narrate has passed since,
+#            for example https://github.com/upgradedev/agon-azure/actions/runs/39349399114
+#            and https://github.com/upgradedev/agon-azure/actions/runs/40542585234.
+#            On a fresh deploy without that grant this job fails with HTTP 401 or
+#            403 and the step summary says so.
 #   capture  ci/video/stills.py builds the still beats' HTML from committed files
 #            and the live run and checks their facts; then Playwright from console/
 #            (its committed lock, its pinned Chromium) records each web beat from the

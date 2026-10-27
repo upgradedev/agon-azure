@@ -10,9 +10,12 @@ and by the M16 test (tests/routes):
 * never touches the store directly and never builds a successful `VerifyResult` itself. It may
   refuse a payload it cannot translate, but it can never approve.
 
-The Teams payload shape is confirmed: gate T read it from a live response on 2026-10-19, and every
-recorded run in web/runs was approved on the Teams card (approval channel "teams") and verified by
-the deployed intake job (job executions of three of them in evidence/run-*.executions.json). The
-Outlook payload shape is still an ASSUMPTION taken from the Logic Apps connector documentation: the
-Outlook approval flow is not deployed.
+The Teams payload shape is confirmed: gate T read it from a live response on 2026-10-19, and
+teams.handle has translated the live decision behind every recorded run in web/runs. Each of those
+bundles is on the public feed, which the Publisher writes only after verify() has approved, and
+Teams is the only decision route deployed (the Outlook flow is not; the intake job executions of
+three of the runs are in evidence/run-*.executions.json). The approval channel in a web/runs record
+is an export argument of agon.webrecord, not read from the approval record. The Outlook payload
+shape is still an ASSUMPTION taken from the Logic Apps connector documentation: the Outlook
+approval flow is not deployed.
 """

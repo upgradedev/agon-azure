@@ -3,7 +3,8 @@
 # what-if    main only, before every deploy: compiles main.bicep and asks Azure what
 #            would change. It is not run on pull requests (see below).
 # deploy     main only, environment azure: incremental deployment of main.bicep.
-# web-build  main only, no Azure identity (no id-token, no environment): builds the
+# web-build  no Azure identity (no id-token, no environment), and no main-only
+#            guard, so a dispatch from another branch runs it too: builds the
 #            React console (console/) from its committed lock, prerenders it,
 #            generates the recorded synthetic data for the published seeds, stamps
 #            the commit and the season files, runs ci/web_check.py and the live
@@ -566,9 +567,12 @@ jobs:
 
   # Spec 3.2 rows 2, 9, 11 and 16: build the one job image, push it to the registry
   # as <registry>/agon:<commit sha>, then deploy infra/apps.bicep (deployment
-  # agon-apps). Independent of web and readiness. Until the owner-side rbac deploy
-  # grants AcrPull and the queue roles, the jobs exist but their executions fail
-  # to pull or to read the queues; the job summary says so.
+  # agon-apps). Independent of web and readiness. The executions need the
+  # owner-side AcrPull and queue grants (infra/rbac.bicep), which have been in
+  # place since 2026-10-19: in evidence/run-*.executions.json every fleet, intake
+  # and feed Publisher execution reads Succeeded. On a fresh deploy without them,
+  # the jobs exist but their executions fail to pull or to read the queues; the
+  # job summary says so.
   #
   # It waits for ai and flows, because the fleet job takes the agon-ai outputs and
   # the trigger URLs of the approval Logic Apps, but it runs whatever they end as:
