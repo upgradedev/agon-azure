@@ -74,54 +74,67 @@ Microsoft Foundry agents (analyst, writer, localiser-editor), run as a Microsoft
 
 ## Architecture
 
-Only deployed parts are drawn. Each Container Apps job and the Logic App runs under its own managed identity (in brackets).
+Only deployed parts are drawn. Each Container Apps job and the Logic App runs under its own managed identity, named on the second line of its box; the table under the diagram names each resource.
 
 ```mermaid
+%%{init: {"flowchart": {"rankSpacing": 40, "nodeSpacing": 30}}}%%
 flowchart TB
   subgraph GH["GitHub Actions, OIDC sign-in"]
-    DRILL["fleet-run drill<br/>operator dispatch"]
-    CI["ci, console, deploy<br/>tests, gates, image build"]
+    DRILL["fleet-run drill"]
+    CI["ci, console, deploy"]
   end
-  subgraph AZ["Azure resource group rg-agon-swc, Sweden Central"]
-    RUNS[("Queue runs")]
-    FLEET["job-agon-fleet (id-fleet)<br/>Container Apps job<br/>Agent Framework workflow"]
-    FOUNDRY["Microsoft Foundry<br/>agents: analyst, writer, localiser-editor<br/>structured calls: triage, desk editor"]
-    TRS["Azure AI Translator<br/>Azure AI Speech"]
-    ART[("Blob artifacts<br/>private")]
-    COSMOS[("Cosmos DB<br/>checkpoints, bundles,<br/>nonces, approvals")]
-    LA["la-agon-teams-approval (id-logicapp)<br/>Logic App"]
-    DQT[("Queue decisions-teams")]
-    INTAKE["job-agon-intake (id-api)<br/>Container Apps job<br/>one verifier"]
-    DQ[("Queue decisions")]
-    PQ[("Queue publish-requests")]
-    PUB["job-agon-publisher (id-publisher)<br/>Container Apps job"]
-    FEED[("Blob feed<br/>public")]
+  subgraph AZ["Azure, rg-agon-swc, Sweden Central"]
+    RUNS[("runs queue")]
+    FLEET["fleet job<br/>id-fleet"]
+    FOUNDRY["Microsoft Foundry<br/>agents and structured calls"]
+    TRS["Translator<br/>and Speech"]
+    COSMOS[("Cosmos DB")]
+    ART[("artifacts blob<br/>private")]
+    LA["Logic App<br/>id-logicapp"]
+    DQT[("decisions-teams<br/>queue")]
+    INTAKE["intake job<br/>id-api"]
+    DQ[("decisions queue")]
+    PQ[("publish-requests<br/>queue")]
+    PUB["Publisher job<br/>id-publisher"]
+    FEED[("feed blob<br/>public")]
   end
-  TEAMS["Microsoft Teams<br/>media office channel"]
-  SWA["Azure Static Web Apps, West Europe<br/>React console"]
+  TEAMS["Microsoft Teams<br/>media office"]
+  SWA["Static Web Apps<br/>React console"]
 
   DRILL -->|"send only"| RUNS
   RUNS --> FLEET
   FLEET --> FOUNDRY
   FLEET --> TRS
-  FLEET --> ART
   FLEET <--> COSMOS
-  FLEET -->|"card, Entra-authenticated trigger"| LA
-  LA <-->|"agon-teams connection"| TEAMS
-  LA -->|"decision, only id-logicapp sends"| DQT
+  FLEET --> ART
+  FLEET -->|"card"| LA
+  LA <--> TEAMS
+  LA -->|"decision"| DQT
   DQT --> INTAKE
-  INTAKE -->|"consume nonce, record approval"| COSMOS
-  INTAKE -->|"pointer, only id-api sends"| DQ
+  INTAKE -->|"verify, consume"| COSMOS
+  INTAKE -->|"pointer"| DQ
   DQ --> FLEET
   FLEET --> PQ
   PQ --> PUB
-  COSMOS -->|"bundle, approval record"| PUB
+  COSMOS --> PUB
   ART --> PUB
-  PUB -->|"create-only writes"| FEED
-  LA -.->|"polls the published manifest"| FEED
-  FEED -.->|"agon.webrecord export, committed to web/runs"| CI
-  CI -->|"console build"| SWA
+  PUB -->|"create-only"| FEED
+  LA -.->|"polls"| FEED
+  FEED -.->|"export to web/runs"| CI
+  CI --> SWA
 ```
+
+| In the diagram | Azure resource and what it does |
+|---|---|
+| fleet job | Container Apps job `job-agon-fleet`, identity `id-fleet`: runs the Agent Framework workflow to the approval pause, posts the card through the Logic App's Entra-authenticated trigger, and resumes the workflow in a new process |
+| Microsoft Foundry | prompt agents `agon-analyst`, `agon-writer`, `agon-localiser-editor`; structured-output calls for triage and the desk editor |
+| Translator and Speech | Azure AI Translator (Greek, Spanish, French) and Azure AI Speech (audio of five editions) |
+| Cosmos DB | workflow checkpoints, sealed bundles, nonces and approval records |
+| Logic App | `la-agon-teams-approval`, identity `id-logicapp`: posts the card through the `agon-teams` connection, waits for the answer, sends it unchanged to `decisions-teams` (only `id-logicapp` may send there), polls the published manifest and updates the card in place |
+| intake job | Container Apps job `job-agon-intake`, identity `id-api`: the one verifier; consumes the nonce, records the approval, and is the only sender on `decisions` |
+| Publisher job | Container Apps job `job-agon-publisher`, identity `id-publisher`: re-hashes the bundle, reads the approval record, writes create-only to the public `feed` container |
+| fleet-run drill | the `fleet-run.yml` workflow, run by an operator; the CI identity may only send to the `runs` queue |
+| Static Web Apps | the public React console, in West Europe, built from the committed copy of the recorded run in `web/runs` (exported by `agon.webrecord`) |
 
 Deployed but not drawn, because no run reaches them yet: the sandbox Publisher job (`job-agon-publisher-sandbox`) and the newsroom post flow (`la-agon-teams-post`). The console never reads the feed: its content security policy allows connections to its own origin only, and it serves the committed copy of the recorded run.
 
@@ -198,30 +211,28 @@ The Instagram and YouTube previews are written to the feed and never posted; the
 The full-time workflow is one Microsoft Agent Framework `WorkflowBuilder` graph (`src/agon/fleet/workflow.py`). Models write and label; deterministic code recomputes every number and name and decides what reaches the card.
 
 ```mermaid
+%%{init: {"flowchart": {"rankSpacing": 30, "nodeSpacing": 24}}}%%
 flowchart TB
-  ingest["ingest<br/>code"]
-  interpret["interpret<br/>code"]
-  analyst["analyst<br/>Foundry agent"]
-  writer["writer<br/>Foundry agent"]
-  triage["triage<br/>model label, code route"]
-  factgate["factgate<br/>code"]
-  desk["desk_editor<br/>model critic"]
-  el["localise_el<br/>Translator, agent"]
-  es["localise_es<br/>Translator, agent"]
-  fr["localise_fr<br/>Translator, agent"]
-  easy["easy_read<br/>code"]
-  lang["factgate_lang<br/>code"]
-  rights["rights<br/>code"]
-  audio["audio<br/>Speech"]
-  seal["seal<br/>code"]
-  approval["approval<br/>request_info pause"]
-  publish["publish_request<br/>queue message"]
-  ingest --> interpret --> analyst --> writer --> triage --> factgate
-  factgate -->|"refused, retry once"| writer
-  factgate --> desk
-  desk --> el & es & fr & easy
-  el & es & fr & easy --> lang
-  lang --> rights --> audio --> seal --> approval --> publish
+  A["ingest, interpret (code)"]
+  B["analyst (Foundry agent)"]
+  C["writer (Foundry agent)"]
+  D["triage (model label, code route)"]
+  E["factgate (code)"]
+  F["desk_editor (model critic)"]
+  G1["localise_el"]
+  G2["localise_es"]
+  G3["localise_fr"]
+  G4["easy_read (code)"]
+  H["factgate_lang (code)"]
+  I["rights (code), audio (Speech), seal (code)"]
+  J["approval (request_info pause)"]
+  K["publish_request"]
+  A --> B --> C --> D --> E
+  E -->|"refused, retry once"| C
+  E --> F
+  F --> G1 & G2 & G3 & G4
+  G1 & G2 & G3 & G4 --> H
+  H --> I --> J --> K
 ```
 
 Each `localise_` step calls Azure AI Translator, then the localiser-editor agent. The node names are the executor ids in the code.
