@@ -52,7 +52,7 @@ import {
   type Timeline,
 } from "../lib/core";
 import { browserFetchText, loadMatch, resolveManifest, type ResolvedManifest } from "../lib/loader";
-import { liveRunsLine, runForBlow } from "../lib/runs";
+import { aiWritten, liveRunsLine, runForBlow } from "../lib/runs";
 import { WhyItMattered } from "../components/turning-points";
 import { GLOSSARY, GLOSSARY_ORDER } from "../lib/glossary";
 import { cn } from "../lib/cn";
@@ -951,7 +951,7 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
                   run={whyRun.run}
                   headingId="h-moments-why"
                   where="match-centre"
-                  lead={`The Analyst agent's picks in the recorded run of this match (${whyRun.run.label}). Choose a minute to move the replay there.`}
+                  lead={`${aiWritten(whyNotes) ? "The Analyst agent's picks" : "The turning points the Writer was given"} in the recorded run of this match (${whyRun.run.label}). Choose a minute to move the replay there.`}
                   seekFor={seekFor}
                   className="mb-4"
                 />
