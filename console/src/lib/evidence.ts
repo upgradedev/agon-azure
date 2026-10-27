@@ -128,7 +128,7 @@ export const PIPELINE: PipelineNode[] = [
     title: "Match model",
     status: "live",
     statusText:
-      "Live on this site: the Match Centre's numbers are computed by it from the served event logs when the site is built. The deployed fleet calls it too, but no published run has used it yet: the recorded run's manifest names a stand-in interpret step, fleet-local-standin/1, that ranks only goals and red cards.",
+      "Live on this site: the Match Centre's numbers are computed by it from the served event logs when the site is built. The deployed fleet calls it too: the runs published on 2026-10-20 and 2026-10-27 name agon.interpret/7ab5e12ab86e in their manifests, while the 2026-10-19 run's manifest names a stand-in interpret step, fleet-local-standin/1, that ranks only goals and red cards.",
     summary:
       "Plain code turns the log into xG, xT, PPDA, control vs chaos and win probability, so the writers can cite numbers instead of guessing them.",
     evidence: [

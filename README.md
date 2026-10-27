@@ -33,6 +33,26 @@ Everything below ran inside our Azure resource group. The four job executions (2
 
 Check it yourself: the [published manifest](https://stagonnnk4re3nvfz7o.blob.core.windows.net/feed/c8a19020c98a8de7dab58475bc0b2466129d3de771e30fd8ec519ab2716382dd/manifest.json) hashes to the approved hash (`sha256sum`). The console's Verify page recomputes, in your browser, the sha256 of every file of the copy of this run that is committed under `web/runs` and served with the site.
 
+## Later real runs (2026-10-20 and 2026-10-27)
+
+Three more bundles went the same way, each approved in the Teams channel and re-hashable from the public feed:
+
+* **Match-Day Charter**, approved 2026-10-20 09:38:49 UTC: the rules for timed cues, sealed as their own bundle ([manifest](https://stagonnnk4re3nvfz7o.blob.core.windows.net/feed/69282a2fc5b639475627f7bbd0391b781175b422ba16f58e105c898511854485/manifest.json)). The 34 timed cues in `web/cues/1.json`, in English, Greek, Spanish and French, were exported under its hash with `PYTHONPATH=src python -m agon.cues`.
+* **Full-time report**, approved 2026-10-20: the first published bundle whose manifest names the real interpret step, `agon.interpret/7ab5e12ab86e` ([manifest](https://stagonnnk4re3nvfz7o.blob.core.windows.net/feed/14f4694e45c96b536d23f93d949cf63c563e7b85d58cd6d25185f72d182bffd5/manifest.json)).
+* **Full-time report**, approved 2026-10-27, the run the console shows first ([manifest](https://stagonnnk4re3nvfz7o.blob.core.windows.net/feed/6bb5b655464f33e3dce6bd0d605c73205a7dfeab74b4254408963a401b6c683c/manifest.json), also `agon.interpret/7ab5e12ab86e`; job executions in [`evidence/run-6bb5b655464f.executions.json`](evidence/run-6bb5b655464f.executions.json)):
+
+| Time (UTC) | Step |
+|---|---|
+| 14:43:27 | A run is put on the `runs` queue ([drill run](https://github.com/upgradedev/agon-azure/actions/runs/40523814282)). |
+| 14:43:51 | The fleet job wakes; Foundry agents write, code checks and seals the bundle. |
+| 14:44:54 | The Logic App posts the approval card (time from the Logic App run history). |
+| 14:46:00 | The worker process ends; the workflow waits in its checkpoint. |
+| 14:48:34 | The media officer approves in Teams (time from the Logic App run history). |
+| 14:48:44 | The intake job runs the one verifier and records the decision at 14:49:05. |
+| 14:49:21 | A new fleet process resumes the workflow from the checkpoint. |
+| 14:49:59 | The Publisher job recomputes the hash and writes create-only to the public feed. |
+| 14:50:45 | The same Teams card is updated in place to "Published" (time from the Logic App run history). |
+
 ## Real, simulated, not deployed
 
 | Part | State |
@@ -50,8 +70,8 @@ Check it yourself: the [published manifest](https://stagonnnk4re3nvfz7o.blob.cor
 | Outlook approval email | built; not deployed until the officer authorises the Outlook connection |
 | Public console | real; the approval card on it is a stand-in that sends no decision in this public build |
 | Live run started from the public page, sandbox publish | not deployed yet: there is no HTTP API or public decision endpoint, and a sandbox run is decided only on the console stand-in, which sends nothing, so nothing reaches the deployed sandbox publisher job yet |
-| Interpret metrics (xG, xT, PPDA, win probability) feeding the agents | the recorded run sealed a stand-in interpret step (`fleet-local-standin/1` in its manifest); the fleet on main has since switched to `agon.interpret` (`src/agon/fleet/interpret_port.py`), and no published run has used it yet, so no report claim rests on these metrics yet |
-| Signed approval link, Key Vault signing, Foundry evaluations, erratum and scorer-correction runs, automatic start at match end, Match-Day Charter cues (the charter is not approved yet), Event Hubs, replayer, matchfacts MCP server (in the repo and contract-tested; the fleet does not use MCP) | not deployed |
+| Interpret metrics (xG, xT, PPDA, win probability) feeding the agents | real since 2026-10-20: the published bundles of 2026-10-20 and 2026-10-27 name `agon.interpret/7ab5e12ab86e` in their manifests (see Later real runs); the 2026-10-19 run sealed a stand-in interpret step (`fleet-local-standin/1`) |
+| Signed approval link, Key Vault signing, Foundry evaluations, erratum and scorer-correction runs, automatic start at match end, Event Hubs, replayer, matchfacts MCP server (in the repo and contract-tested; the fleet does not use MCP) | not deployed |
 
 ## Architecture
 
@@ -103,10 +123,10 @@ Run each command from the repository root. `PYTHONPATH=src` is the bash form; in
 | Realism bands on 200 held-out matches (M2) | 18 of 22 pass; our target was 20, so this is below target and no band was widened | `PYTHONPATH=src python -m agon.synth.bands --seeds 1001-1200` (prints `M2 passed 18 of 22 (threshold 20)` and exits 1, because the result is below target) |
 | Approval routes that skip the verifier (M16) | 0 (4 channel adapters, 2 queue routes) | `PYTHONPATH=src python -m agon.governance.routes`; [governance run](https://github.com/upgradedev/agon-azure/actions/runs/39330327770) |
 | 50 concurrent approvals of one nonce (M15) | 1 approval. Negative control: an etag-blind store lets all 50 consume the nonce, and only the create-only approval record still holds it to 1 approval and 1 publish. Measured on the in-memory store with etag compare-and-set; the Cosmos DB etag path is not exercised by this test | `PYTHONPATH=src python -m pytest tests/approval_concurrency -q` (prints `3 passed`; needs pytest from `requirements/dev.txt`); [governance run](https://github.com/upgradedev/agon-azure/actions/runs/39330327770) |
-| Approval across process death | the 2026-10-19 run resumed in a new Container Apps execution; the CI spike kills the waiting process, resumes in another, and proves a deleted checkpoint cannot resume | [spike run](https://github.com/upgradedev/agon-azure/actions/runs/39229376155) |
+| Approval across process death | the 2026-10-19 and 2026-10-27 runs resumed in a new Container Apps execution (`evidence/`); the CI spike kills the waiting process, resumes in another, and proves a deleted checkpoint cannot resume | [spike run](https://github.com/upgradedev/agon-azure/actions/runs/39229376155) |
 | Foundry model call from CI (gate C2) | HTTP 200 from the luna deployment, 1409 ms, 35 tokens | [foundry-smoke run](https://github.com/upgradedev/agon-azure/actions/runs/39276078687) |
 | Turning-point recall (M7) | not built yet | none |
-| Fact Gate catch rate by language (M8), seeded mutants of every sentence of the recorded run | self-measured, `check_sentence`: 185 of 225 caught (82.2%), the same 37 of 45 in en, el, es and fr. The easy-read edition's prose equals the English prose in this run, so it is not a separate language result. All 16 misses a real run can produce are club names: 6 claimed club names with no cited event in en, and an unclaimed club name in s1 and s3 of every edition. Spelled-out numbers (0 of 30 flagged) and decimals are uncovered by design and not counted | `PYTHONPATH=src python -m agon.governance.mutation --run web/runs/run-c8a19020c98a` (seed 8), pinned by `tests/governance/test_mutation.py`, on main since #53; [governance run](https://github.com/upgradedev/agon-azure/actions/runs/39356938557) |
+| Fact Gate catch rate by language (M8), seeded mutants of every sentence of the 2026-10-19 recorded run | self-measured, `check_sentence`: 185 of 225 caught (82.2%), the same 37 of 45 in en, el, es and fr. The easy-read edition's prose equals the English prose in this run, so it is not a separate language result. All 16 misses a real run can produce are club names: 6 claimed club names with no cited event in en, and an unclaimed club name in s1 and s3 of every edition. Spelled-out numbers (0 of 30 flagged) and decimals are uncovered by design and not counted | `PYTHONPATH=src python -m agon.governance.mutation --run web/runs/run-c8a19020c98a` (seed 8), pinned by `tests/governance/test_mutation.py`, on main since #53; [governance run](https://github.com/upgradedev/agon-azure/actions/runs/39356938557) |
 | M8 translation stage: el, es and fr prose mutated, claims copied from English as the pipeline copies them, gated as `factgate_lang` does | self-measured: 95 of 101 caught (94.1%): el 32 of 34, es 32 of 34, fr 31 of 33; the 6 misses are the unclaimed club names. The claims-equality check in `check_translation` is defence in depth, because editions carry the English claims by code | the same command, section "Translation stage"; [governance run](https://github.com/upgradedev/agon-azure/actions/runs/39356938557) |
 
 These numbers come from our own runs and are labelled as such; nobody else has measured them.
