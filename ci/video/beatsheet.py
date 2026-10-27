@@ -149,10 +149,19 @@ def _text(value: Any, where: str, *, limit: int = 600) -> str:
     return value.strip()
 
 
+HD_VOICE = re.compile(r"[a-z]{2}-[A-Z]{2}-[A-Za-z]+:DragonHD(?:Latest)?Neural")
+
+
 def check_voice(voice: str) -> str:
-    """A standard neural voice name; never one labelled HD (standard voices are not HD)."""
-    if not re.fullmatch(r"[a-z]{2}-[A-Z]{2}-[A-Za-z]+Neural", voice) or "HD" in voice:
-        raise BeatSheetError(f"voice {voice!r} must be a standard neural voice such as en-GB-SoniaNeural, never an HD name")
+    """A standard neural voice name (en-GB-SoniaNeural) or an Azure Speech HD voice in its
+    documented form (en-GB-Ada:DragonHDLatestNeural). A made-up HD label on a standard name
+    (en-GB-SoniaHDNeural) is refused: the receipt must name a voice that exists."""
+    standard = re.fullmatch(r"[a-z]{2}-[A-Z]{2}-[A-Za-z]+Neural", voice) and "HD" not in voice
+    if not (standard or HD_VOICE.fullmatch(voice)):
+        raise BeatSheetError(
+            f"voice {voice!r} must be a standard neural voice such as en-GB-SoniaNeural or an HD voice "
+            "such as en-GB-Ada:DragonHDLatestNeural, never a made-up HD name"
+        )
     return voice
 
 

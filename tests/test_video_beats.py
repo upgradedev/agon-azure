@@ -74,7 +74,7 @@ def test_the_beat_sheet_validates_and_its_floor_is_under_the_cap():
     sheet = bs.load_sheet(SHEET_PATH)
     errors, _ = bs.sheet_warnings(sheet, sync_gate.CAP_SECONDS)
     assert errors == []
-    assert sheet.voice == "en-GB-SoniaNeural"
+    assert sheet.voice == "en-GB-Ada:DragonHDLatestNeural"
     assert [b.index for b in sheet.beats] == list(range(1, len(sheet.beats) + 1))
 
 
@@ -98,11 +98,14 @@ def test_every_teams_beat_and_the_verify_beat_have_the_sources_they_need():
         ("en-GB-SoniaNeural", True),
         ("en-GB-RyanNeural", True),
         ("en-GB-SoniaHDNeural", False),
-        ("en-US-Ava:DragonHDLatestNeural", False),
+        ("en-GB-Ada:DragonHDLatestNeural", True),
+        ("en-US-Ava:DragonHDNeural", True),
+        ("en-GB-Ada:DragonHD", False),
+        ("en-GB-Ada:SoniaNeural", False),
         ("en-GB-Sonia", False),
     ],
 )
-def test_only_standard_neural_voices_never_an_hd_name(voice, ok):
+def test_standard_neural_or_documented_hd_voices_never_a_made_up_hd_name(voice, ok):
     if ok:
         assert bs.check_voice(voice) == voice
     else:
@@ -126,7 +129,7 @@ def _broken(mutate) -> dict:
         (lambda d: d["beats"][0].update(visual=[{"source": "teams:card-arrives", "facts": [{"text": "x"}]}]), "only a web part"),
         (lambda d: _at(d, "verify").update(visual=[{"source": "web:#/", "seconds": 2}, {"source": "web:#/verify"}]), "at most one web"),
         (lambda d: d["beats"][2].update(min_seconds=20, max_seconds=10), "min_seconds <= max_seconds"),
-        (lambda d: d.update(voice="en-GB-SoniaHDNeural"), "never an HD"),
+        (lambda d: d.update(voice="en-GB-SoniaHDNeural"), "never a made-up HD"),
         (lambda d: d.update(site="http://example.com"), "https origin"),
     ],
 )
