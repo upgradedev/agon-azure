@@ -74,7 +74,7 @@ def test_the_beat_sheet_validates_and_its_floor_is_under_the_cap():
     sheet = bs.load_sheet(SHEET_PATH)
     errors, _ = bs.sheet_warnings(sheet, sync_gate.CAP_SECONDS)
     assert errors == []
-    assert sheet.voice == "en-GB-Ada:DragonHDLatestNeural"
+    assert sheet.voice == "en-GB-SoniaNeural"
     assert [b.index for b in sheet.beats] == list(range(1, len(sheet.beats) + 1))
 
 
