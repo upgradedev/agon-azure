@@ -77,50 +77,50 @@ Microsoft Foundry agents (analyst, writer, localiser-editor), run as a Microsoft
 Only deployed parts are drawn. Each Container Apps job and the Logic App runs under its own managed identity (in brackets).
 
 ```mermaid
-flowchart LR
+flowchart TB
   subgraph GH["GitHub Actions, OIDC sign-in"]
     DRILL["fleet-run drill<br/>operator dispatch"]
     CI["ci, console, deploy<br/>tests, gates, image build"]
   end
-  subgraph AZ["Azure resource group rg-agon-swc, Sweden Central, site in West Europe"]
+  subgraph AZ["Azure resource group rg-agon-swc, Sweden Central"]
     RUNS[("Queue runs")]
-    FLEET["Container Apps job job-agon-fleet<br/>(id-fleet)<br/>Agent Framework workflow"]
-    COSMOS[("Cosmos DB<br/>checkpoints, bundles,<br/>nonces, approvals")]
+    FLEET["job-agon-fleet (id-fleet)<br/>Container Apps job<br/>Agent Framework workflow"]
     FOUNDRY["Microsoft Foundry<br/>agents: analyst, writer, localiser-editor<br/>structured calls: triage, desk editor"]
     TRS["Azure AI Translator<br/>Azure AI Speech"]
-    ART[("Blob artifacts, private")]
-    LA["Logic App la-agon-teams-approval<br/>(id-logicapp)"]
+    ART[("Blob artifacts<br/>private")]
+    COSMOS[("Cosmos DB<br/>checkpoints, bundles,<br/>nonces, approvals")]
+    LA["la-agon-teams-approval (id-logicapp)<br/>Logic App"]
     DQT[("Queue decisions-teams")]
-    INTAKE["Container Apps job job-agon-intake<br/>(id-api)<br/>one verifier"]
+    INTAKE["job-agon-intake (id-api)<br/>Container Apps job<br/>one verifier"]
     DQ[("Queue decisions")]
     PQ[("Queue publish-requests")]
-    PUB["Container Apps job job-agon-publisher<br/>(id-publisher)"]
-    FEED[("Blob feed, public")]
+    PUB["job-agon-publisher (id-publisher)<br/>Container Apps job"]
+    FEED[("Blob feed<br/>public")]
   end
   TEAMS["Microsoft Teams<br/>media office channel"]
-  SWA["Azure Static Web Apps<br/>React console"]
+  SWA["Azure Static Web Apps, West Europe<br/>React console"]
 
-  DRILL -->|"send only, CI identity"| RUNS
+  DRILL -->|"send only"| RUNS
   RUNS --> FLEET
-  FLEET <--> COSMOS
   FLEET --> FOUNDRY
   FLEET --> TRS
   FLEET --> ART
+  FLEET <--> COSMOS
   FLEET -->|"card, Entra-authenticated trigger"| LA
   LA <-->|"agon-teams connection"| TEAMS
-  LA -->|"decision, only id-logicapp may send"| DQT
+  LA -->|"decision, only id-logicapp sends"| DQT
   DQT --> INTAKE
   INTAKE -->|"consume nonce, record approval"| COSMOS
-  INTAKE -->|"pointer, only id-api may send"| DQ
+  INTAKE -->|"pointer, only id-api sends"| DQ
   DQ --> FLEET
   FLEET --> PQ
   PQ --> PUB
-  COSMOS -->|"bundle and approval record"| PUB
+  COSMOS -->|"bundle, approval record"| PUB
   ART --> PUB
   PUB -->|"create-only writes"| FEED
   LA -.->|"polls the published manifest"| FEED
-  FEED -.->|"exported by agon.webrecord, committed to web/runs"| CI
-  CI -->|"console build with web/runs"| SWA
+  FEED -.->|"agon.webrecord export, committed to web/runs"| CI
+  CI -->|"console build"| SWA
 ```
 
 Deployed but not drawn, because no run reaches them yet: the sandbox Publisher job (`job-agon-publisher-sandbox`) and the newsroom post flow (`la-agon-teams-post`). The console never reads the feed: its content security policy allows connections to its own origin only, and it serves the committed copy of the recorded run.
@@ -142,60 +142,53 @@ One full-time run with target `feed`, as the code runs it (`src/agon/fleet/worke
 sequenceDiagram
   autonumber
   actor OP as Operator
-  participant GH as GitHub Actions fleet-run
-  participant RQ as Queue runs
-  participant FA as Fleet job process A
+  participant GH as GitHub Actions
+  participant FL as Fleet job
   participant FD as Foundry
   participant TS as Translator and Speech
   participant DB as Cosmos DB
-  participant LA as Logic App teams-approval
-  actor MO as Media officer in Teams
-  participant DT as Queue decisions-teams
+  participant LA as Logic App
+  actor MO as Media officer
   participant IN as Intake job
-  participant DQ as Queue decisions
-  participant FB as Fleet job process B
-  participant PQ as Queue publish-requests
   participant PB as Publisher job
   participant FE as Public feed
 
-  OP->>GH: dispatch the drill (seed, match, target feed)
-  GH->>RQ: RunInput message, send-only right
-  RQ->>FA: queue wakes job-agon-fleet
-  FA->>FA: ingest and interpret, by code
-  FA->>FD: analyst agent picks turning points
-  FA->>FD: writer agent drafts sentences with claims
-  FA->>FD: triage labels each sentence, code routes it
-  FA->>FA: Fact Gate recomputes every claim, at most one Writer retry
-  FA->>FD: desk editor may add flags
+  OP->>GH: dispatch fleet-run<br/>seed, match, target feed
+  GH->>FL: RunInput on queue runs<br/>CI may only send
+  Note over FL: process A starts
+  FL->>FL: ingest and interpret, by code
+  FL->>FD: analyst picks turning points
+  FL->>FD: writer drafts sentences<br/>with claims
+  FL->>FD: triage labels sentences
+  FL->>FL: code routes each sentence,<br/>Fact Gate, at most one Writer retry
+  FL->>FD: desk editor may add flags
   par Greek, Spanish, French
-    FA->>TS: Translator
-    FA->>FD: localiser-editor agent post-edits
+    FL->>TS: Translator
+    FL->>FD: localiser-editor post-edits
   and English easy-read
-    FA->>FA: easy-read rules, by code
+    FL->>FL: easy-read rules, by code
   end
-  FA->>FA: Fact Gate per edition, then Rights Guard
-  FA->>TS: Speech makes audio for five editions
-  FA->>FA: seal the bundle as sha256 of its manifest
-  FA->>DB: register bundle, create nonce, checkpoint at request_info
-  FA->>LA: approval card, Entra-authenticated trigger
-  LA->>MO: card posted in the channel, Logic App waits
-  Note over FA: worker process ends, the workflow waits in its Cosmos DB checkpoint
+  FL->>FL: Fact Gate per edition,<br/>Rights Guard
+  FL->>TS: Speech, audio of five editions
+  FL->>FL: seal, sha256 of the manifest
+  FL->>DB: bundle, nonce,<br/>checkpoint at request_info
+  FL->>LA: card, Entra-authenticated trigger
+  LA->>MO: approval card in the channel
+  Note over FL: process A ends,<br/>the workflow waits in its checkpoint
   MO->>LA: Approve
-  LA->>DT: decision unchanged, only id-logicapp may send
-  DT->>IN: queue wakes job-agon-intake
-  IN->>DB: one verifier, nonce unused, not expired, approver role, hash equal, consume once, record approval
-  IN->>DQ: pointer to the approval record, only id-api may send
-  DQ->>FB: queue wakes job-agon-fleet
-  FB->>DB: load checkpoint, read approval record, nonce reads consumed
-  FB->>FB: resume, response handler re-hashes the sealed manifest
-  FB->>PQ: publish request with run, bundle hash, approval id
-  PQ->>PB: queue wakes job-agon-publisher
-  PB->>DB: read bundle, recompute its hash, read approval record
-  PB->>FE: create-only writes, recap, JSON Feed, RSS, previews, payloads
+  LA->>IN: decision on queue decisions-teams<br/>only id-logicapp sends
+  IN->>DB: one verifier, consume once,<br/>record approval
+  IN->>FL: pointer on queue decisions<br/>only id-api sends
+  Note over FL: process B starts
+  FL->>DB: load checkpoint, read approval,<br/>nonce reads consumed
+  FL->>FL: resume, re-hash the sealed manifest
+  FL->>PB: request on queue publish-requests
+  PB->>DB: read bundle and approval,<br/>recompute the hash
+  PB->>FE: create-only writes
   loop every 30 s, up to 20 minutes
     LA->>FE: GET the published manifest
   end
-  LA->>MO: same card updated in place to Published
+  LA->>MO: same card updated to Published
 ```
 
 The Instagram and YouTube previews are written to the feed and never posted; the newsroom and journalist payloads are written and not sent. A bundle that any gate refused gets no nonce, so its card has no Approve button.
@@ -205,7 +198,7 @@ The Instagram and YouTube previews are written to the feed and never posted; the
 The full-time workflow is one Microsoft Agent Framework `WorkflowBuilder` graph (`src/agon/fleet/workflow.py`). Models write and label; deterministic code recomputes every number and name and decides what reaches the card.
 
 ```mermaid
-flowchart LR
+flowchart TB
   ingest["ingest<br/>code"]
   interpret["interpret<br/>code"]
   analyst["analyst<br/>Foundry agent"]
