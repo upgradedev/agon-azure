@@ -100,6 +100,19 @@ for (const viewport of VIEWPORTS) {
       await expect(item).toContainText(pick.why);
     }
     await expect(desk.getByText(/^Written by the Microsoft Foundry agent agon-analyst:\d+\./)).toBeVisible();
+    /* After the desk grid on a wider screen; on a phone, below the Timeline, which stays under the replay controls. */
+    const deskBox = await desk.boundingBox();
+    if (viewport.width < 768) {
+      const timeline = await page.locator("#h-timeline").boundingBox();
+      expect(Boolean(timeline && deskBox && timeline.y < deskBox.y), "the Timeline comes before the Analyst desk on a phone").toBe(true);
+    } else {
+      const desks = await page.locator("#h-desks").boundingBox();
+      const handoffs = await page.locator("#h-handoffs").boundingBox();
+      expect(
+        Boolean(desks && deskBox && handoffs && desks.y < deskBox.y && deskBox.y < handoffs.y),
+        "the Analyst desk sits between the desk grid and the handoffs",
+      ).toBe(true);
+    }
     await expectNoHorizontalScroll(page);
   });
 }
@@ -128,4 +141,10 @@ test("the Why drawer names the turning point a sentence cites", async ({ page })
   await expect(rows.first()).toContainText(`Minute ${cites(index)[0].minute}`);
   await expect(rows.first()).toContainText(cites(index)[0].why);
   await expect(rows.first()).toContainText("AI-written by the Analyst agent");
+  /* The agent names clubs by id (C6's early breakthrough); the drawer says which club each id is. */
+  const named = [run.home, run.away].filter((side) => cites(index).some((p) => new RegExp(`\\b${side.club_id}\\b`).test(p.why)));
+  expect(named.length, "a cited why names a club by id").toBeGreaterThan(0);
+  for (const side of named) {
+    await expect(drawer).toContainText(`${side.club_id} is ${side.name}`);
+  }
 });

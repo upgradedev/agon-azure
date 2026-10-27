@@ -691,9 +691,10 @@ export function analystSummary(notes: AnalystNotes): string {
   const points = `${n} turning point${n === 1 ? "" : "s"}`;
   if (aiWritten(notes)) {
     const by = notes.interpretSource ? ` (${notes.interpretSource})` : "";
-    return `Before the Writer started, read the candidate moments that code${by} computed from the event log, picked ${points}, and wrote a theme and why each one matters. The picks went to the Writer with the match facts.`;
+    return `Before the Writer started, the Analyst agent read the candidate moments that code${by} computed from the event log, picked ${points}, and wrote a theme and why each one matters. The picks went to the Writer with the match facts.`;
   }
-  return `The agent's answer was not used, so before the Writer started, code took ${points} from the top of the candidate list. They went to the Writer with the match facts.`;
+  /* agon.fleet.steps.analyst falls back when the agent was unavailable or neither of its two answers passed code's checks. */
+  return `No pick from the agent was used, so before the Writer started, code took ${points} from the top of the candidate list. They went to the Writer with the match facts.`;
 }
 
 /* Who wrote the words, what code checked, and where they are sealed. */

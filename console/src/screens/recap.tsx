@@ -6,9 +6,9 @@
   Every sentence is a button that opens the Why drawer: the events it cites,
   its claims, the gate verdicts, who wrote it and who answers for it, and, when
   it cites an event the Analyst picked as a turning point, that pick's minute,
-  theme and why from the sealed card.json. The edition label says "approved"
-  only on an approved pipeline run whose approval names this bundle hash
-  (isApproved, editionLabel).
+  theme and why from the sealed card.json, and which club each id in the why
+  is. The edition label says "approved" only on an approved pipeline run whose
+  approval names this bundle hash (isApproved, editionLabel).
 
   Tabs follow the ARIA tabs pattern by hand (arrow keys, Home, End): a Radix
   tab panel prerenders an inline style, which the CSP would block.
@@ -19,7 +19,7 @@ import { Badge } from "../components/ui/badge";
 import { Dialog } from "../components/ui/dialog";
 import { Notice } from "../components/ui/notice";
 import { LabelLine, ScreenHeader, SeedNotice, StepNav, View } from "../components/screen";
-import { THEME_WORDS, editionLabel, isApproved, matchLine, picksCited, sentenceById, why, type Why } from "../lib/runs";
+import { THEME_WORDS, clubKey, editionLabel, isApproved, matchLine, picksCited, sentenceById, why, type Why } from "../lib/runs";
 import { usePreferences } from "../hooks/preferences";
 import { Listen } from "../components/listen";
 import { hrefFor, type Route } from "../lib/router";
@@ -51,7 +51,7 @@ function Row({ term, children }: { term: string; children: ReactNode }) {
   );
 }
 
-function WhyBody({ w, bundle, picks }: { w: Why; bundle: string; picks: AnalystPick[] }) {
+function WhyBody({ w, bundle, picks, clubs }: { w: Why; bundle: string; picks: AnalystPick[]; clubs: string | null }) {
   return (
     <>
       <dl>
@@ -81,6 +81,7 @@ function WhyBody({ w, bundle, picks }: { w: Why; bundle: string; picks: AnalystP
                 </li>
               ))}
             </ul>
+            {clubs ? <p className="mt-1 text-xs leading-5 text-muted">{clubs}</p> : null}
             <p className="mt-1 text-xs leading-5 text-muted">
               The Analyst's picks among the events this sentence cites, sealed in card.json. The gates check the sentence, not these words.
             </p>
@@ -207,6 +208,9 @@ export function Recap({ active, route, loaded, error, blownSeed }: Props) {
   const openEdition = open ? loaded.editions[open.edition] : undefined;
   const openSentence = open && openEdition ? openEdition.data.sentences[open.index] : undefined;
   const w = open && openEdition && openSentence ? why(run, openEdition.meta, openSentence, open.index) : null;
+  /* The Analyst's picks among the events the open sentence cites, and which club each id in their why is. */
+  const cited = w ? picksCited(loaded.analyst, w.eventIds) : [];
+  const clubs = loaded.analyst && cited.length ? clubKey({ ...loaded.analyst, picks: cited }, run) : null;
 
   return (
     <View view="recap" active={active}>
@@ -336,7 +340,7 @@ export function Recap({ active, route, loaded, error, blownSeed }: Props) {
         }
         closeLabel="Close the Why drawer"
       >
-        {w ? <WhyBody w={w} bundle={run.bundle.sha256} picks={picksCited(loaded.analyst, w.eventIds)} /> : null}
+        {w ? <WhyBody w={w} bundle={run.bundle.sha256} picks={cited} clubs={clubs} /> : null}
       </Dialog>
 
       <StepNav view="recap" param={run.run_id} />

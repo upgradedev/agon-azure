@@ -6,7 +6,8 @@
   The Analyst desk shows the turning points a pipeline run's sealed card.json
   carries: the minute code read from the event, the theme and the why the agent
   wrote, each labelled by who wrote it. The run trace records no step for the
-  Analyst, so its desk stands outside the replay; a run without turning points
+  Analyst, so its desk stands outside the replay: after the desk grid on a
+  wider screen, after the Timeline on a phone. A run without turning points
   (the hand-written sample) shows none.
 
   Replay reveals the run one step at a time. Under reduced motion it never
@@ -90,7 +91,7 @@ function AnalystDesk({ notes, run }: { notes: AnalystNotes; run: Run }) {
     <section
       aria-labelledby="h-analyst"
       data-desk="analyst"
-      className="mb-6 rounded-xl border border-line bg-surface p-4 shadow-card md:mt-6 md:mb-0"
+      className="order-last mt-6 rounded-xl border border-line bg-surface p-4 shadow-card md:order-none"
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 id="h-analyst" className="text-sm font-semibold text-fg">
@@ -290,7 +291,7 @@ export function NewsroomWall({ active, loaded, error, blownSeed, replayRequest }
           </p>
 
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
-            <div className="min-w-0">
+            <div className="flex min-w-0 flex-col">
               <section aria-labelledby="h-desks" className="hidden md:block">
                 <h2 id="h-desks" className="mb-3 text-sm font-semibold text-fg">
                   Desks
@@ -330,7 +331,9 @@ export function NewsroomWall({ active, loaded, error, blownSeed, replayRequest }
                 </div>
               </section>
 
-              {/* After the desk grid on a wider screen, so the replay keeps its place; first on a phone. */}
+              {/* After the desk grid on a wider screen, so the replay keeps its place. On a phone only the
+                  Timeline shows the replay, so the desk moves below it (order-last) and the Timeline stays
+                  right under the replay controls. It holds nothing focusable, so focus order is unchanged. */}
               {loaded?.analyst ? <AnalystDesk notes={loaded.analyst} run={run} /> : null}
 
               <section aria-labelledby="h-handoffs" className="hidden md:block">

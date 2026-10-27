@@ -264,8 +264,8 @@ export interface LoadedEdition {
 export type TurningPointTheme = "control_vs_chaos" | "tactical_pressure" | "game_rhythm";
 
 /* One turning point as a pipeline bundle seals it in card.json (agon.fleet.steps.analyst):
-   the agent wrote why and theme ("model"), or code chose it when the agent's answer was
-   not used ("template"); code read the minute from the event. */
+   the agent wrote why and theme ("model"), or code chose it when no pick from the agent
+   was used ("template"); code read the minute from the event. */
 export interface AnalystPick {
   author: "model" | "template";
   event_id: string;

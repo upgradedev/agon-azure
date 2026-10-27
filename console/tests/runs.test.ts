@@ -479,7 +479,7 @@ describe("the Analyst's turning points", () => {
     const notes = notesOf(loaded.analyst);
     expect(aiWritten(notes)).toBe(true);
     expect(analystSummary(notes)).toBe(
-      "Before the Writer started, read the candidate moments that code (agon.interpret/7ab5e12ab86e) computed from the event log, " +
+      "Before the Writer started, the Analyst agent read the candidate moments that code (agon.interpret/7ab5e12ab86e) computed from the event log, " +
         "picked 4 turning points, and wrote a theme and why each one matters. The picks went to the Writer with the match facts.",
     );
     expect(analystSource(notes, loaded.run)).toBe(
@@ -494,23 +494,31 @@ describe("the Analyst's turning points", () => {
     const fallback: AnalystNotes = { ...notes, picks: notes.picks.map((p) => ({ ...p, author: "template" as const })) };
     expect(aiWritten(fallback)).toBe(false);
     expect(pickAuthorWords(fallback.picks[0])).toBe("Chosen by code");
-    expect(analystSummary(fallback)).toMatch(/^The agent's answer was not used, so before the Writer started, code took 4 turning points/);
+    /* True whether the agent was unavailable or its answers failed code's checks. */
+    expect(analystSummary(fallback)).toBe(
+      "No pick from the agent was used, so before the Writer started, code took 4 turning points from the top of the candidate list. " +
+        "They went to the Writer with the match facts.",
+    );
     expect(analystSource(fallback, loaded.run)).toBe(
       "Chosen by code, not written by a model. Sealed in card.json in bundle 0e16414b71d7; Verify recomputes its hash.",
     );
   });
 
-  it("gives the Why drawer the picks whose event a sentence cites", async () => {
+  it("gives the Why drawer the picks whose event a sentence cites, and which club each id in their why is", async () => {
     const data = await loadRunsData(diskFetch);
     const loaded = data.runs[DEFAULT];
+    const notes = notesOf(loaded.analyst);
     const en = loaded.editions.en;
-    const cited = (index: number): string[] => {
-      const w = why(loaded.run, en.meta, en.data.sentences[index], index);
-      return picksCited(loaded.analyst, w.eventIds).map((p) => p.minute);
-    };
+    const picksOf = (index: number) => picksCited(notes, why(loaded.run, en.meta, en.data.sentences[index], index).eventIds);
+    const cited = (index: number): string[] => picksOf(index).map((p) => p.minute);
     expect(cited(0)).toEqual([]);
     expect(cited(1)).toEqual(["4"]);
     expect(cited(3)).toEqual(["81"]);
     expect(picksCited(null, ["2053eaedb10a5255"])).toEqual([]);
+    /* The key covers only the clubs the cited whys name, as the Recap passes it to the drawer. */
+    expect(clubKey({ ...notes, picks: picksOf(1) }, loaded.run)).toBe("The agent names the clubs by id: C6 is Zennmark Town.");
+    expect(clubKey({ ...notes, picks: picksOf(3) }, loaded.run)).toBe(
+      "The agent names the clubs by id: C1 is Pellmoor Harriers and C6 is Zennmark Town.",
+    );
   });
 });
