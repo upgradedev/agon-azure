@@ -29,7 +29,7 @@ Live demo, no login: https://jolly-stone-0c9c8a003.4.azurestaticapps.net
 6. **Media office** (under More): run status, the job executions read from Azure, what was delivered in which language and where, and the approval audit trail.
 7. **How it works** (under More): the pipeline stage by stage and what of it ran in Azure for the recorded run, each stage with its evidence.
 
-Re-hash the public feed yourself: download the [published manifest of the 2026-10-27 run](https://stagonnnk4re3nvfz7o.blob.core.windows.net/feed/6bb5b655464f33e3dce6bd0d605c73205a7dfeab74b4254408963a401b6c683c/manifest.json) and run `sha256sum manifest.json`. It prints `6bb5b655464f33e3dce6bd0d605c73205a7dfeab74b4254408963a401b6c683c`, the hash the officer approved.
+Re-hash the public feed yourself: download the [published manifest of the run the console opens by default](https://stagonnnk4re3nvfz7o.blob.core.windows.net/feed/0e16414b71d73a7c6a014f0fb5223db18dacfc64fa487fb0a90a09d3bbca1e5f/manifest.json) and run `sha256sum manifest.json`. It prints `0e16414b71d73a7c6a014f0fb5223db18dacfc64fa487fb0a90a09d3bbca1e5f`, the hash the officer approved.
 
 Video: the demonstration video (under two minutes) is linked from the hackathon project page once it is public.
 
@@ -63,7 +63,7 @@ Microsoft Foundry agents (analyst, writer, localiser-editor), run as a Microsoft
 | Microsoft or Azure technology | What Agon uses it for | Where |
 |---|---|---|
 | Microsoft Foundry | three prompt agents (`agon-analyst`, `agon-writer`, `agon-localiser-editor`) and two structured-output calls (triage, desk editor) | `src/agon/agents/foundry.py`, `infra/modules/foundry.bicep` |
-| Microsoft Agent Framework | the full-time workflow graph, its human approval pause (`request_info`) and the resume in a new process | `src/agon/fleet/workflow.py`, `src/agon/fleet/checkpoints.py` |
+| Microsoft Agent Framework | the full-time workflow graph, its human approval pause (`request_info`) and the resume from that checkpoint, in a new process when the waiting one has already exited | `src/agon/fleet/workflow.py`, `src/agon/fleet/checkpoints.py` |
 | Azure AI Translator and Azure AI Speech | Greek, Spanish and French machine translation; audio for five editions | `src/agon/agents/translator.py`, `src/agon/agents/speech.py` |
 | Microsoft Teams and Azure Logic Apps | the approval card, the wait for the officer's answer, the card updated in place after publish | `infra/flows.bicep` (`la-agon-teams-approval`) |
 | Azure Container Apps jobs | fleet, intake and Publisher, each started by a message on its own Storage queues | `infra/apps.bicep` |
@@ -125,17 +125,17 @@ flowchart LR
 
 | In the diagram | Azure resource and what it does |
 |---|---|
-| fleet job | Container Apps job `job-agon-fleet`, identity `id-fleet`: runs the Agent Framework workflow to the approval pause, posts the card through the Logic App's Entra-authenticated trigger, and resumes the workflow in a new process |
+| fleet job | Container Apps job `job-agon-fleet`, identity `id-fleet`: runs the Agent Framework workflow to the approval pause and posts the card through the Logic App's Entra-authenticated trigger. When no decision arrives within the worker's 60 s idle window (`--idle-exit 60`), the process ends and a new process resumes the workflow from the checkpoint; a decision that comes sooner is resumed by the same process |
 | Microsoft Foundry | prompt agents `agon-analyst`, `agon-writer`, `agon-localiser-editor`; structured-output calls for triage and the desk editor |
 | Translator and Speech | Azure AI Translator (Greek, Spanish, French) and Azure AI Speech (audio of five editions) |
 | Cosmos DB | workflow checkpoints, sealed bundles, nonces and approval records |
 | Logic App | `la-agon-teams-approval`, identity `id-logicapp`: posts the card through the `agon-teams` connection, waits for the answer, sends it unchanged to `decisions-teams` (only `id-logicapp` may send there), polls the published manifest and updates the card in place |
 | intake job | Container Apps job `job-agon-intake`, identity `id-api`: the one verifier; consumes the nonce, records the approval, and is the only sender on `decisions` |
 | Publisher job | Container Apps job `job-agon-publisher`, identity `id-publisher`: re-hashes the bundle, reads the approval record, writes create-only to the public `feed` container |
-| fleet-run drill | the `fleet-run.yml` workflow, run by an operator; the CI identity may only send to the `runs` queue |
-| Static Web Apps | the public React console, in West Europe, built from the committed copy of the recorded run in `web/runs` (exported by `agon.webrecord`) |
+| fleet-run drill | the `fleet-run.yml` workflow, run by an operator; on Storage the CI identity may only send, and only to the `runs` queue |
+| Static Web Apps | the public React console, in West Europe, built from the committed copies of the recorded runs in `web/runs` (exported by `agon.webrecord`) |
 
-Deployed but not drawn, because no run reaches them yet: the sandbox Publisher job (`job-agon-publisher-sandbox`) and the newsroom post flow (`la-agon-teams-post`). The console never reads the feed: its content security policy allows connections to its own origin only, and it serves the committed copy of the recorded run.
+Deployed but not drawn, because no run reaches them yet: the sandbox Publisher job (`job-agon-publisher-sandbox`) and the newsroom post flow (`la-agon-teams-post`). The console never reads the feed: its content security policy allows connections to its own origin only, and it serves the committed copies of the recorded runs.
 
 Each job has its own managed identity and only the grants it needs:
 
@@ -148,7 +148,7 @@ Calls to Storage (queues and blobs), Cosmos DB, Foundry, Translator, Speech and 
 
 ## Process flow of one run
 
-One full-time run with target `feed`, as the code runs it (`src/agon/fleet/worker.py`, `src/agon/fleet/workflow.py`, `src/agon/intake/`, `src/agon/publish/job.py`, `infra/flows.bicep`). The two timelines below give the real times of each step.
+One full-time run with target `feed`, as the code runs it (`src/agon/fleet/worker.py`, `src/agon/fleet/workflow.py`, `src/agon/intake/`, `src/agon/publish/job.py`, `infra/flows.bicep`). The three real-run timelines below give the real times of each step.
 
 ```mermaid
 sequenceDiagram
@@ -186,12 +186,12 @@ sequenceDiagram
   FL->>DB: bundle, nonce,<br/>checkpoint at request_info
   FL->>LA: card, Entra-authenticated trigger
   LA->>MO: approval card in the channel
-  Note over FL: process A ends,<br/>the workflow waits in its checkpoint
+  Note over FL: with no decision within 60 s,<br/>process A ends and the workflow<br/>waits in its checkpoint
   MO->>LA: Approve
   LA->>IN: decision on queue decisions-teams<br/>only id-logicapp sends
   IN->>DB: one verifier, consume once,<br/>record approval
   IN->>FL: pointer on queue decisions<br/>only id-api sends
-  Note over FL: process B starts
+  Note over FL: process B starts when the decision<br/>comes after the idle exit
   FL->>DB: load checkpoint, read approval,<br/>nonce reads consumed
   FL->>FL: resume, re-hash the sealed manifest
   FL->>PB: request on queue publish-requests
@@ -207,7 +207,7 @@ The Instagram and YouTube previews are written to the feed and never posted; the
 
 ## The agents and who checks them
 
-The full-time workflow is one Microsoft Agent Framework `WorkflowBuilder` graph (`src/agon/fleet/workflow.py`). Models write and label; deterministic code recomputes every number and name and decides what reaches the card.
+The full-time workflow is one Microsoft Agent Framework `WorkflowBuilder` graph (`src/agon/fleet/workflow.py`). Models write and label; deterministic code recomputes every claimed score, statistic, minute and player name from the event log and decides what reaches the card.
 
 ```mermaid
 flowchart LR
@@ -248,7 +248,7 @@ Each `localise_` step calls Azure AI Translator, then the localiser-editor agent
 | Analyst | Foundry prompt agent `agon-analyst`, prompt `analyst.v1.md` | `agon-analyst:1` on 2026-10-19; `agon-analyst:2` on 2026-10-20 and 2026-10-27 | picks up to 5 turning points from the interpret step's candidates | code rejects an event id that is not in the event log, more than 5 picks, or no pick when candidates exist; it sends the problems back once, then falls back to the 4 largest win-probability swings, chosen by code |
 | Writer | Foundry prompt agent `agon-writer`, prompt `writer.v1.md` | `agon-writer:1` | writes the English report, each sentence with machine-readable claims | the Fact Gate; one retry (`MAX_WRITER_ATTEMPTS = 2`), then a template line built from the claims for each sentence still refused |
 | Triage | structured-output call on the `model.structured` deployment (`gpt-5.6-luna` in the run manifests), prompt `triage.v1.md` | same deployment | labels each sentence's type and the events that ground it | a routing table in code (`_route` in `src/agon/fleet/steps.py`) decides the route: yellow and red card claims always go to Confirm whatever the label, and a non-colour sentence with no claim counts as a Fact Gate refusal. The Fact Gate checks every sentence whatever its route |
-| Desk Editor | structured-output call, prompt `desk_editor.v1.md` | same deployment | a critic that may add flags, shown on the card beside the sentence they name | it can never clear a flag, change the Confirm rows or widen the attested scope; a flag for an unknown sentence is ignored. In the 2026-10-27 run it added none (`web/runs/run-6bb5b655464f/card.json`) |
+| Desk Editor | structured-output call, prompt `desk_editor.v1.md` | same deployment | a critic that may add flags, shown on the card beside the sentence they name | it can never clear a flag, change the Confirm rows or widen the attested scope; a flag for an unknown sentence is ignored. In both 2026-10-27 runs it added none (`web/runs/run-0e16414b71d7/card.json`, `web/runs/run-6bb5b655464f/card.json`); the s7 flag the console's Approve screen lists under Desk Editor flags for the default run is the Fact Gate's (`"by": "factgate"`) |
 | Localiser-editor | Foundry prompt agent `agon-localiser-editor`, prompt `localiser_editor.v1.md` | `agon-localiser-editor:1` | post-edits the Azure AI Translator output for Greek, Spanish and French; the fictional names are passed to Translator as protected terms | the Fact Gate per edition, then the Rights Guard |
 
 The agent versions are read from each run's sealed manifest (`deployment_ids` in `web/runs/<run>/manifest.json`); the prompt files and their sha256 are pinned in `src/agon/agents/prompts/manifest.json`. At startup the fleet worker reads every configured Foundry agent version back and compares the sha256 of its deployed instructions with the pinned prompt; a mismatch fails closed (`verify_deployed` in `src/agon/agents/foundry.py`). The verified hashes are sealed into the bundle as `prompt.<role>`.
@@ -266,7 +266,7 @@ The agent versions are read from each run's sealed manifest (`deployment_ids` in
 
 ### The durable approval pause
 
-`ApprovalExecutor` calls `ctx.request_info(...)` with `DecisionEnvelope` as the response type, after storing the exact sealed manifest in workflow state. Agent Framework writes the pause checkpoint to Cosmos DB (container `checkpoints` in database `agon`) through `agent-framework-azure-cosmos`; a guard records any failed save, and the runner refuses to report a pause while one has failed (`src/agon/fleet/checkpoints.py`). The worker process then ends. A new process resumes the same graph from that checkpoint, and the response handler re-hashes the stored manifest before it accepts the decision. The CI spike in `spikes/s1_durable_approval/` kills the waiting process, resumes in another, and proves a deleted checkpoint cannot resume.
+`ApprovalExecutor` calls `ctx.request_info(...)` with `DecisionEnvelope` as the response type, after storing the exact sealed manifest in workflow state. Agent Framework writes the pause checkpoint to Cosmos DB (container `checkpoints` in database `agon`) through `agent-framework-azure-cosmos`; a guard records any failed save, and the runner refuses to report a pause while one has failed (`src/agon/fleet/checkpoints.py`). When no decision arrives within the worker's 60 s idle window (`--idle-exit 60` in `infra/apps.bicep`), the process ends, and a new process resumes the same graph from that checkpoint (as in the 2026-10-19 run and both 2026-10-27 runs); a decision that comes sooner is resumed by the same process, from the same checkpoint. Either way the response handler re-hashes the stored manifest before it accepts the decision. The CI spike in `spikes/s1_durable_approval/` kills the waiting process, resumes in another, and proves a deleted checkpoint cannot resume.
 
 ## A real run, end to end (2026-10-19)
 
@@ -287,11 +287,11 @@ Check it yourself: the [published manifest](https://stagonnnk4re3nvfz7o.blob.cor
 
 ## Later real runs (2026-10-20 and 2026-10-27)
 
-Three more bundles went the same way, each approved in the Teams channel and re-hashable from the public feed:
+Four more bundles went the same way, each approved in the Teams channel and re-hashable from the public feed:
 
 * **Match-Day Charter**, approved 2026-10-20 09:38:49 UTC: the rules for timed cues, sealed as their own bundle ([manifest](https://stagonnnk4re3nvfz7o.blob.core.windows.net/feed/69282a2fc5b639475627f7bbd0391b781175b422ba16f58e105c898511854485/manifest.json)). The 34 timed cues in `web/cues/1.json`, in English, Greek, Spanish and French, were exported under its hash with `PYTHONPATH=src python -m agon.cues`.
 * **Full-time report**, approved 2026-10-20: the earliest published bundle whose manifest names the real interpret step, `agon.interpret/7ab5e12ab86e` ([manifest](https://stagonnnk4re3nvfz7o.blob.core.windows.net/feed/14f4694e45c96b536d23f93d949cf63c563e7b85d58cd6d25185f72d182bffd5/manifest.json)).
-* **Full-time report**, approved 2026-10-27, the run the console shows by default ([manifest](https://stagonnnk4re3nvfz7o.blob.core.windows.net/feed/6bb5b655464f33e3dce6bd0d605c73205a7dfeab74b4254408963a401b6c683c/manifest.json), also `agon.interpret/7ab5e12ab86e`; job executions in [`evidence/run-6bb5b655464f.executions.json`](evidence/run-6bb5b655464f.executions.json)):
+* **Full-time report**, approved 2026-10-27 14:48 UTC, an earlier run of that day and the second run on the site ([manifest](https://stagonnnk4re3nvfz7o.blob.core.windows.net/feed/6bb5b655464f33e3dce6bd0d605c73205a7dfeab74b4254408963a401b6c683c/manifest.json), also `agon.interpret/7ab5e12ab86e`; job executions in [`evidence/run-6bb5b655464f.executions.json`](evidence/run-6bb5b655464f.executions.json)):
 
 | Time (UTC) | Step |
 |---|---|
@@ -305,13 +305,27 @@ Three more bundles went the same way, each approved in the Teams channel and re-
 | 14:49:59 | The Publisher job recomputes the hash and writes create-only to the public feed. |
 | 14:50:45 | The same Teams card is updated in place to "Published" (time from the Logic App run history). |
 
+* **Full-time report**, approved 2026-10-27 15:45 UTC, the run the console shows by default ([manifest](https://stagonnnk4re3nvfz7o.blob.core.windows.net/feed/0e16414b71d73a7c6a014f0fb5223db18dacfc64fa487fb0a90a09d3bbca1e5f/manifest.json), also `agon.interpret/7ab5e12ab86e`; job executions in [`evidence/run-0e16414b71d7.executions.json`](evidence/run-0e16414b71d7.executions.json); the intake's record time is `approval.approved_at` in `web/runs/run-0e16414b71d7.json`):
+
+| Time (UTC) | Step |
+|---|---|
+| 15:39:25 | A run is put on the `runs` queue ([drill run](https://github.com/upgradedev/agon-azure/actions/runs/40533087300); run id `drill-20261027T153925Z-40533087300`). |
+| 15:39:41 | The fleet job wakes; Foundry agents write, code checks and seals the bundle. |
+| 15:40:53 | The Logic App posts the approval card (time from the Logic App run history). |
+| 15:41:55 | With no decision within the 60 s idle window, the worker process ends; the workflow waits in its checkpoint. |
+| 15:45:28 | The media officer approves in Teams (time from the Logic App run history). |
+| 15:45:41 | The intake job runs the one verifier and records the decision at 15:46:03. |
+| 15:46:11 | A new fleet process resumes the workflow from the checkpoint. |
+| 15:46:41 | The Publisher job recomputes the hash and writes create-only to the public feed. |
+| 15:47:38 | The same Teams card is updated in place to "Published" (time from the Logic App run history). |
+
 ## Real, simulated, not deployed
 
 | Part | State |
 |---|---|
 | Synthetic league, season and matches (seeded, deterministic, standard library only) | real, in CI and on the site |
 | Foundry agents writing the report, Translator, Speech | real, deployed in Sweden Central |
-| Agent Framework workflow with Cosmos DB checkpoints, resumed in a new process | real, deployed (Container Apps jobs) |
+| Agent Framework workflow with Cosmos DB checkpoints, resumed from the checkpoint, in a new process when the waiting one has already exited | real, deployed (Container Apps jobs) |
 | Teams approval card, updated in place after publish | real, deployed (Logic Apps Consumption) |
 | One verifier for every approval route; consume once | real, deployed in the intake job; Teams is the only deployed route |
 | Publisher, one adapter per destination, create-only writes | real, deployed |
@@ -335,7 +349,7 @@ Run each command from the repository root. `PYTHONPATH=src` is the bash form; in
 | Realism bands on 200 held-out matches (M2) | 18 of 22 pass; our target was 20, so this is below target and no band was widened | `PYTHONPATH=src python -m agon.synth.bands --seeds 1001-1200` (prints `M2 passed 18 of 22 (threshold 20)` and exits 1, because the result is below target) |
 | Approval routes that skip the verifier (M16) | 0 (4 channel adapters, 2 queue routes) | `PYTHONPATH=src python -m agon.governance.routes`; [governance run](https://github.com/upgradedev/agon-azure/actions/runs/39330327770) |
 | 50 concurrent approvals of one nonce (M15) | 1 approval. Negative control: an etag-blind store lets all 50 consume the nonce, and only the create-only approval record still holds it to 1 approval and 1 publish. Measured on the in-memory store with etag compare-and-set; the Cosmos DB etag path is not exercised by this test | `PYTHONPATH=src python -m pytest tests/approval_concurrency -q` (prints `3 passed`; needs pytest from `requirements/dev.txt`); [governance run](https://github.com/upgradedev/agon-azure/actions/runs/39330327770) |
-| Approval across process death | the 2026-10-19 and 2026-10-27 runs resumed in a new Container Apps execution (`evidence/`); the CI spike kills the waiting process, resumes in another, and proves a deleted checkpoint cannot resume | [spike run](https://github.com/upgradedev/agon-azure/actions/runs/39229376155) |
+| Approval across process death | the 2026-10-19 run and both 2026-10-27 runs resumed in a new Container Apps execution (`evidence/`); the CI spike kills the waiting process, resumes in another, and proves a deleted checkpoint cannot resume | [spike run](https://github.com/upgradedev/agon-azure/actions/runs/39229376155) |
 | Foundry model call from CI (gate C2) | HTTP 200 from the luna deployment, 1409 ms, 35 tokens | [foundry-smoke run](https://github.com/upgradedev/agon-azure/actions/runs/39276078687) |
 | Turning-point recall (M7) | not built yet | none |
 | Fact Gate catch rate by language (M8), seeded mutants of every sentence of the 2026-10-19 recorded run | self-measured, `check_sentence`: 185 of 225 caught (82.2%), the same 37 of 45 in en, el, es and fr. The easy-read edition's prose equals the English prose in this run, so it is not a separate language result. All 16 misses a real run can produce are club names: 6 claimed club names with no cited event in en, and an unclaimed club name in s1 and s3 of every edition. Spelled-out numbers (0 of 30 flagged) and decimals are uncovered by design and not counted | `PYTHONPATH=src python -m agon.governance.mutation --run web/runs/run-c8a19020c98a` (seed 8), pinned by `tests/governance/test_mutation.py`, on main since #53; [governance run](https://github.com/upgradedev/agon-azure/actions/runs/39356938557) |
@@ -351,7 +365,7 @@ Pointers only: where each criterion can be checked in this repository, on the li
 |---|---|
 | Technological Implementation | Code in `src/agon/` and its tests in `tests/`. CI in `.github/workflows/`: `ci.yml` (tests, gitleaks, image build, pins, dashes, OIDC), `determinism.yml`, `governance.yml`, `console.yml`, `deploy.yml`. Infrastructure as Bicep in `infra/`; exact pins in `requirements/` checked by `ci/check_pins.py`. Operations in [docs/OPERATIONS.md](docs/OPERATIONS.md). Measurements in [Numbers](#numbers-self-measured). |
 | Agentic Design and Innovation | The workflow graph in `src/agon/fleet/workflow.py`, the steps and code checks in `src/agon/fleet/steps.py`, the Foundry adapter and prompt provenance in `src/agon/agents/foundry.py` and `src/agon/agents/prompts/`, the durable pause in `src/agon/fleet/checkpoints.py` and `src/agon/fleet/worker.py`, spike S1 in `spikes/s1_durable_approval/`. Sections [Process flow](#process-flow-of-one-run) and [The agents and who checks them](#the-agents-and-who-checks-them). On the site: Newsroom Wall and How it works. |
-| Real-World Impact and Applicability | [Who it is for](#who-it-is-for-where-it-lands-what-it-replaces), the two real-run timelines with `evidence/` and the public manifests, [Real, simulated, not deployed](#real-simulated-not-deployed), [Honest limits](#honest-limits), identities and grants in `infra/rbac.bicep`. On the site: Media office. |
+| Real-World Impact and Applicability | [Who it is for](#who-it-is-for-where-it-lands-what-it-replaces), the three real-run timelines with `evidence/` and the public manifests, [Real, simulated, not deployed](#real-simulated-not-deployed), [Honest limits](#honest-limits), identities and grants in `infra/rbac.bicep`. On the site: Media office. |
 | User Experience and Presentation | The [Try it in 2 minutes](#try-it-in-2-minutes) path on the live demo; the console source in `console/`; its end-to-end tests (Playwright, axe-core, keyboard path, content security policy) in `console.yml`; the Teams card in `src/agon/fleet/card.py` and `infra/flows.bicep`; the video, linked from the project page once public. |
 | Adherence to the hackathon category | Synthetic data: `src/agon/synth/`, [DATASET_CARD.md](DATASET_CARD.md), the determinism run in [Numbers](#numbers-self-measured). Match insights: `src/agon/interpret/` and [docs/INTERPRET.md](docs/INTERPRET.md), Match Centre in Analyst mode, the timed cues in `web/cues/1.json` described in [web/cues-format/README.txt](web/cues-format/README.txt). Fictional names only: the Rights Guard and the real-name scan in `ci/readiness.py`. |
 
