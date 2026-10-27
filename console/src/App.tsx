@@ -23,7 +23,7 @@ import { About } from "./screens/about";
 import { NotFound } from "./screens/not-found";
 import { navigate, useRoute } from "./hooks/stores";
 import { VIEW_TITLES, hrefFor, parseHash } from "./lib/router";
-import { runForBlow } from "./lib/runs";
+import { runForBlow, siteStatus } from "./lib/runs";
 import type { InitialData, LoadedRun } from "./lib/types";
 
 function pickRun(initial: InitialData, param: string): { loaded: LoadedRun | null; error: string | null } {
@@ -49,6 +49,8 @@ export function App({ initial }: { initial: InitialData }) {
   const { loaded, error } = pickRun(initial, runParam);
   const runs = initial.status === "ready" ? initial.runs : null;
   const fallback = pickRun(initial, "").loaded;
+  /* The status line names the run the site opens on by default, whatever the route shows. */
+  const status = fallback ? siteStatus(fallback.run) : null;
   /* A screen keeps its own state (ticks, replay step) until it shows another run. */
   const runKey = (view: string) => (route.view === view ? loaded?.run.run_id ?? "missing" : fallback?.run.run_id ?? "missing");
 
@@ -84,7 +86,7 @@ export function App({ initial }: { initial: InitialData }) {
 
   return (
     <TooltipProvider delayDuration={300}>
-      <Shell view={route.view}>
+      <Shell view={route.view} status={status}>
         <MatchCentre active={route.view === "home"} runs={runs} progress={progress} onBlowFullTime={onBlowFullTime} />
         <NewsroomWall
           key={`wall-${runKey("newsroom")}`}

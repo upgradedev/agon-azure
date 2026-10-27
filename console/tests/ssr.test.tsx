@@ -21,7 +21,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { prerender } from "../src/entry-server";
 import { BuildLabelView } from "../src/components/shell";
 import { loadRunsData, type FetchText } from "../src/lib/loader";
-import { DECIDED_CARD_SENTENCE, NOT_DEPLOYED_SENTENCE, STANDIN_HEADER, decidedMessage, editionLabel, flagGroups } from "../src/lib/runs";
+import { DECIDED_CARD_SENTENCE, LIVE_RUNS_SENTENCE, NOT_DEPLOYED_SENTENCE, STANDIN_HEADER, decidedMessage, editionLabel, flagGroups } from "../src/lib/runs";
 import { PREVIEW_ONLY_SENTENCE } from "../src/lib/destinations";
 import { REPO, afterFetch, diskFetch } from "./helpers";
 
@@ -59,6 +59,36 @@ describe.each(SOURCES)("prerendered markup, %s", (_name, fetchText, committed) =
       expect(html).toContain('<h2 id="h-analyst" class="text-sm font-semibold text-fg">Analyst desk: turning points</h2>');
       expect(html).toContain(">AI-written<");
     }
+  });
+
+  /* The Recap shows the same picks next to the editions; the Match Centre's copy needs the loaded
+     event file, so it is never in the prerendered page. A run without picks renders neither. */
+  it("puts the default run's turning points on the Recap as Why it mattered, and none without them", () => {
+    expect(html.includes('data-why="recap"')).toBe(picks.length > 0);
+    expect(html).not.toContain('data-why="match-centre"');
+    expect([...html.matchAll(/\sdata-why-pick="([^"]+)"/g)].map((m) => m[1])).toEqual(picks);
+    if (picks.length) {
+      expect(html).toContain(">Why it mattered: the turning points</h2>");
+      expect(html).toMatch(/AI-written by the Microsoft Foundry agent agon-analyst:\d+, sealed in card\.json in bundle [0-9a-f]{12}\./);
+    }
+  });
+
+  it("opens on a status line and a value statement, with no Preview badge and no switch that cannot be turned on", () => {
+    expect(html.split("data-site-status").length - 1).toBe(1);
+    /* The day only (approved_at is the intake's record time, not the minute of the Teams action),
+       kept on one line at 375 px. */
+    expect(html).toContain(decided ? "This site opens on a recorded newsroom run, approved in Microsoft Teams on " : "This site opens on a ");
+    if (decided) {
+      expect(html).toMatch(/approved in Microsoft Teams on <span class="whitespace-nowrap">\d{4}-\d{2}-\d{2}<\/span>/);
+    }
+    expect(html).toContain("data-value-statement");
+    expect(html).toContain("nothing is published until the media officer approves it in Microsoft Teams.");
+    /* The value statement leads to Key moments, where the turning points sit, only when there are some. */
+    expect(html.includes('<a href="#h-moments">explaining why the key moments mattered</a>')).toBe(picks.length > 0);
+    expect(html).toContain('id="h-moments"');
+    expect(html).toContain(LIVE_RUNS_SENTENCE);
+    expect(html).not.toContain('role="switch"');
+    expect(html).not.toContain("Preview build");
   });
 
   it("puts every flag on the approval card under the step that raised it", () => {
@@ -148,9 +178,9 @@ describe.each(SOURCES)("prerendered markup, %s", (_name, fetchText, committed) =
    that markup with the commit read from <body data-commit>, so both must be exactly what
    BuildLabelView renders. tests/test_stamp_web.py holds the Python side to the same strings. */
 const SHA = "0123456789abcdef0123456789abcdef01234567";
-const UNSTAMPED_P = '<p class="text-xs text-muted" id="run-label">Preview build, commit not stamped (local build)</p>';
+const UNSTAMPED_P = '<p class="text-xs text-muted" id="run-label">Build commit not stamped (local build)</p>';
 const STAMPED_P =
-  '<p class="text-xs text-muted" id="run-label">Preview build, commit ' +
+  '<p class="text-xs text-muted" id="run-label">Build commit ' +
   `<a href="https://github.com/upgradedev/agon-azure/commit/${SHA}" aria-label="commit ${SHA}" class="font-mono text-link">0123456</a></p>`;
 
 describe("the build label", () => {

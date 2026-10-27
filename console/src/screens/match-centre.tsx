@@ -7,6 +7,13 @@
   words. Every sentence uses the fictional names from the seed's world file;
   raw ids appear only in the "Ids in the event log" row. Under reduced motion
   the ball jumps from event to event and nothing starts on its own.
+
+  The header's lead says in one sentence what Agon produces and that a person
+  approves it in Microsoft Teams before anything is published. Match setup says
+  where live runs start (not from this page) instead of showing a switch that
+  could never be turned on. Key moments opens with the Analyst's turning points
+  (Why it mattered) when the run Blow full time opens is of the match being
+  replayed, read from that run's sealed card.json.
 */
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Pause, Play, Users, Volume2, VolumeX, Whistle } from "lucide-react";
@@ -45,7 +52,9 @@ import {
   type Timeline,
 } from "../lib/core";
 import { browserFetchText, loadMatch, resolveManifest, type ResolvedManifest } from "../lib/loader";
-import { runForBlow } from "../lib/runs";
+import { aiWritten, approvalDay, liveRunsLine, runForBlow } from "../lib/runs";
+import { WhyItMattered } from "../components/turning-points";
+import { KeepDates } from "../components/ui/keep-dates";
 import { GLOSSARY, GLOSSARY_ORDER } from "../lib/glossary";
 import { cn } from "../lib/cn";
 import { useReducedMotion } from "../hooks/stores";
@@ -61,7 +70,7 @@ import { Analysis } from "../components/match/analysis";
 import { YourView } from "../components/match/your-view";
 import { SideBadge } from "../components/match/marks";
 import type { TrailPoint } from "../components/pitch";
-import type { Club, ManifestEntry, MatchEvent, RunsData, World } from "../lib/types";
+import type { AnalystPick, Club, ManifestEntry, MatchEvent, RunsData, World } from "../lib/types";
 
 type Speed = "1" | "8" | "60";
 const TRAIL = 8;
@@ -70,7 +79,8 @@ const SPEEDS: Record<Speed, number> = { "1": 1, "8": 8, "60": 60 };
 const BAND_WIDTH_M = 17;
 const MAX_STEP_SECONDS = 0.25;
 /* Measured on the live site, 2026-10-20: curl -sS -o /dev/null -w "%{size_download}"
-   .../kinematics/<seed>.kinematics.json gave 1287728, 1260667 and 1265783 bytes for seeds 1 to 3. */
+   .../kinematics/<seed>.kinematics.json gave 1287728, 1260667 and 1265783 bytes for seeds 1 to 3.
+   The hint says "about 1.3 MB"; the measurement sits behind its Source disclosure. */
 const TRACKING_SIZE = "1.26 to 1.29 MB a match before compression (curl size_download on the live site, 2026-10-20)";
 
 const TYPE_WORDS: Record<string, string> = {
@@ -196,8 +206,6 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
     analysisHint: useId(),
     soundHint: useId(),
     trackingHint: useId(),
-    liveReason: useId(),
-    liveLabel: useId(),
     blowHint: useId(),
     momentsHint: useId(),
   };
@@ -367,6 +375,16 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
   }, [active]);
 
   const ready = match.status === "ready" ? match : null;
+  /* Where each event id sits in the loaded file, so a turning point can move the replay to its event. */
+  const eventIndex = useMemo(() => {
+    const found = new Map<string, number>();
+    ready?.events.forEach((e, i) => {
+      if (e.event_id) {
+        found.set(e.event_id, i);
+      }
+    });
+    return found;
+  }, [ready]);
   const view = useMemo(() => {
     if (!ready) {
       return null;
@@ -481,11 +499,12 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
   const blowRun = runs ? runForBlow(runs, seed) : null;
   const defaultRun = runs ? runs.runs[runs.defaultRunId] ?? null : null;
 
-  let blowHint = "Starts the newsroom run you follow on the next screens. Live agents are not connected, so it opens the recorded run, labelled on every screen.";
+  /* Which run Blow full time opens; the live-runs line under it says why that run is not live. */
+  const which = blowRun?.run.provenance === "design_preview" ? "the hand-written sample" : "the recorded run";
+  let blowHint = "Opens the newsroom run you follow on the next screens, labelled on every screen.";
   if (seed !== null && blowRun && blowRun.run.seed === seed) {
-    blowHint = `Opens the newsroom run for seed ${seed}. Live agents are not connected, so this is the recorded run, labelled on every screen.`;
+    blowHint = `Opens ${which} for seed ${seed}, labelled on every screen.`;
   } else if (seed !== null && blowRun) {
-    const which = blowRun.run.provenance === "design_preview" ? "the hand-written sample" : "the recorded run";
     blowHint = `There is no run for seed ${seed} yet, so the newsroom shows ${which} for seed ${blowRun.run.seed} and says so on every screen.`;
   }
 
@@ -530,6 +549,24 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
 
   const names = ready?.derived.names ?? null;
   const file = analysis.status === "ready" ? analysis.file : null;
+  /* The Analyst's turning points, only from the run Blow full time opens and only when that run is
+     of the match being replayed: the same seed, generator and match id. Seeds without a run of their
+     own show none, and nothing shows before the match file has loaded (so not in the prerender). */
+  const loadedMatchId = ready ? ready.world?.match_id ?? file?.match_id ?? null : null;
+  const whyRun =
+    ready && resolved && blowRun?.analyst && blowRun.run.seed === ready.seed && blowRun.run.generator === resolved.manifest.generator && blowRun.run.match_id === loadedMatchId
+      ? blowRun
+      : null;
+  const whyNotes = whyRun?.analyst ?? null;
+  const turningIds = new Set(whyNotes ? whyNotes.picks.map((p) => p.event_id) : []);
+  const seekFor = (pick: AnalystPick): (() => void) | null => {
+    const at = eventIndex.get(pick.event_id);
+    if (!ready || at === undefined) {
+      return null;
+    }
+    const time = ready.derived.timeline.times[at];
+    return () => seek(time);
+  };
   const homeName = ready && names ? names.club(ready.derived.home) : "Home";
   const awayName = ready && names ? (ready.derived.away ? names.club(ready.derived.away) : "Away") : "Away";
   const homeKit = ready && names ? names.clubRecord(ready.derived.home) : null;
@@ -621,7 +658,13 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
         view="home"
         eyebrow="Match Centre"
         title="Replay a fictional match, then blow the whistle"
-        lead="Pick one of the seeded fictional matches and watch it replay from its event log; Blow full time opens the newsroom run you follow on the next four screens."
+        lead={
+          <span className="text-fg" data-value-statement="">
+            Agon writes the club&apos;s match report for fans from the event log, in four languages and easy-read, with Microsoft Foundry agents{" "}
+            {defaultRun?.analyst ? <a href="#h-moments">explaining why the key moments mattered</a> : "explaining why the key moments mattered"}; code
+            checks every claimed number, name and minute, and nothing is published until the media officer approves it in Microsoft Teams.
+          </span>
+        }
       />
       <GuideCard progress={progress} />
 
@@ -772,7 +815,7 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
                 {manifestError || match.status === "error"
                   ? "The synthetic tracking needs the match file, which could not be read, so the players cannot be shown."
                   : kin.status === "off"
-                    ? `Shows all 22 players, with name tags for the player in the latest event and the one you follow. The tracks are synthetic, modelled from the event log within speed and acceleration caps, not measured; ${TRACKING_SIZE}, loaded only when you ask.`
+                    ? "Shows all 22 players, with name tags for the player in the latest event and the one you follow. The tracks are synthetic, modelled from the event log within speed and acceleration caps, not measured; about 1.3 MB a match, loaded only when you ask."
                     : kin.status === "loading"
                       ? "Loading the synthetic tracking for this match."
                       : kin.status === "ready"
@@ -786,6 +829,12 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
                   </>
                 ) : null}
               </p>
+              {manifestError || match.status === "error" || kin.status !== "off" ? null : (
+                <details className="-mt-1 text-xs">
+                  <summary className="cursor-pointer text-link select-none">Source of the file size</summary>
+                  <p className="mt-1 leading-5 text-muted">{TRACKING_SIZE}.</p>
+                </details>
+              )}
               {playReason ? (
                 <p id={ids.playReason} className="text-sm text-muted">
                   {playReason}
@@ -886,27 +935,9 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
                 </p>
               </div>
 
-              <div className="flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <p id={ids.liveLabel} className="text-sm font-medium text-fg">
-                    Run it live
-                  </p>
-                  <p id={ids.liveReason} className="mt-0.5 text-xs leading-5 text-muted">
-                    Live runs are off: the full-time fleet is not connected to this public page, so Blow full time opens the recorded run instead.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked="false"
-                  aria-disabled="true"
-                  aria-labelledby={ids.liveLabel}
-                  aria-describedby={ids.liveReason}
-                  className="relative mt-0.5 inline-flex h-6 w-11 shrink-0 cursor-not-allowed items-center rounded-full border border-line-strong bg-surface-3 p-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
-                >
-                  <span className="size-4 rounded-full bg-line-strong" aria-hidden="true" />
-                </button>
-              </div>
+              <p className="text-xs leading-5 text-muted" data-live-runs="">
+                <KeepDates text={liveRunsLine(blowRun?.run ?? defaultRun?.run ?? null)} />
+              </p>
             </CardBody>
           </Card>
 
@@ -922,10 +953,25 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
 
           <Card aria-labelledby="h-moments">
             <CardHeader>
-              <CardTitle id="h-moments">Key moments</CardTitle>
+              <CardTitle id="h-moments" className="scroll-mt-20">
+                Key moments
+              </CardTitle>
               <Badge tone="neutral">{ready ? ready.derived.moments.length : 0}</Badge>
             </CardHeader>
             <CardBody>
+              {whyRun && whyNotes ? (
+                <WhyItMattered
+                  notes={whyNotes}
+                  run={whyRun.run}
+                  headingId="h-moments-why"
+                  where="match-centre"
+                  lead={`${aiWritten(whyNotes) ? "The Analyst agent's picks" : "The turning points the Writer was given"} in the recorded run of this match${
+                    approvalDay(whyRun.run) ? `, approved on ${approvalDay(whyRun.run)}` : ""
+                  }. Choose a minute to move the replay there.`}
+                  seekFor={seekFor}
+                  className="mb-4"
+                />
+              ) : null}
               <p id={ids.momentsHint} className="text-xs leading-5 text-muted">
                 Goals, shots, cards and substitutions from the event log. Choose one to move the replay there; moments still to come are dimmed.
               </p>
@@ -933,6 +979,7 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
                 <ol className="mt-3 max-h-80 space-y-1 overflow-y-auto pr-1" aria-labelledby="h-moments" aria-describedby={ids.momentsHint}>
                   {ready.derived.moments.map((m) => {
                     const future = view ? m.index > view.index : true;
+                    const turning = turningIds.has(ready.events[m.index]?.event_id ?? "");
                     return (
                       <li key={`${m.kind}-${m.index}`}>
                         <button
@@ -947,7 +994,15 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
                           <span className={cn("mt-0.5 inline-flex min-w-11 justify-center rounded-md px-1.5 text-xs leading-5 font-semibold tabular-nums", MOMENT_TONE[m.kind])}>
                             {m.minute}
                           </span>
-                          <span className="min-w-0">{m.text}</span>
+                          <span className="min-w-0">
+                            {m.text}
+                            {turning ? (
+                              <>
+                                <span className="sr-only">,</span>{" "}
+                                <span className="inline-flex rounded-full bg-info-bg px-2 text-xs leading-5 font-medium text-info">turning point</span>
+                              </>
+                            ) : null}
+                          </span>
                         </button>
                       </li>
                     );
@@ -989,11 +1044,17 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
         </CardHeader>
         <CardBody>
           <p className="text-sm leading-6 text-muted">
-            Before anyone writes, plain code turns the event log into a few numbers the writers must cite instead of guess. The fleet calls this
-            code, and the runs published on 2026-10-20 and 2026-10-27 name it in the interpret entry of their manifest&apos;s deployment_ids
-            (agon.interpret); the 2026-10-19 run, also on this site, predates the switch and its writers read a stand-in that ranks only goals and
-            red cards. Choose a term to see what it means.
+            Before anyone writes, plain code turns the event log into a few numbers the writers must cite instead of guess. Choose a term to see
+            what it means.
           </p>
+          <details className="mt-1.5 text-xs">
+            <summary className="cursor-pointer text-link select-none">Source</summary>
+            <p className="mt-1 leading-5 text-muted">
+              The fleet calls this code, and the runs published on 2026-10-20 and 2026-10-27 name it in the interpret entry of their
+              manifest&apos;s deployment_ids (agon.interpret); the 2026-10-19 run, also on this site, predates the switch and its writers read a
+              stand-in that ranks only goals and red cards.
+            </p>
+          </details>
           <ul className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
             {GLOSSARY_ORDER.map((id) => (
               <li key={id} className="rounded-lg border border-line bg-surface-2 px-3 py-2.5">

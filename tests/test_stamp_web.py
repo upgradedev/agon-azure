@@ -60,9 +60,9 @@ def test_placeholder_must_appear_exactly_once(tmp_path: Path, html: str, count: 
 
 # The prerendered build label, as console/src/components/shell.tsx BuildLabelView renders it with no
 # commit, and the exact markup it renders for SHA (console/tests/ssr.test.tsx holds the same string).
-UNSTAMPED_P = '<p class="text-xs text-muted" id="run-label">Preview build, commit not stamped (local build)</p>'
+UNSTAMPED_P = '<p class="text-xs text-muted" id="run-label">Build commit not stamped (local build)</p>'
 STAMPED_P = (
-    '<p class="text-xs text-muted" id="run-label">Preview build, commit '
+    '<p class="text-xs text-muted" id="run-label">Build commit '
     '<a href="https://github.com/upgradedev/agon-azure/commit/0123456789abcdef0123456789abcdef01234567" '
     'aria-label="commit 0123456789abcdef0123456789abcdef01234567" class="font-mono text-link">0123456</a></p>'
 )
@@ -85,7 +85,7 @@ def test_two_unstamped_build_labels_are_refused(tmp_path: Path) -> None:
 
 
 def test_a_not_stamped_sentence_outside_the_build_label_is_refused(tmp_path: Path) -> None:
-    web = make_web(tmp_path, SHELL.replace("<p>Agon</p>", "<p>Preview build, commit not stamped (local build)</p>"))
+    web = make_web(tmp_path, SHELL.replace("<p>Agon</p>", "<p>Build commit not stamped (local build)</p>"))
     with pytest.raises(stamp_web.StampError, match="still says the build is not stamped"):
         stamp_web.stamp_commit(web, SHA)
 

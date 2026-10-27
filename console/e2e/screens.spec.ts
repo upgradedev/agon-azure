@@ -117,6 +117,118 @@ for (const viewport of VIEWPORTS) {
   });
 }
 
+/* Why it mattered: the same sealed picks on the Recap, next to the editions, and on the Match
+   Centre in Key moments for the replayed match of the run Blow full time opens. */
+for (const viewport of VIEWPORTS) {
+  test(`the Recap shows why the default run's turning points mattered at ${viewport.width} px`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/#/recap");
+    await appReady(page);
+    const run = await defaultRun(page);
+    const sealed = await sealedPicks(page, run.bundle.dir);
+    const why = page.locator('[data-view="recap"] section[data-why="recap"]');
+    await expect(why).toBeVisible();
+    await expect(why.getByRole("heading", { name: "Why it mattered: the turning points" })).toBeVisible();
+    await expect(why.getByText("AI-written", { exact: true })).toBeVisible();
+    const items = why.locator("li[data-why-pick]");
+    await expect(items).toHaveCount(sealed.length);
+    for (const [i, pick] of sealed.entries()) {
+      await expect(items.nth(i)).toHaveAttribute("data-why-pick", pick.event_id);
+      await expect(items.nth(i)).toContainText(`${pick.minute}'`);
+      await expect(items.nth(i)).toContainText(THEME_WORDS[pick.theme]);
+      await expect(items.nth(i)).toContainText(pick.why);
+    }
+    await expect(why.getByText(/^AI-written by the Microsoft Foundry agent agon-analyst:\d+, sealed in card\.json in bundle [0-9a-f]{12}\.$/)).toBeVisible();
+    for (const side of [run.home, run.away].filter((s) => sealed.some((p) => new RegExp(`\\b${s.club_id}\\b`).test(p.why)))) {
+      await expect(why).toContainText(`${side.club_id} is ${side.name}`);
+    }
+    /* Above the editions on a phone, beside them from 1280 px. */
+    const box = await why.boundingBox();
+    const tabs = await page.locator('[data-view="recap"] [role="tablist"]').boundingBox();
+    expect(Boolean(box && tabs), "both are laid out").toBe(true);
+    if (box && tabs) {
+      if (viewport.width < 1280) {
+        expect(box.y + box.height <= tabs.y, "Why it mattered comes before the editions on a phone").toBe(true);
+      } else {
+        expect(box.x >= tabs.x + tabs.width, "Why it mattered sits beside the editions").toBe(true);
+        expect(box.y < viewport.height, "Why it mattered starts on the first screen").toBe(true);
+      }
+    }
+    await expectNoHorizontalScroll(page);
+  });
+
+  test(`the Match Centre shows why the moments mattered for the recorded run's match at ${viewport.width} px`, async ({ page }) => {
+    await page.setViewportSize(viewport);
+    await page.emulateMedia({ reducedMotion: "reduce" });
+    await page.goto("/");
+    await appReady(page);
+    const view = page.locator('[data-view="home"]');
+    await expect(view.locator('section[data-state="ready"]')).toBeVisible({ timeout: 20_000 });
+    const run = await defaultRun(page);
+    const sealed = await sealedPicks(page, run.bundle.dir);
+    const why = view.locator('section[data-why="match-centre"]');
+    await expect(why).toBeVisible();
+    await expect(why.getByText("AI-written", { exact: true })).toBeVisible();
+    /* The lead names the approval day, not the run label (which carries a commit hash). */
+    await expect(why).toContainText(`in the recorded run of this match, approved on ${(run.approval.approved_at ?? "").slice(0, 10)}.`);
+    await expect(why).not.toContainText(run.label);
+    const items = why.locator("li[data-why-pick]");
+    await expect(items).toHaveCount(sealed.length);
+    for (const [i, pick] of sealed.entries()) {
+      await expect(items.nth(i)).toContainText(pick.why);
+    }
+    /* Each pick is in the deployed event file, so each moves the replay, and each is marked in the list. */
+    await expect(why.getByRole("button", { name: /move the replay to this moment/ })).toHaveCount(sealed.length);
+    await expect(view.getByText("turning point", { exact: true })).toHaveCount(sealed.length);
+    const slider = view.getByLabel("Match time");
+    await expect(slider).toHaveValue("0");
+    await why.getByRole("button", { name: new RegExp(`^Minute ${sealed[0].minute.replace("+", "\\+")}, `) }).click();
+    await expect(slider).not.toHaveValue("0");
+    /* Another seed has no recorded run of its own, so it shows no turning points. */
+    await view.getByText("Seed 2", { exact: true }).click();
+    await expect(view.locator('section[data-state="ready"]')).toBeVisible({ timeout: 20_000 });
+    await expect(view.getByText(/Synthetic match, .*seed 2\./).first()).toBeVisible();
+    await expect(why).toHaveCount(0);
+    await expectNoHorizontalScroll(page);
+  });
+}
+
+test("the top bar says what the site opens on and the footer names the stamped commit", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto("/");
+  await appReady(page);
+  const run = await defaultRun(page);
+  const status = page.locator("[data-site-status]");
+  await expect(status).toBeVisible();
+  /* The day of the record, not its minute: approved_at is the intake's record time, after the Teams action. */
+  await expect(status).toContainText(/^This site opens on a recorded newsroom run, approved in Microsoft Teams on \d{4}-\d{2}-\d{2} and published\./);
+  const day = (await status.textContent())?.match(/on (\d{4}-\d{2}-\d{2})/)?.[1] ?? "no date";
+  expect(run.approval.approved_at ?? "").toContain(day);
+  /* On a phone the date stays on one line. */
+  await page.setViewportSize({ width: 375, height: 812 });
+  const date = status.locator("span.whitespace-nowrap", { hasText: day });
+  await expect(date).toHaveText(day);
+  expect(await date.evaluate((el) => el.getClientRects().length), "the date is not split across lines at 375 px").toBe(1);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  /* The value statement leads to Key moments, where the turning points sit, and stays on the Match Centre. */
+  const home = page.locator('[data-view="home"]');
+  await expect(home.locator('section[data-state="ready"]')).toBeVisible({ timeout: 20_000 });
+  await expect(home.locator('section[data-why="match-centre"]')).toBeVisible();
+  const toMoments = home.locator('[data-value-statement] a[href="#h-moments"]');
+  await expect(toMoments).toHaveText("explaining why the key moments mattered");
+  await toMoments.click();
+  await expect(home).toBeVisible();
+  await expect(page.locator("#h-moments")).toBeInViewport();
+  await status.getByRole("link", { name: "Verify it in your browser" }).click();
+  await expect(page).toHaveURL(/#\/verify$/);
+  const sha = (await page.locator("body").getAttribute("data-commit")) ?? "";
+  expect(sha).toMatch(/^[0-9a-f]{40}$/);
+  await expect(page.locator("footer #run-label")).toHaveText(`Build commit ${sha.slice(0, 7)}`);
+  await expect(page.locator("footer #run-label a")).toHaveAttribute("href", `https://github.com/upgradedev/agon-azure/commit/${sha}`);
+  await expect(page.getByRole("banner").getByText("Preview", { exact: true })).toHaveCount(0);
+});
+
 test("the Why drawer names the turning point a sentence cites", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.emulateMedia({ reducedMotion: "reduce" });

@@ -52,7 +52,7 @@
     code.textContent = sha.slice(0, 7);
     link.appendChild(code);
     link.setAttribute("aria-label", "commit " + sha);
-    label.textContent = "Preview build, commit ";
+    label.textContent = "Build commit ";
     label.appendChild(link);
   }
 

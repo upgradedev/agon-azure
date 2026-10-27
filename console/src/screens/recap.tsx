@@ -10,6 +10,10 @@
   is. The edition label says "approved" only on an approved pipeline run whose
   approval names this bundle hash (isApproved, editionLabel).
 
+  A run whose sealed card.json carries the Analyst's turning points shows them
+  as Why it mattered, above the editions on a phone and beside them from xl
+  (components/turning-points.tsx); a run without them shows nothing new.
+
   Tabs follow the ARIA tabs pattern by hand (arrow keys, Home, End): a Radix
   tab panel prerenders an inline style, which the CSP would block.
 */
@@ -22,6 +26,7 @@ import { LabelLine, ScreenHeader, SeedNotice, StepNav, View } from "../component
 import { THEME_WORDS, clubKey, editionLabel, isApproved, matchLine, picksCited, sentenceById, why, type Why } from "../lib/runs";
 import { usePreferences } from "../hooks/preferences";
 import { Listen } from "../components/listen";
+import { WhyItMattered } from "../components/turning-points";
 import { hrefFor, type Route } from "../lib/router";
 import { cn } from "../lib/cn";
 import { VERDICT_TONE } from "./newsroom-wall";
@@ -228,94 +233,108 @@ export function Recap({ active, route, loaded, error, blownSeed }: Props) {
       <SeedNotice blownSeed={blownSeed} run={run} />
       <p className="mb-4 text-sm text-muted">{matchLine(run)}</p>
 
-      <div className="max-w-3xl">
-        <div role="tablist" aria-label="Editions" className="relative flex gap-1 overflow-x-auto rounded-lg border border-line bg-surface-2 p-1">
-          {editions.map((e, i) => {
-            const selected = current?.meta.edition === e.edition;
-            return (
-              <button
-                key={e.edition}
-                ref={(node) => {
-                  if (node) {
-                    tabRefs.current.set(e.edition, node);
-                  } else {
-                    tabRefs.current.delete(e.edition);
-                  }
-                }}
-                type="button"
-                role="tab"
-                id={tabId(e.edition)}
-                aria-selected={selected}
-                aria-controls={panelId}
-                tabIndex={selected ? 0 : -1}
-                onClick={() => select(e.edition, false)}
-                onKeyDown={(event) => onTabKey(event, i)}
-                className={cn(
-                  "shrink-0 rounded-md px-3.5 py-1.5 text-sm font-medium transition-colors",
-                  "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus",
-                  selected ? "bg-surface text-fg shadow-card" : "text-muted hover:text-fg",
-                )}
-              >
-                {TAB_LABELS[e.edition] ?? e.name}
-                <span className="sr-only">, {e.name}</span>
-              </button>
-            );
-          })}
+      {/* With turning points: above the editions on a narrower screen, beside them from xl. It comes
+          first in the page, so a screen reader meets why the moments mattered before the report. */}
+      <div className={loaded.analyst ? "grid gap-6 xl:grid-cols-[minmax(0,48rem)_minmax(0,1fr)] xl:items-start" : undefined}>
+        {loaded.analyst ? (
+          <WhyItMattered
+            notes={loaded.analyst}
+            run={run}
+            headingId="h-recap-why"
+            where="recap"
+            lead="The moments the Writer was given as turning points before it drafted this report: the minute, the theme and why each one mattered."
+            className="xl:col-start-2 xl:row-start-1"
+          />
+        ) : null}
+        <div className="max-w-3xl min-w-0 xl:col-start-1 xl:row-start-1">
+          <div role="tablist" aria-label="Editions" className="relative flex gap-1 overflow-x-auto rounded-lg border border-line bg-surface-2 p-1">
+            {editions.map((e, i) => {
+              const selected = current?.meta.edition === e.edition;
+              return (
+                <button
+                  key={e.edition}
+                  ref={(node) => {
+                    if (node) {
+                      tabRefs.current.set(e.edition, node);
+                    } else {
+                      tabRefs.current.delete(e.edition);
+                    }
+                  }}
+                  type="button"
+                  role="tab"
+                  id={tabId(e.edition)}
+                  aria-selected={selected}
+                  aria-controls={panelId}
+                  tabIndex={selected ? 0 : -1}
+                  onClick={() => select(e.edition, false)}
+                  onKeyDown={(event) => onTabKey(event, i)}
+                  className={cn(
+                    "shrink-0 rounded-md px-3.5 py-1.5 text-sm font-medium transition-colors",
+                    "focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus",
+                    selected ? "bg-surface text-fg shadow-card" : "text-muted hover:text-fg",
+                  )}
+                >
+                  {TAB_LABELS[e.edition] ?? e.name}
+                  <span className="sr-only">, {e.name}</span>
+                </button>
+              );
+            })}
+          </div>
+  
+          <div
+            role="tabpanel"
+            id={panelId}
+            aria-labelledby={current ? tabId(current.meta.edition) : undefined}
+            tabIndex={0}
+            className="mt-4 rounded-xl border border-line bg-surface p-5 shadow-card focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus sm:p-7"
+          >
+            {current ? (
+              <>
+                <div className="mb-4 flex flex-wrap items-center gap-2">
+                  <Badge tone="neutral">{current.meta.name}</Badge>
+                  <Badge tone={loaded.manifest.attested_scope.attested.includes(current.meta.file) ? "success" : "neutral"}>
+                    {loaded.manifest.attested_scope.attested.includes(current.meta.file) ? "Attested by the officer" : "Gate-cleared only"}
+                  </Badge>
+                </div>
+                <p className="sr-only">Each sentence below is a link that opens why it says what it says.</p>
+                <p lang={current.data.language} className="prose-reading">
+                  {current.data.sentences.map((sentence, index) => (
+                    <span key={sentence.sentence_id}>
+                      <a
+                        ref={(node) => {
+                          if (node) {
+                            sentenceRefs.current.set(index, node);
+                          } else {
+                            sentenceRefs.current.delete(index);
+                          }
+                        }}
+                        href={hrefFor("recap", run.run_id, { s: sentence.sentence_id })}
+                        aria-haspopup="dialog"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          opener.current = event.currentTarget;
+                          setOpen({ edition: current.meta.edition, index });
+                        }}
+                        className={cn(
+                          "rounded-sm text-fg decoration-line-strong decoration-dotted decoration-1 underline-offset-[6px] transition-colors",
+                          "hover:bg-accent-bg hover:decoration-primary hover:decoration-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
+                        )}
+                      >
+                        {sentence.text}
+                      </a>{" "}
+                    </span>
+                  ))}
+                </p>
+                <p className="mt-5 border-t border-line pt-4 text-xs leading-5 text-muted">
+                  Choose any sentence to see the events it cites, its claims, the gate verdicts and who answers for it.
+                </p>
+              </>
+            ) : (
+              <p className="text-sm text-muted">This run lists no edition that could be loaded, so there is nothing to read.</p>
+            )}
+          </div>
+          {current ? <Listen run={run} manifest={loaded.manifest} edition={current.meta.edition} active={active} /> : null}
         </div>
-
-        <div
-          role="tabpanel"
-          id={panelId}
-          aria-labelledby={current ? tabId(current.meta.edition) : undefined}
-          tabIndex={0}
-          className="mt-4 rounded-xl border border-line bg-surface p-5 shadow-card focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus sm:p-7"
-        >
-          {current ? (
-            <>
-              <div className="mb-4 flex flex-wrap items-center gap-2">
-                <Badge tone="neutral">{current.meta.name}</Badge>
-                <Badge tone={loaded.manifest.attested_scope.attested.includes(current.meta.file) ? "success" : "neutral"}>
-                  {loaded.manifest.attested_scope.attested.includes(current.meta.file) ? "Attested by the officer" : "Gate-cleared only"}
-                </Badge>
-              </div>
-              <p className="sr-only">Each sentence below is a link that opens why it says what it says.</p>
-              <p lang={current.data.language} className="prose-reading">
-                {current.data.sentences.map((sentence, index) => (
-                  <span key={sentence.sentence_id}>
-                    <a
-                      ref={(node) => {
-                        if (node) {
-                          sentenceRefs.current.set(index, node);
-                        } else {
-                          sentenceRefs.current.delete(index);
-                        }
-                      }}
-                      href={hrefFor("recap", run.run_id, { s: sentence.sentence_id })}
-                      aria-haspopup="dialog"
-                      onClick={(event) => {
-                        event.preventDefault();
-                        opener.current = event.currentTarget;
-                        setOpen({ edition: current.meta.edition, index });
-                      }}
-                      className={cn(
-                        "rounded-sm text-fg decoration-line-strong decoration-dotted decoration-1 underline-offset-[6px] transition-colors",
-                        "hover:bg-accent-bg hover:decoration-primary hover:decoration-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
-                      )}
-                    >
-                      {sentence.text}
-                    </a>{" "}
-                  </span>
-                ))}
-              </p>
-              <p className="mt-5 border-t border-line pt-4 text-xs leading-5 text-muted">
-                Choose any sentence to see the events it cites, its claims, the gate verdicts and who answers for it.
-              </p>
-            </>
-          ) : (
-            <p className="text-sm text-muted">This run lists no edition that could be loaded, so there is nothing to read.</p>
-          )}
-        </div>
-        {current ? <Listen run={run} manifest={loaded.manifest} edition={current.meta.edition} active={active} /> : null}
       </div>
 
       <Dialog

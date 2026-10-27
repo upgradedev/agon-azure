@@ -15,7 +15,10 @@ import {
   DESTINATION_LABELS,
   OUTBOX_LABEL,
   PREVIEW_LABEL,
+  LIVE_RUNS_SENTENCE,
   aiWritten,
+  analystByline,
+  approvalDay,
   analystPicks,
   analystSource,
   analystSummary,
@@ -29,8 +32,10 @@ import {
   flagGroups,
   isApproved,
   lastStep,
+  liveRunsLine,
   pickAuthorWords,
   picksCited,
+  siteStatus,
   stateAt,
   validateDestinations,
   validateIndex,
@@ -505,6 +510,21 @@ describe("the Analyst's turning points", () => {
     );
   });
 
+  it("labels Why it mattered by who wrote the picks and where they are sealed", async () => {
+    const data = await loadRunsData(diskFetch);
+    const loaded = data.runs[DEFAULT];
+    const notes = notesOf(loaded.analyst);
+    expect(analystByline(notes, loaded.run)).toBe(
+      "AI-written by the Microsoft Foundry agent agon-analyst:2, sealed in card.json in bundle 0e16414b71d7.",
+    );
+    const fallback: AnalystNotes = { ...notes, picks: notes.picks.map((p) => ({ ...p, author: "template" as const })) };
+    expect(analystByline(fallback, loaded.run)).toBe("Chosen by code, not written by a model, sealed in card.json in bundle 0e16414b71d7.");
+    const mixed: AnalystNotes = { ...notes, agent: null, picks: [fallback.picks[0], ...notes.picks.slice(1)] };
+    expect(analystByline(mixed, loaded.run)).toBe(
+      "Each pick says whether a Microsoft Foundry agent wrote it or code chose it; all are sealed in card.json in bundle 0e16414b71d7.",
+    );
+  });
+
   it("gives the Why drawer the picks whose event a sentence cites, and which club each id in their why is", async () => {
     const data = await loadRunsData(diskFetch);
     const loaded = data.runs[DEFAULT];
@@ -585,5 +605,41 @@ describe("flags, under the step that raised them", () => {
     expect(validateRun(noName)).toEqual([problem]);
     const notList = { ...clone(committedRun("run-0e16414b71d7")), check_flags: { s7: "x" } };
     expect(validateRun(notList)).toEqual([problem]);
+  });
+});
+
+/* The first screen: the status line names the run the site opens on, and the Match Centre says
+   where live runs start instead of offering a switch that could never be turned on. */
+describe("the status line and the live-runs line", () => {
+  const committedRun = (runId: string): Run => readJson<Run>(join(WEB, "runs", `${runId}.json`));
+
+  /* approval.approved_at (15:46:03) is when the intake recorded the decision; the officer approved
+     in Teams at 15:45:28 (README). Lines that name Teams therefore name the day, not the minute. */
+  it("says the default run was approved in Microsoft Teams and published, on the day its own record names", () => {
+    const run = committedRun("run-0e16414b71d7");
+    expect(run.approval.approved_at).toBe("2026-10-27T15:46:03Z");
+    expect(approvalDay(run)).toBe("2026-10-27");
+    expect(siteStatus(run)).toEqual({
+      text: "This site opens on a recorded newsroom run, approved in Microsoft Teams on 2026-10-27 and published.",
+      approved: true,
+    });
+    expect(liveRunsLine(run)).toBe(`${LIVE_RUNS_SENTENCE} Blow full time replays a recorded run approved that way on 2026-10-27.`);
+    expect(siteStatus(run).text).not.toContain("UTC");
+  });
+
+  it("never says approved for the sample or for an approval that names another hash", () => {
+    const sample = committedRun("sample-s1");
+    expect(approvalDay(sample)).toBeNull();
+    expect(siteStatus(sample)).toEqual({
+      text: "This site opens on a hand-written sample run, not produced by the pipeline and not approved.",
+      approved: false,
+    });
+    expect(liveRunsLine(sample)).toBe(`${LIVE_RUNS_SENTENCE} Blow full time shows a hand-written sample run instead.`);
+    const other = clone(committedRun("run-0e16414b71d7"));
+    other.approval.approved_bundle_sha256 = "0".repeat(64);
+    expect(approvalDay(other)).toBeNull();
+    expect(siteStatus(other)).toEqual({ text: "This site opens on a recorded newsroom run that is not approved.", approved: false });
+    expect(liveRunsLine(other)).toBe(`${LIVE_RUNS_SENTENCE} Blow full time replays a recorded run.`);
+    expect(liveRunsLine(null)).toBe(`${LIVE_RUNS_SENTENCE} Blow full time replays a recorded run.`);
   });
 });
