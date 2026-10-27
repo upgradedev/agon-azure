@@ -1,13 +1,16 @@
 """Azure AI Speech text to speech behind `SpeechPort`, standard library HTTP only.
 
 The REST endpoint returns audio but no word-boundary events, so `word_timings` is None and the
-captions carry sentence text without timings; word timings need the Speech SDK and are a later
-step. The voices below are standard neural voices that are a safe default; the spec wants
-DragonHD voices for EN, ES and FR, whose exact names are confirmed at spike S4 and then set
-through `AGON_SPEECH_VOICES` (JSON, language to voice) without a code change.
+captions carry sentence text without timings; word timings need the Speech SDK and are not built.
+The voices below are standard neural voices, and the deployed fleet job uses them: each recorded
+run's manifest names them under "speech". The spec wants DragonHD voices for EN, ES and FR; they
+are not configured, and `AGON_SPEECH_VOICES` (JSON, language to voice) would set them without a
+code change.
 
-Authentication is injected (`auth_header`), because the Entra header form for Speech REST is
-UNVERIFIED for our resource until spike S4.
+Authentication is injected (`auth_header`). The deployed fleet job passes the Entra form from
+`agon.fleet.azure_ports.speech_auth_header`, and it has worked against our resource since
+2026-10-19: every recorded run in web/runs carries MP3 audio for all five editions
+(web/runs/run-*/audio-*.mp3) and its card has no `audio_unavailable` flag.
 """
 
 from __future__ import annotations

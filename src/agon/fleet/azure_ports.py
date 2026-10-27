@@ -187,8 +187,10 @@ def token_getter(credential: Any, scope: str) -> Callable[[], str]:
 
 def speech_auth_header(credential: Any, resource_id: str) -> Callable[[], str]:
     """Speech REST with Microsoft Entra ID: ``Bearer aad#<resource id>#<token>`` (learn.microsoft.com,
-    rest-text-to-speech, "Use Microsoft Entra authentication", read 2026-10-19). Not yet exercised
-    against our resource (spike S4); a failure only leaves captions without audio."""
+    rest-text-to-speech, "Use Microsoft Entra authentication", read 2026-10-19). The deployed fleet
+    job has used it against our resource since 2026-10-19: every recorded run in web/runs carries MP3
+    audio for all five editions (web/runs/run-*/audio-*.mp3). A failure only leaves captions without
+    audio."""
     if not resource_id.startswith("/subscriptions/"):
         raise ValueError("the Speech resource id is an ARM id starting with /subscriptions/")
     get = token_getter(credential, COGNITIVE_SCOPE)

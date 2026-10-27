@@ -40,7 +40,9 @@ correctly rounded in integer software, rather than the platform libm, whose last
 between Linux and Windows. Distances use `math.isqrt`. The test
 `test_interpret_output_hash_is_pinned` pins the sha256 of the full output for seed 1, computed on
 Windows with Python 3.11; the CI test job and the `mcp` workflow recompute it on ubuntu and
-windows with Python 3.12 (not yet run).
+windows with Python 3.12, green on `main` (for example
+https://github.com/upgradedev/agon-azure/actions/runs/39393568882, jobs `interpret (ubuntu-latest)`
+and `interpret (windows-latest)`).
 
 ## The frozen model
 
@@ -65,8 +67,8 @@ more than two terms is `math.fsum` (the builtin `sum` over floats changed algori
 3.12), and the rows are visited in one fixed key order. A refit on another OS or Python version is
 designed to produce the same bytes. The `mcp` workflow checks that with `--check` on ubuntu and
 windows under Python 3.12, after a negative control (`--seeds 1-3 --check` must report a
-mismatch); that workflow has not run yet. Locally, on Windows with Python 3.11, `--check` on seeds
-1 to 500 reports OK and `--seeds 1-3 --check` exits 1 with a mismatch.
+mismatch); both steps pass on ubuntu and windows in the run above. Locally, on Windows with
+Python 3.11, `--check` on seeds 1 to 500 reports OK and `--seeds 1-3 --check` exits 1 with a mismatch.
 
 ## Each quantity
 
