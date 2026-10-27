@@ -8,6 +8,11 @@
   job executions read from Azure, its sealed manifest on the public feed or
   the operator's drill that started it. The bundle hash it names is held to
   the committed copy of that manifest, byte for byte.
+
+  That recorded run must be the run every other screen opens by default, the
+  first in web/runs/index.json, and the agents, interpret step, verdicts and
+  flags the status lines name must be the ones its sealed files record, so
+  this view can never describe another run than the rest of the site.
 */
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
@@ -21,11 +26,13 @@ import {
   FEED_URL,
   PIPELINE,
   RECORDED_BUNDLE,
+  RECORDED_DATE,
   RECORDED_EXECUTIONS,
+  RECORDED_RUN_ID,
   evidenceHref,
   type EvidenceItem,
 } from "../src/lib/evidence";
-import { REPO } from "./helpers";
+import { REPO, WEB, readJson } from "./helpers";
 
 function fileAt(path: string): string {
   return execFileSync("git", ["show", `${EVIDENCE_SHA}:${path}`], { cwd: REPO, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 });
@@ -81,6 +88,60 @@ describe("evidence links", () => {
       );
       expect(cites, node.id).toBe(true);
     }
+  });
+
+  it("describe the run the other screens open by default: the first in web/runs/index.json", () => {
+    const first = readJson<{ runs: { run_id: string; file: string; provenance: string }[] }>(join(WEB, "runs", "index.json")).runs[0];
+    expect(first.run_id).toBe(RECORDED_RUN_ID);
+    expect(first.provenance).toBe("pipeline");
+    const run = readJson<{ run_id: string; label: string; bundle: { sha256: string }; approval: { approved_bundle_sha256: string; channel: string } }>(
+      join(WEB, "runs", first.file),
+    );
+    expect(run.run_id).toBe(RECORDED_RUN_ID);
+    expect(run.bundle.sha256).toBe(RECORDED_BUNDLE);
+    expect(run.approval.approved_bundle_sha256).toBe(RECORDED_BUNDLE);
+    expect(run.approval.channel).toBe("teams");
+    expect(run.label.startsWith(`Recorded run, ${RECORDED_DATE}, `)).toBe(true);
+    const executions = JSON.parse(fileAt(RECORDED_EXECUTIONS)) as {
+      run_id: string;
+      recorded_run: string;
+      bundle_sha256: string;
+      executions: { job: string; start: string; end: string }[];
+    };
+    expect(executions.recorded_run).toBe(RECORDED_RUN_ID);
+    expect(executions.bundle_sha256).toBe(RECORDED_BUNDLE);
+    expect(executions.run_id.endsWith(`-${DRILL_RUN_ID}`)).toBe(true);
+    for (const row of executions.executions) {
+      expect(row.start.startsWith(RECORDED_DATE), row.job).toBe(true);
+    }
+    // The worker ended at the pause and a new process resumed: two fleet executions, one after the other.
+    const fleet = executions.executions.filter((row) => row.job === "job-agon-fleet");
+    expect(fleet.length).toBe(2);
+    expect(Date.parse(fleet[1].start)).toBeGreaterThan(Date.parse(fleet[0].end));
+    expect(executions.executions.filter((row) => row.job === "job-agon-intake").length).toBe(1);
+    expect(executions.executions.filter((row) => row.job === "job-agon-publisher").length).toBe(1);
+  });
+
+  it("name only what the recorded run's sealed files record", () => {
+    const dir = join(WEB, "runs", RECORDED_RUN_ID);
+    const manifest = readJson<{ deployment_ids: Record<string, string>; gate_verdicts: Record<string, string>; artifacts: Record<string, { sha256: string }> }>(
+      join(dir, "manifest.json"),
+    );
+    const node = (id: string) => PIPELINE.find((n) => n.id === id)?.statusText ?? "";
+    for (const key of ["agent.analyst", "agent.writer", "agent.localiser_editor", "translator"]) {
+      expect(node("foundry"), key).toContain(manifest.deployment_ids[key]);
+    }
+    expect(node("interpret")).toContain(`its sealed manifest names the interpret step ${manifest.deployment_ids.interpret},`);
+    expect(manifest.gate_verdicts).toEqual({ factgate: "pass", factgate_lang: "pass", rights: "pass" });
+    const cardBytes = readFileSync(join(dir, "card.json"));
+    expect(createHash("sha256").update(cardBytes).digest("hex")).toBe(manifest.artifacts["card.json"].sha256);
+    const card = JSON.parse(cardBytes.toString("utf8")) as { flags: { by: string; code: string; sentence_id?: string }[] };
+    expect(card.flags.filter((flag) => flag.by === "desk_editor")).toEqual([]);
+    const onSentences = card.flags.filter((flag) => flag.sentence_id);
+    expect(onSentences.map((flag) => [flag.by, flag.sentence_id])).toEqual([["factgate", "s7"]]);
+    expect(card.flags.some((flag) => flag.by === "factgate" && flag.code === "factgate_retry")).toBe(true);
+    expect(node("desk")).toContain("the one sentence flag there, on s7, was raised by the Fact Gate");
+    expect(node("factgate")).toContain("sent the draft back to the Writer once and flagged s7");
   });
 
   it("never claim what is not deployed (wording the readiness audit of 2026-10-20 found)", () => {

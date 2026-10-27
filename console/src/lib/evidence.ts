@@ -11,19 +11,27 @@
   tests/evidence.test.ts reads every file at EVIDENCE_SHA with git and fails
   when a cited line no longer holds its snippet, so a link can never point at
   the wrong line. The status line of each node says what exists today: "Ran
-  in Azure for the recorded run" only where the recorded run of 2026-10-19
-  shows it (evidence/run-c8a19020c98a.executions.json, read from Azure with
-  az containerapp job execution list, and the sealed manifest on the feed).
+  in Azure for the recorded run" only where the recorded run shows it (its
+  job executions under evidence/, read from Azure with az containerapp job
+  execution list, and its sealed manifest on the feed).
+
+  The recorded run is the run every other screen opens by default: the first
+  run in web/runs/index.json, today run-0e16414b71d7 of 2026-10-27. The same
+  test fails when that first run and the constants below disagree, so this
+  view cannot describe another run than the Newsroom, Approve, Recap, Verify
+  and Media office screens.
 */
 import { REPO_URL } from "./commit";
 
-export const EVIDENCE_SHA = "81b77ce634e772a99936cd09c876dea84051e9e8";
+export const EVIDENCE_SHA = "19248db89efa9bc4ac521a4a25495ae973a2d97f";
 
 /* The public feed container the Publisher writes, and the recorded run's bundle on it. */
 export const FEED_URL = "https://stagonnnk4re3nvfz7o.blob.core.windows.net/feed/";
-export const RECORDED_BUNDLE = "c8a19020c98a8de7dab58475bc0b2466129d3de771e30fd8ec519ab2716382dd";
-export const RECORDED_EXECUTIONS = "evidence/run-c8a19020c98a.executions.json";
-export const DRILL_RUN_ID = 39326468664;
+export const RECORDED_BUNDLE = "0e16414b71d73a7c6a014f0fb5223db18dacfc64fa487fb0a90a09d3bbca1e5f";
+export const RECORDED_RUN_ID = `run-${RECORDED_BUNDLE.slice(0, 12)}`;
+export const RECORDED_DATE = "2026-10-27";
+export const RECORDED_EXECUTIONS = `evidence/${RECORDED_RUN_ID}.executions.json`;
+export const DRILL_RUN_ID = 40533087300;
 
 export type EvidenceItem =
   | { kind: "file"; label: string; path: string; line: number; snippet: string }
@@ -72,8 +80,15 @@ export function evidenceText(item: EvidenceItem): string {
 
 /* The recorded run's own evidence, cited by every node that ran in Azure for it. */
 const FEED_MANIFEST: EvidenceItem = { kind: "feed", label: "The recorded run's sealed manifest, as the Publisher published it", path: `${RECORDED_BUNDLE}/manifest.json` };
-const DRILL_RUN: EvidenceItem = { kind: "run", label: "The operator's drill that started the recorded run", runId: DRILL_RUN_ID, workflow: "fleet-run", commit: "e852b08" };
+const DRILL_RUN: EvidenceItem = { kind: "run", label: "The operator's drill that started the recorded run", runId: DRILL_RUN_ID, workflow: "fleet-run", commit: "42bd5bc" };
 const executions = (line: number, snippet: string, label: string): EvidenceItem => ({ kind: "file", label, path: RECORDED_EXECUTIONS, line, snippet });
+const SEALED_CARD: EvidenceItem = {
+  kind: "file",
+  label: "The recorded run's sealed approval card: its one sentence flag is the Fact Gate's",
+  path: `web/runs/${RECORDED_RUN_ID}/card.json`,
+  line: 1,
+  snippet: '"by":"factgate","code":"factgate_template_line"',
+};
 const GOVERNANCE_RUN: EvidenceItem = { kind: "run", label: "Governance tests on main", runId: 39274209462, workflow: "governance", commit: "96ee47a" };
 
 export const PIPELINE: PipelineNode[] = [
@@ -126,9 +141,9 @@ export const PIPELINE: PipelineNode[] = [
     id: "interpret",
     stage: "Read",
     title: "Match model",
-    status: "live",
+    status: "azure",
     statusText:
-      "Live on this site: the Match Centre's numbers are computed by it from the served event logs when the site is built. The deployed fleet calls it too: the runs published on 2026-10-20 and 2026-10-27 name agon.interpret/7ab5e12ab86e in their manifests, while the 2026-10-19 run's manifest names a stand-in interpret step, fleet-local-standin/1, that ranks only goals and red cards.",
+      "Ran in Azure for the recorded run: its sealed manifest names the interpret step agon.interpret/7ab5e12ab86e, as do the manifests of the other recorded runs of 2026-10-20 and 2026-10-27, while the 2026-10-19 run's manifest names a stand-in interpret step, fleet-local-standin/1, that ranks only goals and red cards. Also live on this site: the Match Centre's numbers are computed by it from the served event logs when the site is built.",
     summary:
       "Plain code turns the log into xG, xT, PPDA, control vs chaos and win probability, so the writers can cite numbers instead of guessing them.",
     evidence: [
@@ -144,7 +159,7 @@ export const PIPELINE: PipelineNode[] = [
     title: "Microsoft Foundry agents",
     status: "azure",
     statusText:
-      "Ran in Azure for the recorded run: its sealed manifest names the Foundry agents agon-analyst:1, agon-writer:1 and agon-localiser-editor:1, and the translator azure-translator-nmt/text-v3.0.",
+      "Ran in Azure for the recorded run: its sealed manifest names the Foundry agents agon-analyst:2, agon-writer:1 and agon-localiser-editor:1, and the translator azure-translator-nmt/text-v3.0.",
     summary:
       "A Foundry analyst agent picks the turning points and a writer agent writes the headline report. Azure AI Translator translates it into Greek, Spanish and French, and a Foundry localiser-editor agent post-edits each translation. The easy-read edition is made by rules in code: a sentence over 20 words, with a listed idiom, a semicolon or brackets becomes a template line. Only the hand-written sample on this site was not written this way.",
     evidence: [
@@ -162,12 +177,13 @@ export const PIPELINE: PipelineNode[] = [
     title: "Fact Gate",
     status: "azure",
     statusText:
-      "Ran in Azure for the recorded run: its sealed manifest records pass for the headline report and for the other editions. Its verdicts on the hand-written sample are real too.",
+      "Ran in Azure for the recorded run: its sealed manifest records pass for the headline report and for the other editions. On the way it sent the draft back to the Writer once and flagged s7 for the officer, as the sealed card records. Its verdicts on the hand-written sample are real too.",
     summary:
       "Deterministic code recomputes every number, name and minute a sentence claims from the log, in every language, and every number written in digits must match a claim. Numbers spelled out in words are out of scope by design. On the sample it struck a sentence that said 2 shots on target when the log says 4.",
     evidence: [
       { kind: "file", label: "The gate", path: "src/agon/governance/factgate.py", line: 320, snippet: "def run_factgate(" },
       FEED_MANIFEST,
+      SEALED_CARD,
       GOVERNANCE_RUN,
     ],
   },
@@ -189,13 +205,15 @@ export const PIPELINE: PipelineNode[] = [
     stage: "Check",
     title: "Desk Editor",
     status: "azure",
-    statusText: "Ran in Azure for the recorded run as a step of the fleet job; it added no flag to that run's card.",
+    statusText:
+      "Ran in Azure for the recorded run as a step of the fleet job. It added no flag of its own to that run's card: the one sentence flag there, on s7, was raised by the Fact Gate, as the sealed card records.",
     summary:
       "Challenges claims code cannot check, such as which moment turned the match, and adds flags the officer reads on the approval card; it never removes a flag and never changes which sentences the officer must tick.",
     evidence: [
       { kind: "file", label: "The desk editor step", path: "src/agon/fleet/workflow.py", line: 141, snippet: "class DeskEditorExecutor(" },
       { kind: "file", label: "What it may do: add flags, never clear one", path: "src/agon/fleet/steps.py", line: 373, snippet: "async def desk_editor(" },
       executions(15, "fleet: ran W-fulltime to the approval pause", "The fleet job's execution for the recorded run, read from Azure"),
+      SEALED_CARD,
     ],
   },
   {

@@ -19,7 +19,9 @@ import {
   FEED_URL,
   PIPELINE,
   RECORDED_BUNDLE,
+  RECORDED_DATE,
   RECORDED_EXECUTIONS,
+  RECORDED_RUN_ID,
   STATUS_WORDS,
   type NodeStatus,
   type PipelineNode,
@@ -157,7 +159,8 @@ export function HowItWorks({ active }: { active: boolean }) {
         </CardHeader>
         <CardBody className="space-y-2 text-sm leading-6 text-muted">
           <p>
-            "{STATUS_WORDS.azure}" means the step ran in the deployed Azure resources for the recorded run of 2026-10-19: an operator started it
+            "{STATUS_WORDS.azure}" means the step ran in the deployed Azure resources for the recorded run of {RECORDED_DATE},{" "}
+            <span className="font-mono">{RECORDED_RUN_ID}</span>, the run this site opens by default: an operator started it
             with <a href={`${REPO_URL}/actions/runs/${DRILL_RUN_ID}`}>drill run {DRILL_RUN_ID}</a>, the Container Apps job executions, read from
             Azure, are in{" "}
             <a href={`${REPO_URL}/blob/${EVIDENCE_SHA}/${RECORDED_EXECUTIONS}`} className="font-mono break-all">
