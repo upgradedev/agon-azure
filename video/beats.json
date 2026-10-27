@@ -42,8 +42,8 @@
       "visual": [
         {
           "source": "web:#/",
-          "viewport": "phone",
-          "actions": "Match Centre at 375 px on the recorded run's match (its seed picked in Match setup): the scoreboard and replay at 60x, then the win probability chart and team stats that agon.interpret computes (lane D4)",
+          "viewport": "desktop",
+          "actions": "Match Centre at 1920 px on the recorded run's match (its seed picked in Match setup): the scoreboard and replay at 60x, then the win probability chart and team stats that agon.interpret computes (lane D4)",
           "facts": [
             {
               "text": "Synthetic match, .*seed {seed}\\."
