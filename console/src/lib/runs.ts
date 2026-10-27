@@ -683,14 +683,15 @@ export function pickAuthorWords(pick: AnalystPick): string {
 }
 
 /* What the Analyst did, in the order agon.fleet.workflow runs it: code computes the candidate
-   moments (interpret), the agent picks among them (analyst), and the picks go into the Writer's
-   brief (agon.fleet.templates.writer_brief). */
+   moments (interpret), the agent reads them and picks events (analyst; code checks each pick is
+   in the event log, not that it is a candidate), and the picks go into the Writer's brief
+   (agon.fleet.templates.writer_brief). */
 export function analystSummary(notes: AnalystNotes): string {
   const n = notes.picks.length;
   const points = `${n} turning point${n === 1 ? "" : "s"}`;
   if (aiWritten(notes)) {
     const by = notes.interpretSource ? ` (${notes.interpretSource})` : "";
-    return `Before the Writer started, picked ${points} from the candidate moments that code${by} computed from the event log, and wrote a theme and why each one matters. The picks went to the Writer with the match facts.`;
+    return `Before the Writer started, read the candidate moments that code${by} computed from the event log, picked ${points}, and wrote a theme and why each one matters. The picks went to the Writer with the match facts.`;
   }
   return `The agent's answer was not used, so before the Writer started, code took ${points} from the top of the candidate list. They went to the Writer with the match facts.`;
 }

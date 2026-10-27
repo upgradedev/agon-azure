@@ -479,8 +479,8 @@ describe("the Analyst's turning points", () => {
     const notes = notesOf(loaded.analyst);
     expect(aiWritten(notes)).toBe(true);
     expect(analystSummary(notes)).toBe(
-      "Before the Writer started, picked 4 turning points from the candidate moments that code (agon.interpret/7ab5e12ab86e) " +
-        "computed from the event log, and wrote a theme and why each one matters. The picks went to the Writer with the match facts.",
+      "Before the Writer started, read the candidate moments that code (agon.interpret/7ab5e12ab86e) computed from the event log, " +
+        "picked 4 turning points, and wrote a theme and why each one matters. The picks went to the Writer with the match facts.",
     );
     expect(analystSource(notes, loaded.run)).toBe(
       "Written by the Microsoft Foundry agent agon-analyst:2. Code checked that each pick is an event in the log and read its minute " +
