@@ -12,6 +12,7 @@
   list stays the one data-pick list in the page.
 */
 import { Badge } from "./ui/badge";
+import { KeepDates } from "./ui/keep-dates";
 import { THEME_WORDS, aiWritten, analystByline, analystSource, analystSummary, clubKey, pickAuthorWords } from "../lib/runs";
 import { cn } from "../lib/cn";
 import type { AnalystNotes, AnalystPick, Run } from "../lib/types";
@@ -67,7 +68,9 @@ export function WhyItMattered({
         </Heading>
         {allAi ? <Badge tone="info">AI-written</Badge> : null}
       </div>
-      <p className="mt-1 text-xs leading-5 text-muted">{lead}</p>
+      <p className="mt-1 text-xs leading-5 text-muted">
+        <KeepDates text={lead} />
+      </p>
       <ol className="mt-3 space-y-2.5">
         {notes.picks.map((pick, i) => {
           const seek = seekFor ? seekFor(pick) : null;

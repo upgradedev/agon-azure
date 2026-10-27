@@ -52,8 +52,9 @@ import {
   type Timeline,
 } from "../lib/core";
 import { browserFetchText, loadMatch, resolveManifest, type ResolvedManifest } from "../lib/loader";
-import { aiWritten, liveRunsLine, runForBlow } from "../lib/runs";
+import { aiWritten, approvalDay, liveRunsLine, runForBlow } from "../lib/runs";
 import { WhyItMattered } from "../components/turning-points";
+import { KeepDates } from "../components/ui/keep-dates";
 import { GLOSSARY, GLOSSARY_ORDER } from "../lib/glossary";
 import { cn } from "../lib/cn";
 import { useReducedMotion } from "../hooks/stores";
@@ -498,11 +499,12 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
   const blowRun = runs ? runForBlow(runs, seed) : null;
   const defaultRun = runs ? runs.runs[runs.defaultRunId] ?? null : null;
 
-  let blowHint = "Starts the newsroom run you follow on the next screens. Live agents are not connected, so it opens the recorded run, labelled on every screen.";
+  /* Which run Blow full time opens; the live-runs line under it says why that run is not live. */
+  const which = blowRun?.run.provenance === "design_preview" ? "the hand-written sample" : "the recorded run";
+  let blowHint = "Opens the newsroom run you follow on the next screens, labelled on every screen.";
   if (seed !== null && blowRun && blowRun.run.seed === seed) {
-    blowHint = `Opens the newsroom run for seed ${seed}. Live agents are not connected, so this is the recorded run, labelled on every screen.`;
+    blowHint = `Opens ${which} for seed ${seed}, labelled on every screen.`;
   } else if (seed !== null && blowRun) {
-    const which = blowRun.run.provenance === "design_preview" ? "the hand-written sample" : "the recorded run";
     blowHint = `There is no run for seed ${seed} yet, so the newsroom shows ${which} for seed ${blowRun.run.seed} and says so on every screen.`;
   }
 
@@ -658,9 +660,9 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
         title="Replay a fictional match, then blow the whistle"
         lead={
           <span className="text-fg" data-value-statement="">
-            Agon writes the club&apos;s match report for fans from the event log, in four languages and easy-read, with Microsoft Foundry agents
-            explaining why the key moments mattered; code checks every claimed number, name and minute, and nothing is published until the media
-            officer approves it in Microsoft Teams.
+            Agon writes the club&apos;s match report for fans from the event log, in four languages and easy-read, with Microsoft Foundry agents{" "}
+            {defaultRun?.analyst ? <a href="#h-moments">explaining why the key moments mattered</a> : "explaining why the key moments mattered"}; code
+            checks every claimed number, name and minute, and nothing is published until the media officer approves it in Microsoft Teams.
           </span>
         }
       />
@@ -827,7 +829,7 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
                   </>
                 ) : null}
               </p>
-              {manifestError || match.status === "error" ? null : (
+              {manifestError || match.status === "error" || kin.status !== "off" ? null : (
                 <details className="-mt-1 text-xs">
                   <summary className="cursor-pointer text-link select-none">Source of the file size</summary>
                   <p className="mt-1 leading-5 text-muted">{TRACKING_SIZE}.</p>
@@ -934,14 +936,26 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
               </div>
 
               <p className="text-xs leading-5 text-muted" data-live-runs="">
-                {liveRunsLine(blowRun?.run ?? defaultRun?.run ?? null)}
+                <KeepDates text={liveRunsLine(blowRun?.run ?? defaultRun?.run ?? null)} />
               </p>
+            </CardBody>
+          </Card>
+
+          <Card aria-labelledby="h-your-view">
+            <CardHeader>
+              <CardTitle id="h-your-view">Your view</CardTitle>
+              <Badge tone="neutral">{mode === "fan" ? "Fan" : "Analyst"}</Badge>
+            </CardHeader>
+            <CardBody>
+              <YourView prefs={prefs} file={file} clubs={clubChoices} />
             </CardBody>
           </Card>
 
           <Card aria-labelledby="h-moments">
             <CardHeader>
-              <CardTitle id="h-moments">Key moments</CardTitle>
+              <CardTitle id="h-moments" className="scroll-mt-20">
+                Key moments
+              </CardTitle>
               <Badge tone="neutral">{ready ? ready.derived.moments.length : 0}</Badge>
             </CardHeader>
             <CardBody>
@@ -951,7 +965,9 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
                   run={whyRun.run}
                   headingId="h-moments-why"
                   where="match-centre"
-                  lead={`${aiWritten(whyNotes) ? "The Analyst agent's picks" : "The turning points the Writer was given"} in the recorded run of this match (${whyRun.run.label}). Choose a minute to move the replay there.`}
+                  lead={`${aiWritten(whyNotes) ? "The Analyst agent's picks" : "The turning points the Writer was given"} in the recorded run of this match${
+                    approvalDay(whyRun.run) ? `, approved on ${approvalDay(whyRun.run)}` : ""
+                  }. Choose a minute to move the replay there.`}
                   seekFor={seekFor}
                   className="mb-4"
                 />
@@ -997,16 +1013,6 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
                   {ready ? "No goals, shots, cards or substitutions are in the loaded event file yet." : "Key moments appear once a match is loaded."}
                 </p>
               )}
-            </CardBody>
-          </Card>
-
-          <Card aria-labelledby="h-your-view">
-            <CardHeader>
-              <CardTitle id="h-your-view">Your view</CardTitle>
-              <Badge tone="neutral">{mode === "fan" ? "Fan" : "Analyst"}</Badge>
-            </CardHeader>
-            <CardBody>
-              <YourView prefs={prefs} file={file} clubs={clubChoices} />
             </CardBody>
           </Card>
         </div>

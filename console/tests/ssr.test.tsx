@@ -75,9 +75,17 @@ describe.each(SOURCES)("prerendered markup, %s", (_name, fetchText, committed) =
 
   it("opens on a status line and a value statement, with no Preview badge and no switch that cannot be turned on", () => {
     expect(html.split("data-site-status").length - 1).toBe(1);
-    expect(html).toContain(decided ? "This site opens on a recorded newsroom run, approved in Microsoft Teams at " : "This site opens on a ");
+    /* The day only (approved_at is the intake's record time, not the minute of the Teams action),
+       kept on one line at 375 px. */
+    expect(html).toContain(decided ? "This site opens on a recorded newsroom run, approved in Microsoft Teams on " : "This site opens on a ");
+    if (decided) {
+      expect(html).toMatch(/approved in Microsoft Teams on <span class="whitespace-nowrap">\d{4}-\d{2}-\d{2}<\/span>/);
+    }
     expect(html).toContain("data-value-statement");
     expect(html).toContain("nothing is published until the media officer approves it in Microsoft Teams.");
+    /* The value statement leads to Key moments, where the turning points sit, only when there are some. */
+    expect(html.includes('<a href="#h-moments">explaining why the key moments mattered</a>')).toBe(picks.length > 0);
+    expect(html).toContain('id="h-moments"');
     expect(html).toContain(LIVE_RUNS_SENTENCE);
     expect(html).not.toContain('role="switch"');
     expect(html).not.toContain("Preview build");

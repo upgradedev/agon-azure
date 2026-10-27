@@ -9,6 +9,7 @@ import { useId, useRef, useState, type ReactNode } from "react";
 import { Info, Menu, Moon, ShieldCheck, Sun } from "lucide-react";
 import { Dialog } from "./ui/dialog";
 import { Tip } from "./ui/tooltip";
+import { KeepDates } from "./ui/keep-dates";
 import { cn } from "../lib/cn";
 import { REPO_URL, STAMPED_LABEL_PREFIX, UNSTAMPED_LABEL } from "../lib/commit";
 import { hrefFor, type ViewKey } from "../lib/router";
@@ -205,7 +206,7 @@ function StatusLine({ status }: { status: SiteStatus }) {
     <p className="flex items-start gap-1.5 text-xs leading-5 text-fg" data-site-status="">
       <Icon className={cn("mt-0.5 size-3.5 shrink-0", status.approved ? "text-accent" : "text-muted")} aria-hidden="true" />
       <span>
-        {status.text} <a href={hrefFor("verify")}>Verify it in your browser</a>
+        <KeepDates text={status.text} /> <a href={hrefFor("verify")}>Verify it in your browser</a>
       </span>
     </p>
   );

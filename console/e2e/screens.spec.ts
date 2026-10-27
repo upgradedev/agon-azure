@@ -170,7 +170,9 @@ for (const viewport of VIEWPORTS) {
     const why = view.locator('section[data-why="match-centre"]');
     await expect(why).toBeVisible();
     await expect(why.getByText("AI-written", { exact: true })).toBeVisible();
-    await expect(why).toContainText(run.label);
+    /* The lead names the approval day, not the run label (which carries a commit hash). */
+    await expect(why).toContainText(`in the recorded run of this match, approved on ${(run.approval.approved_at ?? "").slice(0, 10)}.`);
+    await expect(why).not.toContainText(run.label);
     const items = why.locator("li[data-why-pick]");
     await expect(items).toHaveCount(sealed.length);
     for (const [i, pick] of sealed.entries()) {
@@ -199,8 +201,25 @@ test("the top bar says what the site opens on and the footer names the stamped c
   const run = await defaultRun(page);
   const status = page.locator("[data-site-status]");
   await expect(status).toBeVisible();
-  await expect(status).toContainText(/^This site opens on a recorded newsroom run, approved in Microsoft Teams at \d{2}:\d{2} UTC on \d{4}-\d{2}-\d{2}/);
-  expect(run.approval.approved_at ?? "").toContain((await status.textContent())?.match(/on (\d{4}-\d{2}-\d{2})/)?.[1] ?? "no date");
+  /* The day of the record, not its minute: approved_at is the intake's record time, after the Teams action. */
+  await expect(status).toContainText(/^This site opens on a recorded newsroom run, approved in Microsoft Teams on \d{4}-\d{2}-\d{2} and published\./);
+  const day = (await status.textContent())?.match(/on (\d{4}-\d{2}-\d{2})/)?.[1] ?? "no date";
+  expect(run.approval.approved_at ?? "").toContain(day);
+  /* On a phone the date stays on one line. */
+  await page.setViewportSize({ width: 375, height: 812 });
+  const date = status.locator("span.whitespace-nowrap", { hasText: day });
+  await expect(date).toHaveText(day);
+  expect(await date.evaluate((el) => el.getClientRects().length), "the date is not split across lines at 375 px").toBe(1);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  /* The value statement leads to Key moments, where the turning points sit, and stays on the Match Centre. */
+  const home = page.locator('[data-view="home"]');
+  await expect(home.locator('section[data-state="ready"]')).toBeVisible({ timeout: 20_000 });
+  await expect(home.locator('section[data-why="match-centre"]')).toBeVisible();
+  const toMoments = home.locator('[data-value-statement] a[href="#h-moments"]');
+  await expect(toMoments).toHaveText("explaining why the key moments mattered");
+  await toMoments.click();
+  await expect(home).toBeVisible();
+  await expect(page.locator("#h-moments")).toBeInViewport();
   await status.getByRole("link", { name: "Verify it in your browser" }).click();
   await expect(page).toHaveURL(/#\/verify$/);
   const sha = (await page.locator("body").getAttribute("data-commit")) ?? "";

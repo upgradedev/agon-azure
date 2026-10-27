@@ -961,16 +961,25 @@ function approvedWhere(run: Run): string {
   return channel === "teams" ? "in Microsoft Teams" : `through ${CHANNEL_WORDS[channel] ?? "an approval channel"}`;
 }
 
+/* The day an approved run was approved, as YYYY-MM-DD, or null. approval.approved_at is the
+   intake's record time, a little after the officer's action in Teams (README: approved in Teams at
+   15:45:28, recorded at 15:46:03), so sentences that name Teams name the day, not that minute. */
+export function approvalDay(run: Run): string | null {
+  const m = /^([0-9]{4}-[0-9]{2}-[0-9]{2})T/.exec(String(run.approval.approved_at ?? ""));
+  return isApproved(run) && m ? m[1] : null;
+}
+
 /* The status line under the top bar: what the site opens on, read from the run it shows by
    default. It names that run, not the run on screen, so it stays true on a deep link to another. */
 export function siteStatus(run: Run): { text: string; approved: boolean } {
   if (run.provenance === "design_preview") {
     return { text: "This site opens on a hand-written sample run, not produced by the pipeline and not approved.", approved: false };
   }
-  if (isApproved(run) && run.approval.approved_at) {
+  const day = approvalDay(run);
+  if (day) {
     const published = run.state === "PUBLISHED" ? " and published" : "";
     return {
-      text: `This site opens on a recorded newsroom run, approved ${approvedWhere(run)} at ${formatUtc(run.approval.approved_at)}${published}.`,
+      text: `This site opens on a recorded newsroom run, approved ${approvedWhere(run)} on ${day}${published}.`,
       approved: true,
     };
   }
@@ -983,8 +992,9 @@ export const LIVE_RUNS_SENTENCE =
   "Live runs are put on the run queue in Azure, not started from this public page, and nothing is published until the media officer approves the sealed report in Microsoft Teams.";
 
 export function liveRunsLine(run: Run | null): string {
-  if (run && isApproved(run) && run.approval.channel === "teams" && run.approval.approved_at) {
-    return `${LIVE_RUNS_SENTENCE} Blow full time replays a recorded run approved that way at ${formatUtc(run.approval.approved_at)}.`;
+  const day = run ? approvalDay(run) : null;
+  if (run && day && run.approval.channel === "teams") {
+    return `${LIVE_RUNS_SENTENCE} Blow full time replays a recorded run approved that way on ${day}.`;
   }
   if (run && run.provenance === "design_preview") {
     return `${LIVE_RUNS_SENTENCE} Blow full time shows a hand-written sample run instead.`;

@@ -18,6 +18,7 @@ import {
   LIVE_RUNS_SENTENCE,
   aiWritten,
   analystByline,
+  approvalDay,
   analystPicks,
   analystSource,
   analystSummary,
@@ -612,17 +613,23 @@ describe("flags, under the step that raised them", () => {
 describe("the status line and the live-runs line", () => {
   const committedRun = (runId: string): Run => readJson<Run>(join(WEB, "runs", `${runId}.json`));
 
-  it("says the default run was approved in Microsoft Teams and published, from its own record", () => {
+  /* approval.approved_at (15:46:03) is when the intake recorded the decision; the officer approved
+     in Teams at 15:45:28 (README). Lines that name Teams therefore name the day, not the minute. */
+  it("says the default run was approved in Microsoft Teams and published, on the day its own record names", () => {
     const run = committedRun("run-0e16414b71d7");
+    expect(run.approval.approved_at).toBe("2026-10-27T15:46:03Z");
+    expect(approvalDay(run)).toBe("2026-10-27");
     expect(siteStatus(run)).toEqual({
-      text: "This site opens on a recorded newsroom run, approved in Microsoft Teams at 15:46 UTC on 2026-10-27 and published.",
+      text: "This site opens on a recorded newsroom run, approved in Microsoft Teams on 2026-10-27 and published.",
       approved: true,
     });
-    expect(liveRunsLine(run)).toBe(`${LIVE_RUNS_SENTENCE} Blow full time replays a recorded run approved that way at 15:46 UTC on 2026-10-27.`);
+    expect(liveRunsLine(run)).toBe(`${LIVE_RUNS_SENTENCE} Blow full time replays a recorded run approved that way on 2026-10-27.`);
+    expect(siteStatus(run).text).not.toContain("UTC");
   });
 
   it("never says approved for the sample or for an approval that names another hash", () => {
     const sample = committedRun("sample-s1");
+    expect(approvalDay(sample)).toBeNull();
     expect(siteStatus(sample)).toEqual({
       text: "This site opens on a hand-written sample run, not produced by the pipeline and not approved.",
       approved: false,
@@ -630,6 +637,7 @@ describe("the status line and the live-runs line", () => {
     expect(liveRunsLine(sample)).toBe(`${LIVE_RUNS_SENTENCE} Blow full time shows a hand-written sample run instead.`);
     const other = clone(committedRun("run-0e16414b71d7"));
     other.approval.approved_bundle_sha256 = "0".repeat(64);
+    expect(approvalDay(other)).toBeNull();
     expect(siteStatus(other)).toEqual({ text: "This site opens on a recorded newsroom run that is not approved.", approved: false });
     expect(liveRunsLine(other)).toBe(`${LIVE_RUNS_SENTENCE} Blow full time replays a recorded run.`);
     expect(liveRunsLine(null)).toBe(`${LIVE_RUNS_SENTENCE} Blow full time replays a recorded run.`);
