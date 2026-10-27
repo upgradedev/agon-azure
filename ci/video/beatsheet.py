@@ -21,6 +21,10 @@ fit 1920 x 930 at the top of the frame, and captions are burned into the
 150-pixel band below it, white on a solid dark band. Captions never sit on top
 of a light page, and the sync gate can read them back from the pixels.
 
+A still part with "animate": true (the opening) is not one screenshot: the capture
+records its page as a clip, every CSS animation rewound to its start at the clip's
+lead, and compose trims and uses it the way it uses a web clip.
+
 Usage: python ci/video/beatsheet.py --check video/beats.json
 """
 
@@ -83,6 +87,7 @@ class Part:
     trim_start: float
     facts: tuple[dict[str, str], ...]
     actions: str
+    animate: bool = False  # a still recorded as a clip, so its CSS animation plays (still parts only)
 
 
 @dataclass(frozen=True)
@@ -205,7 +210,12 @@ def _part(raw: Any, where: str, last: bool) -> Part:
     actions = raw.get("actions", "")
     if not isinstance(actions, str) or any(d in actions for d in DASHES):
         raise BeatSheetError(f"{where}.actions must be text without em or en dashes")
-    return Part(kind, target, seconds, viewport, trim, tuple(clean_facts), actions)
+    animate = raw.get("animate", False)
+    if not isinstance(animate, bool):
+        raise BeatSheetError(f"{where}.animate must be true or false")
+    if animate and kind != "still":
+        raise BeatSheetError(f"{where}: only a still part can be animate (a web or Teams part is a clip already)")
+    return Part(kind, target, seconds, viewport, trim, tuple(clean_facts), actions, animate)
 
 
 def parse_sheet(data: Any) -> Sheet:

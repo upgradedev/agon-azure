@@ -1,0 +1,93 @@
+<!doctype html>
+<!--
+  The opening of the submission video (beat "opening"), 1920 x 930: the picture area
+  above the caption band. Text and CSS animations only: no script, no font file, no
+  image, nothing fetched. ci/video/stills.py checks that, and the beat's part says
+  "animate": true, so console/e2e/video-capture.ts records this page as a clip, every
+  animation rewound to its start at the clip's lead, instead of one screenshot.
+
+  The lines appear in the order the narration says them (about 2.6 words a second
+  from 0.32 s): the title, the problem, then one run as boxes, one after another.
+  Every box is complete by 11.8 s, inside the beat's min_seconds of 12.5. Every box
+  names a part that runs in the deployed pipeline (README.md, "Real, simulated, not
+  deployed"); the code check box says only what the Fact Gate recomputes, the claims.
+  One column, so a line that wraps in another font moves the rest down, never over it.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Agon opening</title>
+<style>
+  html, body { margin: 0; width: 1920px; height: 930px; background: #0b0f14; color: #e6edf3;
+    font-family: "DejaVu Sans", "Segoe UI", Arial, sans-serif; overflow: hidden; }
+  @keyframes rise { from { opacity: 0; transform: translateY(18px); } to { opacity: 1; transform: none; } }
+  @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+  @keyframes grow { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+  .in { animation: rise .7s ease-out both; }
+  .page { position: absolute; left: 110px; right: 110px; top: 44px; }
+  .name { font-size: 100px; font-weight: 700; letter-spacing: .01em; line-height: 1; animation-delay: .1s; }
+  .rule { width: 180px; height: 6px; border-radius: 3px; background: #3fb68b; margin: 20px 0 16px;
+    transform-origin: left; animation: grow .8s ease-out .4s both; }
+  .tag { font-size: 30px; line-height: 1.35; animation-delay: .6s; }
+  .fiction { font-size: 21px; color: #9aa7b4; margin-top: 6px; animation-delay: .9s; }
+  .eyebrow { font-size: 21px; letter-spacing: .08em; text-transform: uppercase; color: #3fb68b; }
+  .problem { margin-top: 40px; }
+  .problem p { margin: 8px 0 0; font-size: 33px; line-height: 1.38; font-weight: 600; }
+  .problem em { font-style: normal; color: #7ee2b8; }
+  .flow { margin-top: 52px; }
+  .lane { display: flex; align-items: stretch; margin-top: 14px; }
+  .box { flex: 1 1 0; min-width: 0; min-height: 140px; background: #111821; border: 1px solid #26303b;
+    border-radius: 14px; padding: 16px 18px; }
+  .box b { display: block; font-size: 24px; line-height: 1.25; }
+  .box span { display: block; font-size: 18px; color: #9aa7b4; margin-top: 10px; line-height: 1.35; }
+  .box.ms b { color: #7ee2b8; }
+  .arrow { flex: 0 0 50px; display: flex; align-items: center; justify-content: center; font-size: 32px;
+    color: #3fb68b; animation: fade .4s ease-out both; }
+  /* The narration: the problem from 0.32 s, "one wrong number" near 4.9 s, "Agon:" near 8.4 s,
+     "code checks" near 10.3 s, "the officer approves" near 11.1 s. */
+  .t-problem { animation-delay: 1.0s; }
+  .t-p1 { animation-delay: 1.2s; }
+  .t-p2 { animation-delay: 4.6s; }
+  .t-flow { animation-delay: 6.8s; }
+  .t-b1 { animation-delay: 7.0s; }
+  .t-a1 { animation-delay: 7.8s; }
+  .t-b2 { animation-delay: 8.2s; }
+  .t-a2 { animation-delay: 9.0s; }
+  .t-b3 { animation-delay: 9.4s; }
+  .t-a3 { animation-delay: 10.2s; }
+  .t-b4 { animation-delay: 10.4s; }
+  .t-a4 { animation-delay: 11.0s; }
+  .t-b5 { animation-delay: 11.2s; }
+  @media (prefers-reduced-motion: reduce) { .in, .rule, .arrow { animation: none; } }
+</style>
+</head>
+<body>
+  <div class="page">
+    <div class="name in">Agon</div>
+    <div class="rule"></div>
+    <div class="tag in">An AI match newsroom that publishes only what the club's media officer approves in Microsoft Teams</div>
+    <div class="fiction in">Fictional clubs and players, synthetic matches</div>
+
+    <div class="problem">
+      <div class="eyebrow in t-problem">The problem</div>
+      <p class="in t-p1">After full time, a small club media office must publish the match report in four languages.</p>
+      <p class="in t-p2"><em>One wrong number</em> goes out under the club's name.</p>
+    </div>
+
+    <div class="flow">
+      <div class="eyebrow in t-flow">One run</div>
+      <div class="lane">
+        <div class="box in t-b1"><b>Synthetic match event log</b><span>a seeded fictional match</span></div>
+        <div class="arrow t-a1">&#8594;</div>
+        <div class="box ms in t-b2"><b>Microsoft Foundry agents write the report</b><span>Microsoft Agent Framework workflow on Azure Container Apps</span></div>
+        <div class="arrow t-a2">&#8594;</div>
+        <div class="box in t-b3"><b>Code checks the claims</b><span>claimed numbers and names, against the event log</span></div>
+        <div class="arrow t-a3">&#8594;</div>
+        <div class="box ms in t-b4"><b>The officer approves the exact hash</b><span>Microsoft Teams card, Azure Logic Apps</span></div>
+        <div class="arrow t-a4">&#8594;</div>
+        <div class="box in t-b5"><b>The Publisher publishes once</b><span>anyone can re-hash it</span></div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

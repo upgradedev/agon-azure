@@ -1,7 +1,13 @@
 """Build the HTML of the video's still beats, from committed files and the live run, and check their facts.
 
-Two stills, each 1920 x 930 (the picture area above the caption band):
+Three stills, each 1920 x 930 (the picture area above the caption band):
 
+  opening       video/stills/opening.html as committed, animated with CSS only: the title,
+                the problem and the flow of one run. Its facts: it names the Microsoft
+                parts the run uses, says the clubs are fictional, claims no check of
+                "every number" (the Fact Gate recomputes the claims and refuses digits no
+                claim carries), uses no superlative, and loads nothing: no script, link,
+                image, font file, import or URL.
   architecture  video/stills/architecture.html as committed: the load-bearing sentence,
                 the components, the live URL and the repo URL. Its facts: both URLs are
                 the sheet's site and the public repo.
@@ -19,7 +25,8 @@ page's data-commit must equal --release-sha.
 For each still it writes <out>/still-<name>.html and <out>/still-<name>.meta.json. A still
 whose input is missing, or whose facts fail, fails the run with --facts enforce (the
 video workflow) and is written as a labelled placeholder with --facts report (the pull
-request rehearsal). console/e2e/video-capture.ts screenshots each HTML to a PNG.
+request rehearsal). console/e2e/video-capture.ts screenshots each HTML to a PNG, or,
+for a still part marked "animate": true in the sheet (the opening), records it as a clip.
 
 Usage:
   python ci/video/stills.py --beats video/beats.json --release-sha SHA --out DIR \
@@ -199,16 +206,44 @@ def executions_html(evidence: dict[str, Any], run: dict[str, Any]) -> str:
 # --------------------------------------------------------------------- builders
 
 
+def _visible_words(text: str) -> str:
+    """The text a viewer reads: comments, the style block and tags removed, entities decoded, spaces collapsed."""
+    return " ".join(html.unescape(re.sub(r"<[^>]+>", " ", re.sub(r"<!--.*?-->|<style.*?</style>", " ", text, flags=re.S))).split())
+
+
 def build_architecture(repo: Path, sheet: bs.Sheet, run: dict[str, Any]) -> tuple[str, list[tuple[str, bool]]]:
     path = repo / "video" / "stills" / "architecture.html"
     if not path.is_file():
         raise StillError(f"{path} is missing")
     text = path.read_text(encoding="utf-8")
-    words = " ".join(re.sub(r"<[^>]+>", " ", re.sub(r"<!--.*?-->|<style.*?</style>", " ", text, flags=re.S)).split())
+    words = _visible_words(text)
     return text, [
         (f"the still shows the live URL {sheet.site}", sheet.site in words),
         (f"the still shows the repo URL {REPO_URL}", REPO_URL in words),
         ("the still states the load-bearing sentence", LOAD_BEARING in words),
+    ]
+
+
+OPENING_PARTS = ("Microsoft Foundry", "Microsoft Agent Framework", "Azure Container Apps", "Microsoft Teams", "Azure Logic Apps")
+SUPERLATIVES = re.compile(r"\b(first|best|novel|revolutionary|sota|state of the art)\b", re.I)
+LOADS = re.compile(r"<\s*(script|link|img|iframe|object|embed|video|audio|source)\b|@import|@font-face|url\s*\(|https?:", re.I)
+
+
+def build_opening(repo: Path, sheet: bs.Sheet, run: dict[str, Any]) -> tuple[str, list[tuple[str, bool]]]:
+    path = repo / "video" / "stills" / "opening.html"
+    if not path.is_file():
+        raise StillError(f"{path} is missing")
+    text = path.read_text(encoding="utf-8")
+    words = _visible_words(text)
+    return text, [
+        ("the still shows the title Agon", re.search(r"\bAgon\b", words) is not None),
+        *((f"the still names {part}", part in words) for part in OPENING_PARTS),
+        ("the still says the clubs are fictional", "fictional clubs" in words.lower()),
+        ("the still claims no check of every number, only of the claims", "every number" not in words.lower()),
+        ("the still uses no superlative", SUPERLATIVES.search(words) is None),
+        ("the still has no em or en dash", not any(d in text for d in bs.DASHES)),
+        ("the still animates with CSS keyframes", "@keyframes" in text),
+        ("the still loads nothing: no script, link, image, font file, import or URL", LOADS.search(text) is None),
     ]
 
 
@@ -226,6 +261,7 @@ def build_executions(repo: Path, sheet: bs.Sheet, run: dict[str, Any]) -> tuple[
 
 
 BUILDERS: dict[str, Callable[[Path, bs.Sheet, dict[str, Any]], tuple[str, list[tuple[str, bool]]]]] = {
+    "opening": build_opening,
     "architecture": build_architecture,
     "executions": build_executions,
 }

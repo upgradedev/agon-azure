@@ -1,7 +1,10 @@
 /*
   Submission video capture, CI only. One clip per web part of video/beats.json,
   recorded from the LIVE site at a stated release SHA, never from a local build,
-  plus one PNG per still that ci/video/stills.py built and checked.
+  plus one PNG per still that ci/video/stills.py built and checked. A still part
+  with "animate": true (the opening) is recorded as a clip instead, at 1920 x 930:
+  every CSS animation is paused at zero while the page settles, the lead mark is
+  taken, then they play, so compose.py trims to the animation's first frame.
 
   Not a console test: the file has no .spec suffix, so the default
   playwright.config.ts never runs it; playwright.video.config.ts does, from
@@ -59,6 +62,7 @@ interface Part {
   seconds?: number;
   actions?: string;
   facts?: Fact[];
+  animate?: boolean;
 }
 
 interface Beat {
@@ -250,14 +254,6 @@ const SCRIPTS: Record<string, Script> = {
     await page.waitForTimeout(1500);
     await glide(page, view.locator(`section[data-run-id="${run.id}"]`).getByText(/Approved hash and published hash/));
   },
-  "data-lab": async (page) => {
-    await go(page, "#/data-lab");
-    const view = page.locator('[data-view="data-lab"]');
-    await expect(view.locator('[aria-labelledby="h-lab-table"]')).toBeVisible({ timeout: 20_000 });
-    await page.waitForTimeout(1500);
-    await glide(page, view.getByText("Where these numbers come from"));
-    await page.waitForTimeout(800);
-  },
 };
 
 /* Every fact of a part, checked on the page, in a served file or in the repository; returns [held, failed]. */
@@ -408,13 +404,59 @@ for (const beat of chosen.filter((b) => webPart(b))) {
 for (const beat of chosen) {
   for (const part of parts(beat).filter((p) => p.source.startsWith("still:"))) {
     const name = part.source.slice("still:".length);
+    const animated = part.animate === true;
     test(`still ${name} for ${beat.id}`, async ({ browser }) => {
       expect(stillsDir, "AGON_VIDEO_STILLS names the folder ci/video/stills.py wrote").not.toBe("");
       const metaPath = join(stillsDir, `still-${name}.meta.json`);
       expect(existsSync(metaPath), `ci/video/stills.py wrote ${metaPath}`).toBe(true);
       const meta = JSON.parse(readFileSync(metaPath, "utf-8")) as StillMeta;
       mkdirSync(clipsDir, { recursive: true });
-      if (!meta.placeholder) {
+      /* An animated still is held, like a web clip, for max_seconds plus a margin after its lead. */
+      const hold = beat.max_seconds + MARGIN_SECONDS;
+      let lead: number | null = null;
+      let recorded: number | null = null;
+      if (!meta.placeholder && animated) {
+        test.setTimeout((hold + 150) * 1000);
+        mkdirSync(join(clipsDir, "raw"), { recursive: true });
+        const context = await browser.newContext({
+          viewport: STILL,
+          deviceScaleFactor: 1,
+          colorScheme: "dark",
+          reducedMotion: "no-preference",
+          recordVideo: { dir: join(clipsDir, "raw"), size: STILL },
+        });
+        const page = await context.newPage();
+        const opened = Date.now();
+        await page.setContent(readFileSync(join(stillsDir, `still-${name}.html`), "utf-8"), { waitUntil: "load" });
+        /* Hold every animation at its start while the page settles, so the frames before the lead show nothing ahead of it. */
+        const animations = await page.evaluate(() => {
+          const all = document.getAnimations();
+          for (const animation of all) {
+            animation.pause();
+            animation.currentTime = 0;
+          }
+          return all.length;
+        });
+        expect(animations, `still ${name} is animate in the sheet, so its page runs CSS animations`).toBeGreaterThan(0);
+        await page.evaluate(async () => {
+          await document.fonts.ready;
+        });
+        await page.waitForTimeout(SETTLE_MS);
+        /* The lead mark: compose.py trims everything before it, and the animations start here. */
+        lead = (Date.now() - opened) / 1000;
+        await page.evaluate(() => {
+          for (const animation of document.getAnimations()) {
+            animation.play();
+          }
+        });
+        await page.waitForTimeout(hold * 1000);
+        recorded = (Date.now() - opened) / 1000;
+        const video = page.video();
+        await context.close();
+        expect(video, "the context recorded a video").not.toBeNull();
+        await video?.saveAs(join(clipsDir, `still-${name}.webm`));
+        await video?.delete();
+      } else if (!meta.placeholder) {
         const context = await browser.newContext({ viewport: STILL, deviceScaleFactor: 1, colorScheme: "dark" });
         const page = await context.newPage();
         await page.setContent(readFileSync(join(stillsDir, `still-${name}.html`), "utf-8"), { waitUntil: "load" });
@@ -435,6 +477,15 @@ for (const beat of chosen) {
             data_commit: meta.data_commit,
             site,
             run_id: meta.run_id,
+            animated,
+            ...(lead === null
+              ? {}
+              : {
+                  framing: STILL,
+                  lead_seconds: Number(lead.toFixed(3)),
+                  hold_seconds: hold,
+                  recorded_seconds: Number((recorded ?? 0).toFixed(3)),
+                }),
             facts_mode: factsMode,
             facts_checked: meta.facts_checked,
             facts_failed: meta.facts_failed,

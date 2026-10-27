@@ -27,7 +27,10 @@ for this release on a page serving it, all of them must show the same run, and a
 clip whose narrated facts did not hold is refused unless --rehearsal (the pull
 request rehearsal only) composes it and lists the facts in the receipt. A still
 is clips/still-<name>.png from the capture (or video/stills/<name>.png); a still
-or clip receipt with a placeholder becomes a labelled card, never a stand-in picture.
+part with "animate": true (the opening) is the clip clips/still-<name>.webm the
+capture recorded, trimmed after its lead and checked for length like a web clip,
+with no picture fallback. A still or clip receipt with a placeholder becomes a
+labelled card, never a stand-in picture.
 
 Segments are cached by a hash of their inputs and filter graph, so changing one
 beat's words re-renders that segment only, then the join and the audio.
@@ -268,19 +271,35 @@ def render_segment(
                 hashed.append(bs.sha256_file(video))
                 info.update({"clip": video.name, "trim_start": start, "blur_boxes": len(boxes.get(part.target, []))})
         else:
+            # An animated still is a recorded clip, still-<name>.webm, trimmed after its lead like a web clip;
+            # any other still is one picture, still-<name>.png, held for the part.
             still: Path | None = None
             if (clips / f"still-{part.target}.json").is_file():
-                still, meta = clip_receipt(clips, f"still-{part.target}", release_sha, media=".png")
+                still, meta = clip_receipt(clips, f"still-{part.target}", release_sha, media=".webm" if part.animate else ".png")
                 if meta.get("placeholder"):
                     card = (str(meta["placeholder"]), f"placeholder: not built at {release_sha[:7]}")
                     info["placeholder"] = meta["placeholder"]
                     still = None
-            elif (stills / f"{part.target}.png").is_file():
+                elif part.animate and meta.get("animated") is not True:
+                    raise ComposeError(f"{beat.id}: still {part.target} is animate in the sheet, but its capture receipt is not a recorded clip")
+            elif not part.animate and (stills / f"{part.target}.png").is_file():
                 still = stills / f"{part.target}.png"
             else:
-                raise ComposeError(f"{beat.id}: no still-{part.target}.json in {clips} and no {part.target}.png in {stills}")
-            if still is not None:
+                raise ComposeError(f"{beat.id}: no still-{part.target}.json in {clips}"
+                                   + ("" if part.animate else f" and no {part.target}.png in {stills}"))
+            if still is not None and part.animate:
+                lead = float(meta.get("lead_seconds", 0))
+                have = usable_seconds(still, lead)
+                if have + 1e-6 < seconds:
+                    raise ComposeError(
+                        f"{beat.id}: the animated still clip has {have:.2f} s after its {lead:.2f} s lead, the part needs "
+                        f"{seconds:.2f} s; record a longer clip (the capture holds max_seconds plus a margin)"
+                    )
+                inputs += ["-ss", f"{lead:.3f}", "-i", str(still.resolve())]
+                info["lead_seconds"] = lead
+            elif still is not None:
                 inputs += ["-loop", "1", "-framerate", str(bs.FPS), "-i", str(still.resolve())]
+            if still is not None:
                 graph.append(f"[{index}:v]fps={bs.FPS},trim=end_frame={count},setpts=PTS-STARTPTS,{FIT}[p{k}]")
                 hashed.append(bs.sha256_file(still))
                 info["clip"] = still.name

@@ -12,15 +12,28 @@
   ],
   "beats": [
     {
+      "id": "opening",
+      "narration": "A club media office must publish the match report in four languages; one wrong number goes out under the club's name. Agon: Microsoft Foundry agents write, code checks, the officer approves in Teams.",
+      "visual": [
+        {
+          "source": "still:opening",
+          "animate": true,
+          "actions": "video/stills/opening.html recorded as a clip, its CSS animation rewound at the lead: the title and what Agon is, the problem, then the flow of one run as boxes that appear one after another"
+        }
+      ],
+      "min_seconds": 12.5,
+      "max_seconds": 15
+    },
+    {
       "id": "card-arrives",
-      "narration": "Once a run is started, Agon writes the club's match report in four languages, and nothing is published until the media officer approves this exact bundle in Microsoft Teams.",
+      "narration": "A real run: the approval card arrives in the club's Teams channel, with the report the officer attests.",
       "visual": [
         {
           "source": "teams:card-arrives",
           "actions": "the approval card arrives in the Match Day channel; the officer did not ask for it"
         }
       ],
-      "min_seconds": 9,
+      "min_seconds": 7.5,
       "max_seconds": 12.5
     },
     {
@@ -214,32 +227,6 @@
       ],
       "min_seconds": 9,
       "max_seconds": 12
-    },
-    {
-      "id": "data-lab",
-      "narration": "The data is ours: a deterministic season, the same on every machine, with realism bands frozen before calibration.",
-      "visual": [
-        {
-          "source": "web:#/data-lab",
-          "actions": "Data Lab at 1920: the final table of the season, then where the numbers come from (determinism, frozen bands)",
-          "facts": [
-            {
-              "text": "Final table"
-            },
-            {
-              "text": "the same seed always gives the same bytes"
-            },
-            {
-              "text": "The realism bands, frozen and hashed before calibration"
-            },
-            {
-              "text": "Determinism check on main"
-            }
-          ]
-        }
-      ],
-      "min_seconds": 7.5,
-      "max_seconds": 10
     },
     {
       "id": "close",

@@ -5,8 +5,8 @@ ffmpeg, one per case in ci/fixtures/video/gate_cases.json, runs the real gate on
 each and asserts that the set of failing checks is exactly the one the case
 expects: empty for a good file, {"total"} for a file of exactly 115.000 s, and so
 on. The case "composed_good" is built end to end by narrate.py (tone engine) and
-compose.py from a synthetic beat sheet and clip, so the composer is held to the
-gate too. The CLI is also run once per exit code (0 pass, 1 fail, 2 cap mismatch).
+compose.py from a synthetic beat sheet: an animated still clip, a Teams card and a
+web clip, so the composer is held to the gate too. The CLI is also run once per exit code (0 pass, 1 fail, 2 cap mismatch).
 
 The fixture's cap is its own literal. This script refuses to run unless the
 fixture, the gate and the cap CI passes in (--cap-seconds) agree.
@@ -106,6 +106,8 @@ def compose_case(work: Path) -> tuple[Path, Path, Path]:
         "format": bs.BEATS_FORMAT, "voice": "en-GB-SoniaNeural", "locale": "en-GB", "rate": "0%",
         "site": "https://agon.example", "run_id": "run-selftest", "theme": "dark", "target_seconds": [1, 30],
         "beats": [
+            {"id": "still-beat", "narration": "An animated still, recorded as a clip and trimmed after its lead.",
+             "visual": [{"source": "still:opening", "animate": True}], "min_seconds": 3, "max_seconds": 6},
             {"id": "teams-beat", "narration": "A placeholder card stands in for a Teams clip.",
              "visual": [{"source": "teams:card-arrives"}], "min_seconds": 3, "max_seconds": 6},
             {"id": "web-beat", "narration": "A web clip, trimmed after its lead, then held to the narration.",
@@ -120,6 +122,13 @@ def compose_case(work: Path) -> tuple[Path, Path, Path]:
     (clips / "web-beat.json").write_text(json.dumps({
         "format": bs.CLIP_FORMAT, "beat": "web-beat", "release_sha": FAKE_SHA, "data_commit": FAKE_SHA,
         "lead_seconds": lead, "placeholder": None,
+    }), encoding="utf-8")
+    # An animated still is a 1920 x 930 recording with a lead, as video-capture.ts writes it.
+    _ffmpeg("-f", "lavfi", "-i", f"testsrc2=s={bs.WIDTH}x{bs.VISUAL_HEIGHT}:r=25:d=7.5", "-c:v", "libvpx", "-b:v", "600k",
+            "-deadline", "realtime", "-cpu-used", "8", str(clips / "still-opening.webm"))
+    (clips / "still-opening.json").write_text(json.dumps({
+        "format": bs.CLIP_FORMAT, "beat": "still-opening", "for_beat": "still-beat", "release_sha": FAKE_SHA,
+        "data_commit": FAKE_SHA, "animated": True, "lead_seconds": 0.4, "placeholder": None,
     }), encoding="utf-8")
     narration, out = folder / "narration", folder / "out"
     for cmd in (
