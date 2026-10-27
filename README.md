@@ -71,7 +71,7 @@ Three more bundles went the same way, each approved in the Teams channel and re-
 | Public console | real; the approval card on it is a stand-in that sends no decision in this public build |
 | Live run started from the public page, sandbox publish | not deployed yet: there is no HTTP API or public decision endpoint, and a sandbox run is decided only on the console stand-in, which sends nothing, so nothing reaches the deployed sandbox publisher job yet |
 | Interpret metrics (xG, xT, PPDA, win probability) feeding the agents | real since 2026-10-20: the published bundles of 2026-10-20 and 2026-10-27 name `agon.interpret/7ab5e12ab86e` in their manifests (see Later real runs); the 2026-10-19 run sealed a stand-in interpret step (`fleet-local-standin/1`) |
-| Signed approval link, Key Vault signing, Foundry evaluations, erratum and scorer-correction runs, automatic start at match end, Match-Day Charter cues (the charter is not approved yet), Event Hubs, replayer, matchfacts MCP server (in the repo and contract-tested; the fleet does not use MCP) | not deployed |
+| Signed approval link, Key Vault signing, Foundry evaluations, erratum and scorer-correction runs, automatic start at match end, Event Hubs, replayer, matchfacts MCP server (in the repo and contract-tested; the fleet does not use MCP) | not deployed |
 
 ## Architecture
 

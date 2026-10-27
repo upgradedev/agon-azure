@@ -990,9 +990,9 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
         <CardBody>
           <p className="text-sm leading-6 text-muted">
             Before anyone writes, plain code turns the event log into a few numbers the writers must cite instead of guess. The fleet calls this
-            code now, but no published run has used it yet: the recorded run on this site predates the switch, so its writers read a stand-in
-            that ranks only goals and red cards, as the interpret entry of its manifest&apos;s deployment_ids shows. Choose a term to see what it
-            means.
+            code, and the runs published on 2026-10-20 and 2026-10-27 name it in the interpret entry of their manifest&apos;s deployment_ids
+            (agon.interpret); the 2026-10-19 run, also on this site, predates the switch and its writers read a stand-in that ranks only goals and
+            red cards. Choose a term to see what it means.
           </p>
           <ul className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
             {GLOSSARY_ORDER.map((id) => (
