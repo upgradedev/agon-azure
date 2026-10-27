@@ -10,11 +10,11 @@
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776ab)](pyproject.toml)
 [![Live demo](https://img.shields.io/badge/live%20demo-no%20login-0a66c2)](https://jolly-stone-0c9c8a003.4.azurestaticapps.net)
 [![Synthetic data only](https://img.shields.io/badge/data-synthetic%20only-6e40c9)](DATASET_CARD.md)
-[![Video 1:50](https://img.shields.io/badge/video-1%3A50-c4302b)](https://youtu.be/AKHongCPfM4)
+[![Video 1:51](https://img.shields.io/badge/video-1%3A51-c4302b)](https://youtu.be/Kq4-5EawTNY)
 
 **Agon publishes nothing until the club's media officer approves the exact checked bundle in Microsoft Teams, so a one-person media office can put out a match report in four languages, with audio and an English easy-read edition, without copying numbers by hand or waiting for translators.**
 
-[Live demo](https://jolly-stone-0c9c8a003.4.azurestaticapps.net) · [Video (1:50)](https://youtu.be/AKHongCPfM4) · [Try it in 2 minutes](#try-it-in-2-minutes) · [Architecture](#architecture) · [Process flow](#process-flow-of-one-run) · [Agents and checks](#the-agents-and-who-checks-them) · [How to judge](#how-to-judge-agon-against-the-rubric) · [Documentation map](#documentation-map)
+[Live demo](https://jolly-stone-0c9c8a003.4.azurestaticapps.net) · [Video (1:51)](https://youtu.be/Kq4-5EawTNY) · [Try it in 2 minutes](#try-it-in-2-minutes) · [Architecture](#architecture) · [Process flow](#process-flow-of-one-run) · [Agents and checks](#the-agents-and-who-checks-them) · [How to judge](#how-to-judge-agon-against-the-rubric) · [Documentation map](#documentation-map)
 
 Agon (the contest) is our entry to the Microsoft Inside the Game developer hackathon. It serves the small media office of a professional football club. Every club, player and match in it is synthetic and fictional. MIT licence.
 
@@ -32,7 +32,7 @@ Live demo, no login: https://jolly-stone-0c9c8a003.4.azurestaticapps.net
 
 Re-hash the public feed yourself: download the [published manifest of the run the console opens by default](https://stagonnnk4re3nvfz7o.blob.core.windows.net/feed/0e16414b71d73a7c6a014f0fb5223db18dacfc64fa487fb0a90a09d3bbca1e5f/manifest.json) and run `sha256sum manifest.json`. It prints `0e16414b71d73a7c6a014f0fb5223db18dacfc64fa487fb0a90a09d3bbca1e5f`, the hash the officer approved.
 
-Video (1:50, English captions): https://youtu.be/AKHongCPfM4. It shows the run the console opens by default, from the card arriving in Teams to the approved hash equalling the published hash.
+Video (1:51, English captions): https://youtu.be/Kq4-5EawTNY. It opens with the problem and the flow, then shows the run the console opens by default, from the card arriving in Teams to the approved hash equalling the published hash.
 
 ## Contents
 
