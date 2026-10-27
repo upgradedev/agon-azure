@@ -366,15 +366,16 @@ def _flag_source(by: str) -> str:
 
 def _flag_text(flag: Mapping[str, Any], verdicts: Mapping[str, Any]) -> str:
     """A flag in plain words. A template-line flag's detail is why the sentence it REPLACED failed
-    (agon.fleet.steps.factgate and factgate_lang), never a fault in the line the bundle carries."""
+    (agon.fleet.steps.factgate, factgate_lang and easy_read), never a fault in the line the bundle carries."""
     detail = str(flag.get("detail") or flag.get("code"))
-    replaced = {"factgate_template_line": ("The Writer's sentence", "factgate"),
-                "translation_template_line": ("The translated sentence", "factgate_lang")}
+    replaced = {"factgate_template_line": ("The Writer's sentence failed the Fact Gate", "factgate"),
+                "translation_template_line": ("The translated sentence failed the Fact Gate", "factgate_lang"),
+                "easy_read_template_line": ("The English sentence broke the easy-read rules", None)}
     if flag.get("code") not in replaced:
         return detail
-    whose, gate = replaced[str(flag.get("code"))]
-    passed = ", which passed the Fact Gate." if verdicts.get(gate) == "pass" else "."
-    return f"{whose} failed the Fact Gate: {detail.rstrip('.')}. Code replaced it with the template line shown{passed}"
+    why, gate = replaced[str(flag.get("code"))]
+    passed = ", which passed the Fact Gate." if gate and verdicts.get(gate) == "pass" else "."
+    return f"{why}: {detail.rstrip('.')}. Code replaced it with the template line shown{passed}"
 
 
 def flags_by_source(
@@ -402,23 +403,69 @@ def desk_editor_line(flagged: int, confirm_rows: int) -> str:
     return f"{own}; {confirm_rows} Confirm row{'' if confirm_rows == 1 else 's'} on the card."
 
 
+# agon.fleet.steps.factgate writes a retry's detail as this prefix, then "<id>: <reason / reason>"
+# for each sentence it sent back, joined by "; ".
+RETRY_PREFIX = "sent back to the Writer once: "
+RETRY_ID = re.compile(r"(?:^|; )([a-z0-9][a-z0-9-]{0,62}): ")
+
+
+def _retried_ids(flags: Sequence[Mapping[str, Any]]) -> list[str]:
+    """The sentence ids the Fact Gate's retry flags name, in the order written, each once."""
+    ids: list[str] = []
+    for f in flags:
+        detail = str(f.get("detail") or "")
+        if detail.startswith(RETRY_PREFIX):
+            ids += [sid for sid in RETRY_ID.findall(detail[len(RETRY_PREFIX):]) if sid not in ids]
+    return ids
+
+
+def _replaced_by_factgate(card: Mapping[str, Any]) -> list[str]:
+    """The English sentences the Fact Gate replaced with a template line, from its sealed flags."""
+    return [str(f["sentence_id"]) for f in card.get("flags", []) if isinstance(f, dict) and f.get("by") == "factgate"
+            and f.get("code") == "factgate_template_line" and f.get("sentence_id")]
+
+
 def factgate_retry_lines(card: Mapping[str, Any]) -> list[dict[str, Any]]:
     """The Fact Gate's step 3 line for its retry and template lines (agon.fleet.steps.factgate),
     counted from the sealed flags, or no line when it sent nothing back and replaced nothing."""
-    flags = [f for f in card.get("flags", []) if isinstance(f, dict) and f.get("by") == "factgate"]
-    retried = any(f.get("code") == "factgate_retry" for f in flags)
-    replaced = [str(f["sentence_id"]) for f in flags if f.get("code") == "factgate_template_line" and f.get("sentence_id")]
-    parts = ["Sent the failing sentences back to the Writer once"] if retried else []
+    retries = [f for f in card.get("flags", []) if isinstance(f, dict) and f.get("by") == "factgate"
+               and f.get("code") == "factgate_retry"]
+    retried = _retried_ids(retries)
+    replaced = _replaced_by_factgate(card)
+    parts: list[str] = []
+    if retried:
+        parts.append(f"sent sentence{'' if len(retried) == 1 else 's'} {_join(retried)} back to the Writer once")
+    elif retries:
+        parts.append("sent every failing sentence back to the Writer once")
     if replaced:
         one = len(replaced) == 1
-        parts.append(f"sentence{'' if one else 's'} {_join(replaced)} {'still ' if retried else ''}failed, so code replaced "
+        # "still" only for sentences the retry names; any other failed the second check alone.
+        when = "still failed" if retried and set(replaced) <= set(retried) else "failed the second check" if retries else "failed"
+        parts.append(f"sentence{'' if one else 's'} {_join(replaced)} {when}, so code replaced "
                      f"{'it with a template line' if one else 'them with template lines'}")
-    elif retried:
+    elif retries:
         parts.append("every sentence passed the second check")
     if not parts:
         return []
     text = "; ".join(parts) + "."
     return [{"step": 3, "text": text[0].upper() + text[1:]}]
+
+
+def gate_evidence(card: Mapping[str, Any], gate: str, verdict: str) -> str:
+    """A gate's own output from the sealed card.json, or the manifest verdict when it gave none. When
+    the Fact Gate passed, every reason it lists is about a sentence of the Writer's that code then
+    replaced with a template line (agon.fleet.steps.factgate), so each such reason says so; on any
+    other verdict the reasons also hold the template lines' own failures and stay as written."""
+    reasons = card.get("gate_reasons") if isinstance(card.get("gate_reasons"), dict) else {}
+    rows = [str(r) for r in reasons.get(gate, [])]
+    if gate == "factgate" and verdict == "pass":
+        replaced = set(_replaced_by_factgate(card))
+        rows = [
+            f"{sid} (the Writer's sentence, replaced by a template line that passed): {rest}" if sid in replaced else row
+            for row in rows
+            for sid, _, rest in [row.partition(": ")]
+        ]
+    return "; ".join(rows) or f"manifest gate_verdicts.{gate} = {verdict}"
 
 
 def build_run(
@@ -469,14 +516,13 @@ def build_run(
         check = "factgate" if edition == "en" else "factgate_lang"
         for s in rows:
             sentence_gates[str(s["sentence_id"])] = {check: verdicts[check], "rights": verdicts["rights"]}
-    reasons = card.get("gate_reasons") if isinstance(card.get("gate_reasons"), dict) else {}
     gates = [
         {
             "gate": gate,
             "name": GATE_NAMES.get(gate, gate),
             "verdict": verdict,
             "detail": f"{GATE_NAMES.get(gate, gate)}: {verdict}, as sealed in the bundle manifest.",
-            "evidence": "; ".join(str(r) for r in reasons.get(gate, [])) or f"manifest gate_verdicts.{gate} = {verdict}",
+            "evidence": gate_evidence(card, gate, verdict),
         }
         for gate, verdict in sorted(verdicts.items())
     ]

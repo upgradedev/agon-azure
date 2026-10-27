@@ -375,6 +375,7 @@ def test_committed_runs_show_each_flag_under_the_step_that_raised_it(folder, run
     lines = {d["desk"]: d["lines"] for d in run["desks"]}
     assert lines["desk_editor"] == [{"step": 4, "text": webrecord.desk_editor_line(len(desk), len(run["confirm_rows"]))}]
     assert lines["factgate"][1:-1] == webrecord.factgate_retry_lines(card)
+    assert [g["evidence"] for g in run["gates"]] == [webrecord.gate_evidence(card, g["gate"], g["verdict"]) for g in run["gates"]]
     own = [f for f in card["flags"] if f.get("by") == "desk_editor" and f.get("sentence_id") in ids]
     assert len(run["desk_editor_flags"]) == len(own)
 
@@ -393,8 +394,17 @@ def test_the_default_run_shows_its_template_line_under_the_fact_gate():
     assert [s["author"] for s in report["sentences"] if s["sentence_id"] == "s7"] == ["template"]
     lines = {d["desk"]: [line["text"] for line in d["lines"]] for d in run["desks"]}
     assert lines["desk_editor"] == ["Flagged no sentence for a person; 1 Confirm row on the card."]
-    assert ("Sent the failing sentences back to the Writer once; sentence s7 still failed, so code replaced it with a template line."
-            in lines["factgate"])
+    assert lines["factgate"][1] == ("Sent sentences s4 and s7 back to the Writer once; "
+                                    "sentence s7 still failed, so code replaced it with a template line.")
+    # The gate's own output names the Writer's s7, which the template line replaced.
+    assert run["gates"][0]["gate"] == "factgate" and run["gates"][0]["evidence"] == (
+        "s7 (the Writer's sentence, replaced by a template line that passed): claim value 4 (1x) is not written in the prose")
+
+
+def test_a_run_with_one_sentence_sent_back_says_so_in_the_singular():
+    run = json.loads((SAMPLE_RUNS / "run-6bb5b655464f.json").read_text(encoding="utf-8"))
+    lines = {d["desk"]: [line["text"] for line in d["lines"]] for d in run["desks"]}
+    assert lines["factgate"][1] == "Sent sentence s4 back to the Writer once; every sentence passed the second check."
 
 
 def test_flags_split_by_who_raised_them():
@@ -419,25 +429,59 @@ def test_flags_split_by_who_raised_them():
                                  "Code replaced it with the template line shown, which passed the Fact Gate.")
     # A gate that did not pass is never said to have passed the replacement.
     assert checks[1]["text"] == "The translated sentence failed the Fact Gate: number 3 missing. Code replaced it with the template line shown."
-    assert checks[2]["text"] == "21 words, the cap is 15"
+    assert checks[2]["text"] == ("The English sentence broke the easy-read rules: 21 words, the cap is 15. "
+                                 "Code replaced it with the template line shown.")
     assert webrecord.desk_editor_line(len(desk), 2) == "Flagged 1 sentence for a person; 2 Confirm rows on the card."
     assert webrecord.desk_editor_line(0, 1) == "Flagged no sentence for a person; 1 Confirm row on the card."
 
 
+RETRY_S4 = "sent back to the Writer once: s4: claim value 1 (2x) is not written in the prose"
+RETRY_S4_S7 = RETRY_S4 + "; s7: claim value 4 (1x) is not written in the prose / name 'Ilse Varrow' is claimed but not written in the sentence"
+
+
 @pytest.mark.parametrize("flags, line", [
     ([], None),
-    ([{"code": "factgate_retry", "by": "factgate", "detail": "d"}],
-     "Sent the failing sentences back to the Writer once; every sentence passed the second check."),
-    ([{"code": "factgate_retry", "by": "factgate", "detail": "d"},
+    ([{"code": "factgate_retry", "by": "factgate", "detail": RETRY_S4}],
+     "Sent sentence s4 back to the Writer once; every sentence passed the second check."),
+    ([{"code": "factgate_retry", "by": "factgate", "detail": RETRY_S4_S7}],
+     "Sent sentences s4 and s7 back to the Writer once; every sentence passed the second check."),
+    ([{"code": "factgate_retry", "by": "factgate", "detail": RETRY_S4_S7},
+      {"code": "factgate_template_line", "by": "factgate", "detail": "d", "sentence_id": "s7"}],
+     "Sent sentences s4 and s7 back to the Writer once; sentence s7 still failed, so code replaced it with a template line."),
+    ([{"code": "factgate_retry", "by": "factgate", "detail": RETRY_S4_S7},
       {"code": "factgate_template_line", "by": "factgate", "detail": "d", "sentence_id": "s4"},
       {"code": "factgate_template_line", "by": "factgate", "detail": "d", "sentence_id": "s7"}],
-     "Sent the failing sentences back to the Writer once; sentences s4 and s7 still failed, so code replaced them with template lines."),
+     "Sent sentences s4 and s7 back to the Writer once; sentences s4 and s7 still failed, so code replaced them with template lines."),
+    # A sentence the retry did not name never "still" failed.
+    ([{"code": "factgate_retry", "by": "factgate", "detail": RETRY_S4},
+      {"code": "factgate_template_line", "by": "factgate", "detail": "d", "sentence_id": "s7"}],
+     "Sent sentence s4 back to the Writer once; sentence s7 failed the second check, so code replaced it with a template line."),
+    # A retry whose detail names no sentence is told without a count.
+    ([{"code": "factgate_retry", "by": "factgate", "detail": "d"}],
+     "Sent every failing sentence back to the Writer once; every sentence passed the second check."),
     ([{"code": "factgate_template_line", "by": "factgate", "detail": "d", "sentence_id": "s7"}],
      "Sentence s7 failed, so code replaced it with a template line."),
     ([{"code": "factgate_retry", "by": "writer", "detail": "not the Fact Gate"}], None),
 ])
 def test_the_fact_gate_line_tells_its_retry_and_its_template_lines(flags, line):
     assert webrecord.factgate_retry_lines({"flags": flags}) == ([] if line is None else [{"step": 3, "text": line}])
+
+
+def test_the_fact_gate_output_names_the_sentence_a_template_line_replaced_only_when_the_gate_passed():
+    card = {
+        "flags": [{"code": "factgate_template_line", "by": "factgate", "detail": "x", "sentence_id": "s7"}],
+        "gate_reasons": {"factgate": ["s2: claim value 1 (2x) is not written in the prose",
+                                      "s7: claim value 4 (1x) is not written in the prose"],
+                         "rights": ["refusal at s3: x"]},
+    }
+    assert webrecord.gate_evidence(card, "factgate", "pass") == (
+        "s2: claim value 1 (2x) is not written in the prose; "
+        "s7 (the Writer's sentence, replaced by a template line that passed): claim value 4 (1x) is not written in the prose")
+    # On a mismatch the reasons also hold the template line's own failure, so they stay as written.
+    assert webrecord.gate_evidence(card, "factgate", "mismatch") == (
+        "s2: claim value 1 (2x) is not written in the prose; s7: claim value 4 (1x) is not written in the prose")
+    assert webrecord.gate_evidence(card, "rights", "refused") == "refusal at s3: x"
+    assert webrecord.gate_evidence(card, "factgate_lang", "pass") == "manifest gate_verdicts.factgate_lang = pass"
 
 
 @pytest.mark.parametrize("mutate, ok", [

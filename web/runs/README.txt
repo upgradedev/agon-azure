@@ -108,7 +108,9 @@ index.json
                          "text"}]
     gates              [{"gate", "name", "verdict": pass | mismatch | refused
                          | skipped, "detail": plain words, "evidence": the
-                         gate's own output, which may hold ids}]
+                         gate's own output, which may hold ids}]; when the
+                         Fact Gate passed, a reason about a sentence it
+                         replaced says so after that sentence's id
     editions           [{"edition", "language", "name",
                          "file": "edition-<edition>.json"}]; a pipeline run
                        may name the file "report-<edition>.json" instead
@@ -125,7 +127,7 @@ index.json
                        is the routing table's "the injury sentence" and so on
     desk_editor_flags  [{"sentence_id", "text"}], only the flags the Desk
                        Editor raised itself (card.json "by": "desk_editor")
-    approval          {"status": awaiting | approved | changes_requested,
+    approval           {"status": awaiting | approved | changes_requested,
                         "approved_at": "YYYY-MM-DDTHH:MM:SSZ" or null,
                         "approver_role": str or null, "channel": str or null,
                         "approved_bundle_sha256": the bundle.sha256 that was
@@ -207,15 +209,17 @@ flag (agon.webrecord.flags_by_source):
           "desk_editor"
     name  that step as the approval card names it: "Fact Gate",
           "Fact Gate, other editions", "Easy-read rules", ...
-    text  the flag in plain words. A Fact Gate template-line flag says that
-          the Writer's sentence failed the Fact Gate, gives the gate's
-          reason, and says code replaced it with the template line the
-          bundle carries: the reason is about the replaced sentence, not
-          the line shown beside it.
+    text  the flag in plain words. A template-line flag says which sentence
+          failed (the Writer's, for the Fact Gate; the translated one, for
+          the Fact Gate on other editions; the English one, for the
+          easy-read rules), gives the reason, and says code replaced it
+          with the template line the bundle carries: the reason is about
+          the replaced sentence, not the line shown beside it.
 
 The Fact Gate's retry (code "factgate_retry", no sentence id) is told on the
-Newsroom Wall as the Fact Gate's step 3 line. A recorded run carries
-check_flags; the sample does not.
+Newsroom Wall as the Fact Gate's step 3 line, which names the sentences it
+sent back to the Writer. A recorded run carries check_flags; the sample
+does not.
 
 <run_id>/edition-<id>.json
 --------------------------
