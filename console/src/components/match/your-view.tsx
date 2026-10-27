@@ -15,7 +15,7 @@ export const LANGUAGE_WORDS: Record<Language, string> = { en: "EN", el: "EL", es
 
 const MODE_HINTS: Record<ViewMode, string> = {
   fan: "Fan mode tells the match in plain words: the big moments as they happen, a few simple stats and the star player.",
-  analyst: "Analyst mode shows every chart, the full team scorecard, every player, the pressure readout and the ids from the event log.",
+  analyst: "Analyst mode shows the full charts (win probability, xG race, momentum, shot map and territory), the full team scorecard, every player's full line, the pressure readout and the ids from the event log.",
 };
 
 const selectClass =
@@ -106,7 +106,7 @@ export function YourView({ prefs, file, clubs }: { prefs: Preferences; file: Mat
           <p id={ids.followHint} className="text-xs leading-5 text-muted">
             {file
               ? known
-                ? "Shows their scorecard, pass quality, heat zones and moments, and dims everyone else on the charts."
+                ? "Shows their scorecard, pass quality, heat zones and moments, and dims everyone else on the xG race, the shot map and the timeline."
                 : "Choose a favourite player in this match to follow them."
               : "Players appear once the match analysis has loaded."}
           </p>
@@ -132,7 +132,7 @@ export function YourView({ prefs, file, clubs }: { prefs: Preferences; file: Mat
           ))}
         </select>
         <p id={ids.metricHint} className="mt-1 text-xs leading-5 text-muted">
-          Tells the whole match through that one number instead of every chart.
+          Tells the whole match through that one number instead of the mode's charts.
         </p>
       </div>
 

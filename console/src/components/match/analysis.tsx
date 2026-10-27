@@ -2,10 +2,12 @@
   The match in numbers, below the replay, shaped by the viewer's own view:
   - Fan mode tells the story in plain words: the big moments so far, a few
     simple stats, the star player and, with a favourite club, that club's view;
-  - Analyst mode shows every chart, the full team scorecard and every player;
+  - Analyst mode shows the full charts (win probability, xG race, momentum,
+    shot map, territory), the full team scorecard and every player's full line;
   - one metric tells the whole match through that metric alone;
   - following a player shows that player's scorecard, pass quality, heat zones
-    and moments, and dims everyone else on the charts.
+    and moments, and dims everyone else on the xG race, the shot map and the
+    timeline.
   Every value is read from the match analysis (agon.webmatch, computed by
   agon.interpret and agon.governance.recompute); nothing is computed here.
 */
@@ -411,7 +413,7 @@ export function PlayerFocus({
         </span>
       </h3>
       <p className="mt-1 text-xs leading-5 text-muted">
-        Their scorecard, pass quality and where they had the ball; on the charts above everyone else is dimmed. Pass difficulty is agon.interpret&apos;s modelled
+        Their scorecard, pass quality and where they had the ball; everyone else is dimmed on the xG race, the shot map and the timeline. Pass difficulty is agon.interpret&apos;s modelled
         chance that a pass like it fails, from 0 (easy) to 100. {file.rules.speed} <SourceNote />
       </p>
       <div className="mt-3 grid gap-4 md:grid-cols-2">
