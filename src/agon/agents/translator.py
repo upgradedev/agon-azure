@@ -6,9 +6,11 @@ Names are protected the documented way for the Text API: the text is sent as HTM
 break the per-language name check. The wrapper is removed and the HTML unescaped on the way back.
 
 Authentication is keyless: a Microsoft Entra token for ``https://cognitiveservices.azure.com``,
-sent to the resource's custom-domain endpoint. The request shape (v3.0 ``/translate``) is
-UNVERIFIED against our resource until spike S4; the spec names Text API 2026-06-06, so the path
-and version are constructor arguments, not literals in the call.
+sent to the resource's custom-domain endpoint. The deployed fleet job has used this request shape
+(v3.0 ``/translate``) against our resource since 2026-10-19: every recorded run in web/runs carries
+the el, es and fr editions (web/runs/run-*/report-{el,es,fr}.json), which exist only when this call
+returns, and its card has no `edition_unavailable` flag. The spec names Text API 2026-06-06, so the
+path and version stay constructor arguments, not literals in the call.
 """
 
 from __future__ import annotations

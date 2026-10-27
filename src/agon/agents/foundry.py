@@ -25,9 +25,9 @@ local prompt pinned in the manifest. Any mismatch, missing instructions or wrong
 closed, and until verification has passed `complete` refuses every prompt-agent role. The
 verified hashes are what `deployment_ids()` hands to the seal as ``prompt.<role>``.
 
-Not yet exercised against a live Foundry project: that is gate C2. Every Azure import is lazy, so
-this module imports with the standard library alone.
-"""
+Live since 2026-10-19: the deployed fleet job runs this port. Each recorded run's manifest in
+web/runs/run-*/manifest.json names ports "foundry", the three agent versions and their verified
+prompt hashes. Every Azure import is lazy, so this module imports with the standard library alone."""
 
 from __future__ import annotations
 

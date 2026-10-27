@@ -3,7 +3,8 @@
 # what-if    main only, before every deploy: compiles main.bicep and asks Azure what
 #            would change. It is not run on pull requests (see below).
 # deploy     main only, environment azure: incremental deployment of main.bicep.
-# web-build  main only, no Azure identity (no id-token, no environment): builds the
+# web-build  no Azure identity (no id-token, no environment), and no main-only
+#            guard, so a dispatch from another branch runs it too: builds the
 #            React console (console/) from its committed lock, prerenders it,
 #            generates the recorded synthetic data for the published seeds, stamps
 #            the commit and the season files, runs ci/web_check.py and the live
@@ -24,8 +25,9 @@
 #            reads, never fails because of it.
 # foundry-smoke  main only, after ai: one model call to the Foundry deployment
 #            (.github/workflows/foundry-smoke.yml, gate C2). Fails on any non-200,
-#            including the refusal expected until the owner-side rbac deploy has
-#            run: HTTP 401 or 403 with error code PermissionDenied.
+#            for example HTTP 401 or 403 with error code PermissionDenied when the
+#            owner-side rbac deploy has not run. Gate C2 passed on 2026-10-19:
+#            https://github.com/upgradedev/agon-azure/actions/runs/39276078687.
 #
 # The CI identity holds Contributor on the resource group only. It cannot write
 # role assignments, so infra/rbac.bicep is NOT deployed here (docs/OPERATIONS.md).
@@ -37,8 +39,8 @@
 # own branch before anyone reviews it, and the only Azure identity this repo has
 # holds Contributor on the group. So pull requests get compile and lint only (the
 # bicep job in ci.yml, no login), and the Azure what-if diff is read on main just
-# before the deploy. The pull_request federated subject must also be removed on
-# the owner side, because a branch could add its own workflow that uses it
+# before the deploy. The owner side removed the pull_request federated subject
+# on 2026-10-19, because a branch could add its own workflow that uses it
 # (docs/OPERATIONS.md, step 4). Do not add pull_request back without a separate
 # Reader plus whatIf identity.
 # Actions are pinned by full commit sha; the comment names the version and how the
@@ -364,8 +366,8 @@ jobs:
           az config set bicep.use_binary_from_path=false bicep.check_version=false --only-show-errors
           az bicep install --version "$BICEP_VERSION"
           az bicep version
-      # ci.yml lints main.bicep and rbac.bicep on every pull request; until it also
-      # lists ai.bicep, this step is the warning gate on it, with the same script.
+      # ci.yml (job bicep) lints ai.bicep with the other templates on every pull
+      # request; this step repeats the same warning gate on main before the what-if.
       - name: Build and lint ai.bicep, failing on any warning
         run: python3 ci/bicep_check.py --runner az infra/ai.bicep
       - name: Check the agon-main input
@@ -565,9 +567,12 @@ jobs:
 
   # Spec 3.2 rows 2, 9, 11 and 16: build the one job image, push it to the registry
   # as <registry>/agon:<commit sha>, then deploy infra/apps.bicep (deployment
-  # agon-apps). Independent of web and readiness. Until the owner-side rbac deploy
-  # grants AcrPull and the queue roles, the jobs exist but their executions fail
-  # to pull or to read the queues; the job summary says so.
+  # agon-apps). Independent of web and readiness. The executions need the
+  # owner-side AcrPull and queue grants (infra/rbac.bicep), which have been in
+  # place since 2026-10-19: in evidence/run-*.executions.json every fleet, intake
+  # and feed Publisher execution reads Succeeded. On a fresh deploy without them,
+  # the jobs exist but their executions fail to pull or to read the queues; the
+  # job summary says so.
   #
   # It waits for ai and flows, because the fleet job takes the agon-ai outputs and
   # the trigger URLs of the approval Logic Apps, but it runs whatever they end as:

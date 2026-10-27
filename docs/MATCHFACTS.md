@@ -74,7 +74,8 @@ Stdlib, every run (`tests/test_matchfacts_tools.py`):
 - the referee is unreachable: a fresh interpreter that refuses any referee import calls every
   tool, then checks `sys.modules`. A negative control proves the blocker blocks.
 
-With the SDK, in CI (`tests/test_matchfacts_server.py`, workflow `mcp`, not yet run in CI). On
+With the SDK, in CI (`tests/test_matchfacts_server.py`, workflow `mcp`, job `matchfacts`, green on
+`main` with the pinned SDK, for example https://github.com/upgradedev/agon-azure/actions/runs/39393568882). On
 the author's machine these six tests passed against an mcp 1.29.0 that was already in the user
 site-packages, not the pinned 1.30.0; this lane installed nothing:
 - an in-process client lists exactly the nine tools, all annotated read-only and non-destructive,
