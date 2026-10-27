@@ -8,7 +8,9 @@
 
   The optional `destinations` key follows agon.publish.webview (documented in
   web/runs/README.txt): validateDestinations ports its destination_problems
-  rule by rule, with the same wording.
+  rule by rule, with the same wording. The optional `check_flags` key holds
+  the flags of every step but the Desk Editor, each naming its step;
+  flagGroups groups them for the approval card.
 */
 import type {
   AnalystNotes,
@@ -18,6 +20,7 @@ import type {
   BundleState,
   ConfirmRow,
   DeliveryKind,
+  DeskEditorFlag,
   DestinationId,
   DestinationStatus,
   EditionMeta,
@@ -125,7 +128,11 @@ const RUN_KEYS = [
   "gates", "generator", "handoffs", "home", "label", "match_id", "provenance", "run_id", "score", "seed",
   "sentence_gates", "sentence_types", "state", "states",
 ];
-const OPTIONAL_RUN_KEYS = ["destinations"];
+/* check_flags: the card's flags on a sentence raised by any step but the Desk Editor
+   (agon.webrecord.flags_by_source); a recorded run carries it, the sample does not. */
+const OPTIONAL_RUN_KEYS = ["destinations", "check_flags"];
+/* card.json "by": the step that raised a flag (agon.fleet.steps.add_flag). */
+const FLAG_SOURCE = /^[a-z][a-z0-9_]{0,62}$/;
 
 /* The destination registry (agon.governance.destinations): ids in order, their
    text labels, and how each one receives the approved bytes in this build. */
@@ -489,6 +496,25 @@ export function validateRun(run: unknown): string[] {
   const flagsOk = Array.isArray(flags) && flags.every((f: unknown) => keysAre(f, ["sentence_id", "text"]) && nonEmpty(f.text));
   if (!flagsOk) {
     problems.push("desk_editor_flags must be a list of {sentence_id, text}");
+  }
+  if (has(run, "check_flags")) {
+    const checks = run.check_flags;
+    const checksOk =
+      Array.isArray(checks) &&
+      checks.every(
+        (f: unknown) =>
+          keysAre(f, ["by", "name", "sentence_id", "text"]) &&
+          typeof f.sentence_id === "string" &&
+          SENTENCE_ID.test(f.sentence_id) &&
+          typeof f.by === "string" &&
+          FLAG_SOURCE.test(f.by) &&
+          f.by !== "desk_editor" &&
+          nonEmpty(f.name) &&
+          nonEmpty(f.text),
+      );
+    if (!checksOk) {
+      problems.push("check_flags must be a list of {sentence_id, by, name, text}, none by the Desk Editor");
+    }
   }
   const approval = run.approval;
   if (
@@ -996,6 +1022,32 @@ export function sentenceById(
     }
   }
   return null;
+}
+
+export interface FlagGroup {
+  /* The step that raised these flags, as the card shows it: "Fact Gate", "Desk Editor". */
+  name: string;
+  flags: DeskEditorFlag[];
+}
+
+/* The approval card's flags, each under the step that raised it: the other steps'
+   flags (check_flags) grouped by step in the order the run lists them, then the
+   Desk Editor's own. A Fact Gate flag is never shown as a Desk Editor flag. */
+export function flagGroups(run: Run): FlagGroup[] {
+  const groups: FlagGroup[] = [];
+  for (const flag of run.check_flags ?? []) {
+    const group = groups.find((g) => g.name === flag.name);
+    const entry = { sentence_id: flag.sentence_id, text: flag.text };
+    if (group) {
+      group.flags.push(entry);
+    } else {
+      groups.push({ name: flag.name, flags: [entry] });
+    }
+  }
+  if (run.desk_editor_flags.length) {
+    groups.push({ name: "Desk Editor", flags: run.desk_editor_flags });
+  }
+  return groups;
 }
 
 export function matchLine(run: Run): string {

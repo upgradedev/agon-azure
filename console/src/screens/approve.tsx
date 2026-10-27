@@ -3,7 +3,9 @@
   Adaptive Card. Its header sentence says what it is, verbatim.
 
   It shows the bundle hash (with copy), the editions, what the officer attests
-  versus what is gate-cleared only, the Desk Editor's flags, the Confirm rows
+  versus what is gate-cleared only, the flags under the step that raised each
+  one (a Fact Gate flag under the Fact Gate, the Desk Editor's own under the
+  Desk Editor), the Confirm rows
   that must be ticked, and the destinations that would receive the approved
   bytes. Approve is never disabled: it names any unticked Confirm row, and with
   all ticked it says in a full sentence that this card has no decision channel,
@@ -25,6 +27,7 @@ import {
   approveAttempt,
   attestation,
   decidedMessage,
+  flagGroups,
   matchLine,
   notDeployedMessage,
   sentenceById,
@@ -199,14 +202,14 @@ export function Approve({ active, loaded, error, blownSeed, onDecided }: Props) 
               <p className="rounded-lg border border-line bg-surface-2 px-3 py-2 text-sm text-fg">{att.cleared}</p>
             </div>
 
-            {run.desk_editor_flags.length ? (
-              <div>
-                <p className="mb-1.5 text-xs font-semibold tracking-wide text-muted uppercase">Desk Editor flags</p>
+            {flagGroups(run).map((group) => (
+              <div key={group.name}>
+                <p className="mb-1.5 text-xs font-semibold tracking-wide text-muted uppercase">{`${group.name} flags`}</p>
                 <ul className="space-y-2">
-                  {run.desk_editor_flags.map((flag) => {
+                  {group.flags.map((flag, i) => {
                     const found = sentenceById(loaded, flag.sentence_id);
                     return (
-                      <li key={flag.sentence_id} className="rounded-lg border border-notice/30 bg-notice-bg px-3 py-2.5 text-sm">
+                      <li key={`${flag.sentence_id}-${i}`} className="rounded-lg border border-notice/30 bg-notice-bg px-3 py-2.5 text-sm">
                         <p className="text-notice">{flag.text}</p>
                         {found ? <q className="mt-1 block text-fg italic">{found.sentence.text}</q> : null}
                         <div className="mt-1.5">
@@ -217,7 +220,7 @@ export function Approve({ active, loaded, error, blownSeed, onDecided }: Props) 
                   })}
                 </ul>
               </div>
-            ) : null}
+            ))}
 
             <fieldset aria-describedby={confirmHint}>
               <legend className="mb-1 text-xs font-semibold tracking-wide text-muted uppercase">Confirm rows</legend>

@@ -159,6 +159,14 @@ export interface DeskEditorFlag {
   text: string;
 }
 
+/* A flag on a sentence raised by any step but the Desk Editor (card.json "by"), with that step named. */
+export interface CheckFlag {
+  sentence_id: string;
+  by: string;
+  name: string;
+  text: string;
+}
+
 export interface Approval {
   status: ApprovalStatus;
   approved_at: string | null;
@@ -215,6 +223,8 @@ export interface Run {
   approval: Approval;
   /* Optional, read when a pipeline run carries it; the hand-written sample does not. */
   destinations?: Destination[];
+  /* Optional the same way: the other steps' flags, never the Desk Editor's (agon.webrecord.flags_by_source). */
+  check_flags?: CheckFlag[];
 }
 
 export interface Claim {
