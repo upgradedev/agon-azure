@@ -4,9 +4,11 @@
   bytes Verify hashes, never from a copy.
 
   Every sentence is a button that opens the Why drawer: the events it cites,
-  its claims, the gate verdicts, who wrote it and who answers for it. The
-  edition label says "approved" only on an approved pipeline run whose
-  approval names this bundle hash (isApproved, editionLabel).
+  its claims, the gate verdicts, who wrote it and who answers for it, and, when
+  it cites an event the Analyst picked as a turning point, that pick's minute,
+  theme and why from the sealed card.json. The edition label says "approved"
+  only on an approved pipeline run whose approval names this bundle hash
+  (isApproved, editionLabel).
 
   Tabs follow the ARIA tabs pattern by hand (arrow keys, Home, End): a Radix
   tab panel prerenders an inline style, which the CSP would block.
@@ -17,13 +19,13 @@ import { Badge } from "../components/ui/badge";
 import { Dialog } from "../components/ui/dialog";
 import { Notice } from "../components/ui/notice";
 import { LabelLine, ScreenHeader, SeedNotice, StepNav, View } from "../components/screen";
-import { editionLabel, isApproved, matchLine, sentenceById, why, type Why } from "../lib/runs";
+import { THEME_WORDS, editionLabel, isApproved, matchLine, picksCited, sentenceById, why, type Why } from "../lib/runs";
 import { usePreferences } from "../hooks/preferences";
 import { Listen } from "../components/listen";
 import { hrefFor, type Route } from "../lib/router";
 import { cn } from "../lib/cn";
 import { VERDICT_TONE } from "./newsroom-wall";
-import type { LoadedEdition, LoadedRun } from "../lib/types";
+import type { AnalystPick, LoadedEdition, LoadedRun } from "../lib/types";
 
 const TAB_LABELS: Record<string, string> = { en: "EN", el: "EL", es: "ES", fr: "FR", easy: "Easy-read" };
 
@@ -49,7 +51,7 @@ function Row({ term, children }: { term: string; children: ReactNode }) {
   );
 }
 
-function WhyBody({ w, bundle }: { w: Why; bundle: string }) {
+function WhyBody({ w, bundle, picks }: { w: Why; bundle: string; picks: AnalystPick[] }) {
   return (
     <>
       <dl>
@@ -69,6 +71,21 @@ function WhyBody({ w, bundle }: { w: Why; bundle: string }) {
             "None: a final-score claim reads the whole log."
           )}
         </Row>
+        {picks.length ? (
+          <Row term="Turning points">
+            <ul className="space-y-1.5">
+              {picks.map((p, i) => (
+                <li key={`${i}-${p.event_id}`} data-pick={p.event_id}>
+                  <span className="font-medium tabular-nums">Minute {p.minute}</span>, {THEME_WORDS[p.theme]}: {p.why}{" "}
+                  <span className="text-muted">({p.author === "model" ? "AI-written by the Analyst agent" : "chosen by code"})</span>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-1 text-xs leading-5 text-muted">
+              The Analyst's picks among the events this sentence cites, sealed in card.json. The gates check the sentence, not these words.
+            </p>
+          </Row>
+        ) : null}
         <Row term="Claim types">{w.claimTypes.length ? w.claimTypes.join(", ") : "None"}</Row>
         <Row term="Gate verdicts">
           {w.gates.length ? (
@@ -319,7 +336,7 @@ export function Recap({ active, route, loaded, error, blownSeed }: Props) {
         }
         closeLabel="Close the Why drawer"
       >
-        {w ? <WhyBody w={w} bundle={run.bundle.sha256} /> : null}
+        {w ? <WhyBody w={w} bundle={run.bundle.sha256} picks={picksCited(loaded.analyst, w.eventIds)} /> : null}
       </Dialog>
 
       <StepNav view="recap" param={run.run_id} />

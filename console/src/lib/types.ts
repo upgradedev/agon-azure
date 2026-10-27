@@ -260,10 +260,34 @@ export interface LoadedEdition {
   data: EditionFile;
 }
 
+/* The three themes the Analyst may give a turning point (agon.agents.schemas.THEMES). */
+export type TurningPointTheme = "control_vs_chaos" | "tactical_pressure" | "game_rhythm";
+
+/* One turning point as a pipeline bundle seals it in card.json (agon.fleet.steps.analyst):
+   the agent wrote why and theme ("model"), or code chose it when the agent's answer was
+   not used ("template"); code read the minute from the event. */
+export interface AnalystPick {
+  author: "model" | "template";
+  event_id: string;
+  minute: string;
+  theme: TurningPointTheme;
+  why: string;
+}
+
+export interface AnalystNotes {
+  picks: AnalystPick[];
+  /* The Analyst agent the sealed manifest names (deployment_ids["agent.analyst"]), if any. */
+  agent: string | null;
+  /* The code that computed the candidate moments (card.json interpret_source), if named. */
+  interpretSource: string | null;
+}
+
 export interface LoadedRun {
   run: Run;
   manifest: BundleManifest;
   editions: Record<string, LoadedEdition>;
+  /* The Analyst's turning points from the sealed card.json; null when the run has none. */
+  analyst: AnalystNotes | null;
 }
 
 export interface RunsData {
