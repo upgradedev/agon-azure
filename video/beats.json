@@ -114,11 +114,11 @@
     },
     {
       "id": "officer-approves",
-      "narration": "The officer asks for nothing: the card is already in the channel. They read the report they attest, tick the Confirm row, leave Instagram out, and approve.",
+      "narration": "The officer asks for nothing: the card is already in the channel. They read the report they attest, tick the Confirm row the code cannot check, and approve.",
       "visual": [
         {
           "source": "teams:officer-approves",
-          "actions": "the officer reads the attested report, ticks the Confirm row, unticks \"Instagram (preview only, not posted)\", taps Approve"
+          "actions": "the officer reads the attested report, ticks the Confirm row (the card refuses an approval without it), taps Approve"
         }
       ],
       "min_seconds": 13,
@@ -138,7 +138,7 @@
     },
     {
       "id": "published",
-      "narration": "The same card now says what was published, what was only prepared, and what the officer left out. One approval covers every edition: Greek, Spanish, French and easy-read.",
+      "narration": "The same card now says what was published and what was only prepared or recorded. One approval covers every edition: Greek, Spanish, French and easy-read.",
       "visual": [
         {
           "source": "teams:card-published",
