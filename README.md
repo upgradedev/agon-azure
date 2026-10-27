@@ -288,7 +288,7 @@ Check it yourself: the [published manifest](https://stagonnnk4re3nvfz7o.blob.cor
 
 ## Later real runs (2026-10-20 and 2026-10-27)
 
-Four more bundles went the same way, each approved in the Teams channel and re-hashable from the public feed:
+Five more bundles went the same way, each approved in the Teams channel and re-hashable from the public feed:
 
 * **Match-Day Charter**, approved 2026-10-20 09:38:49 UTC: the rules for timed cues, sealed as their own bundle ([manifest](https://stagonnnk4re3nvfz7o.blob.core.windows.net/feed/69282a2fc5b639475627f7bbd0391b781175b422ba16f58e105c898511854485/manifest.json)). The 34 timed cues in `web/cues/1.json`, in English, Greek, Spanish and French, were exported under its hash with `PYTHONPATH=src python -m agon.cues`.
 * **Full-time report**, approved 2026-10-20: the earliest published bundle whose manifest names the real interpret step, `agon.interpret/7ab5e12ab86e` ([manifest](https://stagonnnk4re3nvfz7o.blob.core.windows.net/feed/14f4694e45c96b536d23f93d949cf63c563e7b85d58cd6d25185f72d182bffd5/manifest.json)).
@@ -319,6 +319,8 @@ Four more bundles went the same way, each approved in the Teams channel and re-h
 | 15:46:11 | A new fleet process resumes the workflow from the checkpoint. |
 | 15:46:41 | The Publisher job recomputes the hash and writes create-only to the public feed. |
 | 15:47:38 | The same Teams card is updated in place to "Published" (time from the Logic App run history). |
+
+* **Full-time report**, approved 2026-10-27 and in the public feed at 16:01:08 UTC, the newest item there ([manifest](https://stagonnnk4re3nvfz7o.blob.core.windows.net/feed/737b47d8a608761caebed82f0b3fd28343f16d4f3f099527dd7b40311ed98ac6/manifest.json), [drill run](https://github.com/upgradedev/agon-azure/actions/runs/40535218224)). It is not exported to the console, whose run label for it would equal the default run's.
 
 ## Real, simulated, not deployed
 
