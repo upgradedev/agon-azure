@@ -338,6 +338,136 @@ def _join(words: Sequence[str]) -> str:
     return words[0] if len(words) == 1 else ", ".join(words[:-1]) + " and " + words[-1]
 
 
+# ----------------------------------------------------------------- the card's flags, by who raised them
+
+# card.json "by" (agon.fleet.steps.add_flag) in the words the console shows. A flag is shown under
+# the step that raised it: only the Desk Editor's own flags are Desk Editor flags.
+DESK_EDITOR = "desk_editor"
+FLAG_SOURCES = {
+    "factgate": "Fact Gate",
+    "factgate_lang": "Fact Gate, other editions",
+    "easy_read": "Easy-read rules",
+    "rights": "Rights Guard",
+    "writer": "Writer",
+    "analyst": "Analyst",
+    "triage": "Triage",
+    "audio": "Audio",
+}
+
+
+def _flag_source(by: str) -> str:
+    if by in FLAG_SOURCES:
+        return FLAG_SOURCES[by]
+    language = by.removeprefix("localise_")
+    if language != by and language in EDITION_NAMES:
+        return f"{EDITION_NAMES[language]} localiser"
+    return by.replace("_", " ").capitalize()
+
+
+def _flag_text(flag: Mapping[str, Any], verdicts: Mapping[str, Any]) -> str:
+    """A flag in plain words. A template-line flag's detail is why the sentence it REPLACED failed
+    (agon.fleet.steps.factgate, factgate_lang and easy_read), never a fault in the line the bundle carries."""
+    detail = str(flag.get("detail") or flag.get("code"))
+    replaced = {"factgate_template_line": ("The Writer's sentence failed the Fact Gate", "factgate"),
+                "translation_template_line": ("The translated sentence failed the Fact Gate", "factgate_lang"),
+                "easy_read_template_line": ("The English sentence broke the easy-read rules", None)}
+    if flag.get("code") not in replaced:
+        return detail
+    why, gate = replaced[str(flag.get("code"))]
+    passed = ", which passed the Fact Gate." if gate and verdicts.get(gate) == "pass" else "."
+    return f"{why}: {detail.rstrip('.')}. Code replaced it with the template line shown{passed}"
+
+
+def flags_by_source(
+    card: Mapping[str, Any], sentence_ids: set[str], verdicts: Mapping[str, Any]
+) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    """The card's flags on a sentence of this bundle, split by card.json "by": the Desk Editor's own
+    (desk_editor_flags) and every other step's (check_flags, with the step named). A flag with no
+    sentence id stays in the sealed card.json; the Fact Gate's retry is told by factgate_retry_lines."""
+    desk: list[dict[str, str]] = []
+    checks: list[dict[str, str]] = []
+    for f in card.get("flags", []):
+        if not isinstance(f, dict) or f.get("sentence_id") not in sentence_ids or not (f.get("detail") or f.get("code")):
+            continue
+        by = str(f.get("by") or "check")
+        if by == DESK_EDITOR:
+            desk.append({"sentence_id": f["sentence_id"], "text": str(f.get("detail") or f.get("code"))})
+        else:
+            checks.append({"sentence_id": f["sentence_id"], "by": by, "name": _flag_source(by), "text": _flag_text(f, verdicts)})
+    return desk, checks
+
+
+def desk_editor_line(flagged: int, confirm_rows: int) -> str:
+    """The Desk Editor's step 4 line: the flags it added itself, never another step's."""
+    own = f"Flagged {flagged} sentence{'' if flagged == 1 else 's'} for a person" if flagged else "Flagged no sentence for a person"
+    return f"{own}; {confirm_rows} Confirm row{'' if confirm_rows == 1 else 's'} on the card."
+
+
+# agon.fleet.steps.factgate writes a retry's detail as this prefix, then "<id>: <reason / reason>"
+# for each sentence it sent back, joined by "; ".
+RETRY_PREFIX = "sent back to the Writer once: "
+RETRY_ID = re.compile(r"(?:^|; )([a-z0-9][a-z0-9-]{0,62}): ")
+
+
+def _retried_ids(flags: Sequence[Mapping[str, Any]]) -> list[str]:
+    """The sentence ids the Fact Gate's retry flags name, in the order written, each once."""
+    ids: list[str] = []
+    for f in flags:
+        detail = str(f.get("detail") or "")
+        if detail.startswith(RETRY_PREFIX):
+            ids += [sid for sid in RETRY_ID.findall(detail[len(RETRY_PREFIX):]) if sid not in ids]
+    return ids
+
+
+def _replaced_by_factgate(card: Mapping[str, Any]) -> list[str]:
+    """The English sentences the Fact Gate replaced with a template line, from its sealed flags."""
+    return [str(f["sentence_id"]) for f in card.get("flags", []) if isinstance(f, dict) and f.get("by") == "factgate"
+            and f.get("code") == "factgate_template_line" and f.get("sentence_id")]
+
+
+def factgate_retry_lines(card: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """The Fact Gate's step 3 line for its retry and template lines (agon.fleet.steps.factgate),
+    counted from the sealed flags, or no line when it sent nothing back and replaced nothing."""
+    retries = [f for f in card.get("flags", []) if isinstance(f, dict) and f.get("by") == "factgate"
+               and f.get("code") == "factgate_retry"]
+    retried = _retried_ids(retries)
+    replaced = _replaced_by_factgate(card)
+    parts: list[str] = []
+    if retried:
+        parts.append(f"sent sentence{'' if len(retried) == 1 else 's'} {_join(retried)} back to the Writer once")
+    elif retries:
+        parts.append("sent every failing sentence back to the Writer once")
+    if replaced:
+        one = len(replaced) == 1
+        # "still" only for sentences the retry names; any other failed the second check alone.
+        when = "still failed" if retried and set(replaced) <= set(retried) else "failed the second check" if retries else "failed"
+        parts.append(f"sentence{'' if one else 's'} {_join(replaced)} {when}, so code replaced "
+                     f"{'it with a template line' if one else 'them with template lines'}")
+    elif retries:
+        parts.append("every sentence passed the second check")
+    if not parts:
+        return []
+    text = "; ".join(parts) + "."
+    return [{"step": 3, "text": text[0].upper() + text[1:]}]
+
+
+def gate_evidence(card: Mapping[str, Any], gate: str, verdict: str) -> str:
+    """A gate's own output from the sealed card.json, or the manifest verdict when it gave none. When
+    the Fact Gate passed, every reason it lists is about a sentence of the Writer's that code then
+    replaced with a template line (agon.fleet.steps.factgate), so each such reason says so; on any
+    other verdict the reasons also hold the template lines' own failures and stay as written."""
+    reasons = card.get("gate_reasons") if isinstance(card.get("gate_reasons"), dict) else {}
+    rows = [str(r) for r in reasons.get(gate, [])]
+    if gate == "factgate" and verdict == "pass":
+        replaced = set(_replaced_by_factgate(card))
+        rows = [
+            f"{sid} (the Writer's sentence, replaced by a template line that passed): {rest}" if sid in replaced else row
+            for row in rows
+            for sid, _, rest in [row.partition(": ")]
+        ]
+    return "; ".join(rows) or f"manifest gate_verdicts.{gate} = {verdict}"
+
+
 def build_run(
     p: Published,
     *,
@@ -380,24 +510,19 @@ def build_run(
         for sid in needs_confirm
     ]
     all_ids = {str(s.get("sentence_id")) for rows in sentences.values() for s in rows}
-    flags = [
-        {"sentence_id": f["sentence_id"], "text": str(f.get("detail") or f.get("code"))}
-        for f in card.get("flags", [])
-        if isinstance(f, dict) and f.get("sentence_id") in all_ids and (f.get("detail") or f.get("code"))
-    ]
+    flags, check_flags = flags_by_source(card, all_ids, verdicts)
     sentence_gates: dict[str, dict[str, str]] = {}
     for edition, rows in sentences.items():
         check = "factgate" if edition == "en" else "factgate_lang"
         for s in rows:
             sentence_gates[str(s["sentence_id"])] = {check: verdicts[check], "rights": verdicts["rights"]}
-    reasons = card.get("gate_reasons") if isinstance(card.get("gate_reasons"), dict) else {}
     gates = [
         {
             "gate": gate,
             "name": GATE_NAMES.get(gate, gate),
             "verdict": verdict,
             "detail": f"{GATE_NAMES.get(gate, gate)}: {verdict}, as sealed in the bundle manifest.",
-            "evidence": "; ".join(str(r) for r in reasons.get(gate, [])) or f"manifest gate_verdicts.{gate} = {verdict}",
+            "evidence": gate_evidence(card, gate, verdict),
         }
         for gate, verdict in sorted(verdicts.items())
     ]
@@ -410,7 +535,6 @@ def build_run(
     languages = [EDITION_NAMES[m["edition"]] for m in metas if m["edition"] != "en"]
     delivered = [r["label"] for r in destinations if r["status"] == "delivered"]
     prepared = [r["label"] for r in destinations if r["status"] == "preview_not_posted"]
-    flagged = len(flags)
     desks = [
         {"desk": "whistle", "name": "Whistle", "lines": [
             {"step": 1, "text": "This trace is rebuilt from the published bundle, not taken from the live run log."},
@@ -426,12 +550,11 @@ def build_run(
             # numbers written in digits; a number spelled out in words is out of its scope.
             {"step": 3, "text": "Recomputed every number, name and minute the headline report claims from the event log, "
                                 f"and matched every number written in digits to a claim: {verdicts['factgate']}."},
+            *factgate_retry_lines(card),
             {"step": 5, "text": f"Checked every translated and easy-read sentence: {verdicts['factgate_lang']}."},
         ]},
         {"desk": "desk_editor", "name": "Desk Editor", "lines": [
-            {"step": 4, "text": (f"Flagged {flagged} sentence{'' if flagged == 1 else 's'} for a person; "
-                                 if flagged else "Flagged no sentence for a person; ")
-                                + f"{len(confirm_rows)} Confirm row{'' if len(confirm_rows) == 1 else 's'} on the card."},
+            {"step": 4, "text": desk_editor_line(len(flags), len(confirm_rows))},
         ]},
         {"desk": "localise", "name": "Localisers", "lines": [
             {"step": 4, "text": _localise_line(languages)},
@@ -477,6 +600,7 @@ def build_run(
         "sentence_gates": sentence_gates,
         "confirm_rows": confirm_rows,
         "desk_editor_flags": flags,
+        "check_flags": check_flags,
         "approval": {
             "status": "approved",
             "approved_at": approved_at,

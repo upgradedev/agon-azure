@@ -108,7 +108,9 @@ index.json
                          "text"}]
     gates              [{"gate", "name", "verdict": pass | mismatch | refused
                          | skipped, "detail": plain words, "evidence": the
-                         gate's own output, which may hold ids}]
+                         gate's own output, which may hold ids}]; when the
+                         Fact Gate passed, a reason about a sentence it
+                         replaced says so after that sentence's id
     editions           [{"edition", "language", "name",
                          "file": "edition-<edition>.json"}]; a pipeline run
                        may name the file "report-<edition>.json" instead
@@ -123,7 +125,8 @@ index.json
     confirm_rows       [{"row_id", "sentence_id", "type", "label"}], one per
                        injury, referee, quote and transfer sentence; label
                        is the routing table's "the injury sentence" and so on
-    desk_editor_flags  [{"sentence_id", "text"}]
+    desk_editor_flags  [{"sentence_id", "text"}], only the flags the Desk
+                       Editor raised itself (card.json "by": "desk_editor")
     approval           {"status": awaiting | approved | changes_requested,
                         "approved_at": "YYYY-MM-DDTHH:MM:SSZ" or null,
                         "approver_role": str or null, "channel": str or null,
@@ -192,6 +195,31 @@ key when it is present (agon.publish.webview.destination_problems). The
 sample run does not carry it. The live site is the React console
 (console/), which reads this key; the retired hand-written page
 (web/agon-runs.js) refuses it and no longer ships.
+
+check_flags (optional key)
+--------------------------
+The sealed card.json flags on a sentence raised by any step but the Desk
+Editor, each shown under the step that raised it, never as a Desk Editor
+flag (agon.webrecord.flags_by_source):
+
+    check_flags  [{"sentence_id", "by", "name", "text"}]
+
+    by    card.json "by", the step that raised the flag: "factgate",
+          "factgate_lang", "easy_read", "rights" and so on; never
+          "desk_editor"
+    name  that step as the approval card names it: "Fact Gate",
+          "Fact Gate, other editions", "Easy-read rules", ...
+    text  the flag in plain words. A template-line flag says which sentence
+          failed (the Writer's, for the Fact Gate; the translated one, for
+          the Fact Gate on other editions; the English one, for the
+          easy-read rules), gives the reason, and says code replaced it
+          with the template line the bundle carries: the reason is about
+          the replaced sentence, not the line shown beside it.
+
+The Fact Gate's retry (code "factgate_retry", no sentence id) is told on the
+Newsroom Wall as the Fact Gate's step 3 line, which names the sentences it
+sent back to the Writer. A recorded run carries check_flags; the sample
+does not.
 
 <run_id>/edition-<id>.json
 --------------------------
