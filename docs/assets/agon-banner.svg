@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300" role="img" aria-labelledby="agon-banner-title agon-banner-desc">
+  <title id="agon-banner-title">Agon</title>
+  <desc id="agon-banner-desc">The word Agon beside the outline of a football pitch and a sealed check mark, over the subtitle: match reports that publish only after the media officer approves.</desc>
+  <defs>
+    <linearGradient id="agon-banner-bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0c2b27"/>
+      <stop offset="1" stop-color="#13394a"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="300" rx="20" fill="url(#agon-banner-bg)"/>
+  <g fill="none" stroke="#ffffff" stroke-opacity="0.22" stroke-width="3">
+    <rect x="760" y="36" width="380" height="164" rx="4"/>
+    <line x1="950" y1="36" x2="950" y2="200"/>
+    <circle cx="950" cy="118" r="34"/>
+    <rect x="760" y="78" width="54" height="80"/>
+    <rect x="1086" y="78" width="54" height="80"/>
+  </g>
+  <circle cx="950" cy="118" r="4" fill="#ffffff" fill-opacity="0.35"/>
+  <g transform="translate(1100 214)">
+    <circle r="30" fill="#2f9e74"/>
+    <path d="M -13 1 L -4 10 L 14 -9" fill="none" stroke="#ffffff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <rect x="66" y="170" width="120" height="6" rx="3" fill="#2f9e74"/>
+  <text x="60" y="150" font-family="'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="116" font-weight="700" letter-spacing="2" fill="#ffffff">Agon</text>
+  <text x="64" y="246" font-family="'Segoe UI', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="30" fill="#d6ece4">Match reports that publish only after the media officer approves</text>
+</svg>
