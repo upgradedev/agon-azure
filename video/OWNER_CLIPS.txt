@@ -24,13 +24,22 @@ sends as such on the Published card. The build session checks its changedTime
 before every drill and tells the owner.
 
 1. card-arrives (beat 2, "card-arrives", after the animated opening)
-   The approval card arriving in the Match Day channel after the run has been
-   started; the officer did not ask for it: the report headline, the hash, the
-   editions.
+   The approval card in the Match Day channel after the run has been started;
+   the officer did not ask for it: the report headline, the hash, the editions,
+   the sealed report.
+   The current card-arrives.mp4 is 11.88 seconds (ffprobe format=duration). It
+   opens on the bottom of the card (the sentence to tick, the flags, the
+   destinations, Approve) and scrolls up from about 7.8 seconds: the sealed
+   report is on screen from about 8.8 seconds, the hash and editions from about
+   9.8 seconds, the headline from about 10.4 seconds to the end.
    Narration over it: "A real run: the approval card arrives in the club's
    Teams channel, with the report the officer attests."
-   Needs at least 14 seconds of picture after its trim point (the beat may run
-   up to 12.5 seconds).
+   The beat is shorter than the clip (about 7.5 to 8.2 seconds), so the cut
+   uses the END of the clip: pass --trim card-arrives=T, with T worked out as
+   under TRIMS THE COMPOSER EXPECTS. Without it the beat ends before the report
+   is on screen, and the narration names the report over the checkboxes.
+   Needs the beat's measured window of picture after its trim point (the beat
+   may run up to 12.5 seconds).
 
 2. officer-approves (beat 5, "officer-approves")
    The officer reading the report they attest, ticking the Confirm row (the
@@ -61,9 +70,25 @@ TRIMS THE COMPOSER EXPECTS
 Each clip is used from its trim point onwards, for exactly the length its beat
 measures. The beat sheet (video/beats.json) sets trim_start 0 for all three, so
 either cut each file to start on its first useful frame, or pass the offset in
-seconds on the command line, for example:
+seconds on the command line.
 
-  --trim card-arrives=3.2 --trim officer-approves=1.5 --trim card-published=0.8
+card-arrives is used from its end, so its trim depends on the measured window:
+
+  T = clip seconds - card-arrives window_ms / 1000 - 0.1
+
+The window is in the narration's timing.json, the clip length from ffprobe:
+
+  python -c "import json,sys; print([b['window_ms'] for b in json.load(open(sys.argv[1]))['beats'] if b['id'] == 'card-arrives'][0])" <work>/narration/timing.json
+  ffprobe -v error -show_entries format=duration -of csv=p=0 <your teams folder>/card-arrives.mp4
+
+For the 11.88 second clip and a 7760 ms window, T = 11.88 - 7.76 - 0.1 = 4.02:
+
+  --trim card-arrives=4.02
+
+The 0.1 seconds keep the last frame inside the clip. A trim one frame too
+late fails the compose with the seconds it lacks; nothing else changes.
+officer-approves and card-published take a --trim the same way, from their
+first useful frame, if the files are not cut already.
 
 A clip that is too short after its trim fails the compose with the number of
 seconds it lacks. Nothing is stretched or looped to hide it.

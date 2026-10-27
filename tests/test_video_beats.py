@@ -585,7 +585,9 @@ def test_no_beat_implies_an_automatic_trigger_at_the_end_of_the_match():
 def test_the_officer_ticks_the_confirm_row_and_the_gate_claims_only_what_it_checks():
     beats = {b.id: b for b in bs.load_sheet(SHEET_PATH).beats}
     assert "tick the Confirm row" in beats["officer-approves"].narration
-    assert "every number, and every name and minute it claims" in beats["newsroom"].narration
+    assert "every claimed number, name and minute against the event log" in beats["newsroom"].narration
+    for beat in beats.values():
+        assert "every number" not in beat.narration.lower(), (beat.id, "the Fact Gate checks the claims, not every number")
     files = [f for p in beats["newsroom"].parts for f in p.facts if f.get("file")]
     assert any("turning_points" in f["text"] and "model" in f["text"] for f in files), "a model-authored turning point is checked"
 

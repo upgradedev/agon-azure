@@ -77,7 +77,7 @@
     },
     {
       "id": "newsroom",
-      "narration": "In a Microsoft Agent Framework workflow, Microsoft Foundry agents pick the turning points and write the report. Code checks every number, and every name and minute it claims, against the event log; a failing sentence goes back to the writer once before the officer sees anything.",
+      "narration": "In a Microsoft Agent Framework workflow, Microsoft Foundry agents pick the turning points and write the report. Code checks every claimed number, name and minute against the event log; a failing sentence goes back to the writer once before the officer sees anything.",
       "visual": [
         {
           "source": "web:#/newsroom/{run_id}",
