@@ -1,13 +1,14 @@
 /*
   The frame around every screen: skip link, top bar with the judge path, the
-  build label, the footer. Navigation is plain links to hash routes, so it
-  works in the prerendered page before any script runs.
+  status line that says what the site opens on (read from the run it shows by
+  default, linking to Verify), and the footer with the build label (the commit
+  the deploy stamped). Navigation is plain links to hash routes, so it works in
+  the prerendered page before any script runs.
 */
 import { useId, useRef, useState, type ReactNode } from "react";
-import { Menu, Moon, Sun } from "lucide-react";
+import { Info, Menu, Moon, ShieldCheck, Sun } from "lucide-react";
 import { Dialog } from "./ui/dialog";
 import { Tip } from "./ui/tooltip";
-import { Badge } from "./ui/badge";
 import { cn } from "../lib/cn";
 import { REPO_URL, STAMPED_LABEL_PREFIX, UNSTAMPED_LABEL } from "../lib/commit";
 import { hrefFor, type ViewKey } from "../lib/router";
@@ -193,7 +194,24 @@ function BuildLabel() {
   return <BuildLabelView commit={useCommit()} />;
 }
 
-export function Shell({ view, children }: { view: ViewKey; children: ReactNode }) {
+export interface SiteStatus {
+  text: string;
+  approved: boolean;
+}
+
+function StatusLine({ status }: { status: SiteStatus }) {
+  const Icon = status.approved ? ShieldCheck : Info;
+  return (
+    <p className="flex items-start gap-1.5 text-xs leading-5 text-fg" data-site-status="">
+      <Icon className={cn("mt-0.5 size-3.5 shrink-0", status.approved ? "text-accent" : "text-muted")} aria-hidden="true" />
+      <span>
+        {status.text} <a href={hrefFor("verify")}>Verify it in your browser</a>
+      </span>
+    </p>
+  );
+}
+
+export function Shell({ view, status, children }: { view: ViewKey; status: SiteStatus | null; children: ReactNode }) {
   const guideSkipped = useGuideSkipped();
   return (
     <div className="flex min-h-dvh flex-col">
@@ -213,9 +231,6 @@ export function Shell({ view, children }: { view: ViewKey; children: ReactNode }
             <BrandMark className="size-7" />
             <span className="text-[0.9375rem] font-semibold tracking-tight">Agon</span>
           </a>
-          <Badge tone="preview" className="hidden sm:inline-flex">
-            Preview
-          </Badge>
           <nav aria-label="Judge path" className="ml-4 hidden lg:block">
             <ol className="flex items-center gap-0.5">
               {PATH_STEPS.map((step, i) => (
@@ -247,7 +262,7 @@ export function Shell({ view, children }: { view: ViewKey; children: ReactNode }
       </header>
       <div className="border-b border-line bg-surface-2/60">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-x-4 gap-y-1 px-4 py-1.5 sm:px-6">
-          <BuildLabel />
+          {status ? <StatusLine status={status} /> : null}
           <p className="text-xs text-muted">Synthetic, fictional clubs and players only.</p>
         </div>
       </div>
@@ -257,10 +272,10 @@ export function Shell({ view, children }: { view: ViewKey; children: ReactNode }
       <footer className="border-t border-line">
         <div className="mx-auto flex max-w-7xl flex-col gap-2 px-4 py-6 text-xs text-muted sm:flex-row sm:items-center sm:justify-between sm:px-6">
           <p>
-            Agon preview build. Clubs, players and matches are synthetic and fictional; Agon is not affiliated with any league, club
-            or broadcaster.
+            Clubs, players and matches are synthetic and fictional; Agon is not affiliated with any league, club or broadcaster.
           </p>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+            <BuildLabel />
             {guideSkipped ? (
               <button
                 type="button"

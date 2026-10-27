@@ -760,6 +760,21 @@ export function picksCited(notes: AnalystNotes | null, eventIds: string[]): Anal
   return notes.picks.filter((p) => cited.has(p.event_id));
 }
 
+/* One line under the "Why it mattered" heading on the Recap and the Match Centre: who wrote the
+   picks and where they are sealed. analystSource says what code checked; the screens keep it one
+   click away. */
+export function analystByline(notes: AnalystNotes, run: Run): string {
+  const sealed = `sealed in ${CARD_FILE} in bundle ${shortHash(run.bundle.sha256)}`;
+  const agent = notes.agent ? `the Microsoft Foundry agent ${notes.agent}` : "a Microsoft Foundry agent";
+  if (aiWritten(notes)) {
+    return `AI-written by ${agent}, ${sealed}.`;
+  }
+  if (!notes.picks.some((p) => p.author === "model")) {
+    return `Chosen by code, not written by a model, ${sealed}.`;
+  }
+  return `Each pick says whether ${agent} wrote it or code chose it; all are ${sealed}.`;
+}
+
 /* ------------------------------------------------------------- approval */
 
 export function joinLabels(labels: string[]): string {
@@ -937,6 +952,44 @@ export function editionLabel(run: Run): string {
     return "AI-drafted. Numbers and names checked by code. The club media office asked for changes, so this edition is not approved.";
   }
   return "AI-drafted. Numbers and names checked by code. Not yet approved by the club media office.";
+}
+
+/* ------------------------------------------------------------- first screen */
+
+function approvedWhere(run: Run): string {
+  const channel = run.approval.channel ?? "";
+  return channel === "teams" ? "in Microsoft Teams" : `through ${CHANNEL_WORDS[channel] ?? "an approval channel"}`;
+}
+
+/* The status line under the top bar: what the site opens on, read from the run it shows by
+   default. It names that run, not the run on screen, so it stays true on a deep link to another. */
+export function siteStatus(run: Run): { text: string; approved: boolean } {
+  if (run.provenance === "design_preview") {
+    return { text: "This site opens on a hand-written sample run, not produced by the pipeline and not approved.", approved: false };
+  }
+  if (isApproved(run) && run.approval.approved_at) {
+    const published = run.state === "PUBLISHED" ? " and published" : "";
+    return {
+      text: `This site opens on a recorded newsroom run, approved ${approvedWhere(run)} at ${formatUtc(run.approval.approved_at)}${published}.`,
+      approved: true,
+    };
+  }
+  return { text: "This site opens on a recorded newsroom run that is not approved.", approved: false };
+}
+
+/* Where live runs start, on the Match Centre in place of a switch that could never be turned on
+   (README, Real, simulated, not deployed: no run starts from the public page). */
+export const LIVE_RUNS_SENTENCE =
+  "Live runs are put on the run queue in Azure, not started from this public page, and nothing is published until the media officer approves the sealed report in Microsoft Teams.";
+
+export function liveRunsLine(run: Run | null): string {
+  if (run && isApproved(run) && run.approval.channel === "teams" && run.approval.approved_at) {
+    return `${LIVE_RUNS_SENTENCE} Blow full time replays a recorded run approved that way at ${formatUtc(run.approval.approved_at)}.`;
+  }
+  if (run && run.provenance === "design_preview") {
+    return `${LIVE_RUNS_SENTENCE} Blow full time shows a hand-written sample run instead.`;
+  }
+  return `${LIVE_RUNS_SENTENCE} Blow full time replays a recorded run.`;
 }
 
 export interface WhyGate {

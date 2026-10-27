@@ -12,7 +12,7 @@ Rules, each a hard failure:
 * index.html must hold the placeholder __AGON_COMMIT__ exactly once, and after
   stamping no file under the web directory may still hold it;
 * the prerendered build label (id="run-label", at most one) is rewritten from
-  "Preview build, commit not stamped (local build)" to the stamped label with
+  "Build commit not stamped (local build)" to the stamped label with
   the commit link, exactly as console/src/components/shell.tsx BuildLabelView
   renders it, so the served HTML names the commit before any script runs and
   the console hydrates it without a mismatch; after stamping index.html may not
@@ -52,8 +52,8 @@ TEXT_SUFFIXES = (".html", ".js", ".css", ".json", ".svg", ".txt", ".xml", ".webm
 # REPO_URL) and BuildLabelView; console/tests/ssr.test.tsx and tests/test_stamp_web.py hold both
 # sides to one string.
 REPO_URL = "https://github.com/upgradedev/agon-azure"
-UNSTAMPED_LABEL = "Preview build, commit not stamped (local build)"
-STAMPED_LABEL_PREFIX = "Preview build, commit "
+UNSTAMPED_LABEL = "Build commit not stamped (local build)"
+STAMPED_LABEL_PREFIX = "Build commit "
 RUN_LABEL = re.compile(rb'(<p\b[^>]*\bid="run-label"[^>]*>)' + re.escape(UNSTAMPED_LABEL.encode("ascii")) + rb"(</p>)")
 
 
