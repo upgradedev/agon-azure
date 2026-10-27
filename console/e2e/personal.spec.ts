@@ -1,7 +1,7 @@
 /*
   Your view: the same match as two different experiences, and the viewer's
-  own choices. Fan mode tells the story in words; Analyst mode shows every
-  chart and scorecard; a favourite club and player, following that player,
+  own choices. Fan mode tells the story in words; Analyst mode shows the
+  full charts and scorecard; a favourite club and player, following that player,
   and one metric reshape the page, and the choices survive a reload (stored
   per browser). Each state is checked with axe and screenshotted.
 */
