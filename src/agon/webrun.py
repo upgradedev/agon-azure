@@ -99,8 +99,12 @@ RUN_KEYS = frozenset({
 })
 # Optional: present once a run reports its publish destinations (agon.publish.webview, documented
 # in web/runs/README.txt). The shipped sample does not carry it: web/agon-runs.js refuses any key
-# outside RUN_KEYS, and the console that reads it (lane D4) replaces that page.
-OPTIONAL_RUN_KEYS = frozenset({"destinations"})
+# outside RUN_KEYS, and the console that reads it (lane D4) replaces that page. check_flags, the
+# card's flags on a sentence raised by any step but the Desk Editor (agon.webrecord.flags_by_source),
+# is optional the same way: a recorded run carries it, the sample does not.
+OPTIONAL_RUN_KEYS = frozenset({"destinations", "check_flags"})
+CHECK_FLAG_KEYS = frozenset({"sentence_id", "by", "name", "text"})
+FLAG_SOURCE = re.compile(r"^[a-z][a-z0-9_]{0,62}$")
 EDITION_KEYS = frozenset({"edition", "language", "name", "file"})
 # approved_bundle_sha256 names the exact bundle the media officer approved. It must equal bundle.sha256
 # on an approved run and be null otherwise, so "approved" can never float free of the hash Verify checks.
@@ -668,6 +672,15 @@ def validate_run(run: Any) -> list[str]:
     flags = run["desk_editor_flags"]
     if not isinstance(flags, list) or not all(isinstance(x, dict) and set(x) == {"sentence_id", "text"} and _nonempty(x["text"]) for x in flags):
         problems.append("desk_editor_flags must be a list of {sentence_id, text}")
+    if "check_flags" in run:
+        checks = run["check_flags"]
+        if not isinstance(checks, list) or not all(
+            isinstance(x, dict) and set(x) == CHECK_FLAG_KEYS and isinstance(x["sentence_id"], str)
+            and SENTENCE_ID.match(x["sentence_id"]) and isinstance(x["by"], str) and FLAG_SOURCE.match(x["by"])
+            and x["by"] != "desk_editor" and _nonempty(x["name"]) and _nonempty(x["text"])
+            for x in checks
+        ):
+            problems.append("check_flags must be a list of {sentence_id, by, name, text}, none by the Desk Editor")
     approval = run["approval"]
     if not isinstance(approval, dict) or set(approval) != APPROVAL_KEYS or approval.get("status") not in APPROVAL_STATUSES:
         problems.append(
@@ -803,6 +816,7 @@ def verify_run_dir(runs_dir: Path) -> list[str]:
         unknown = (set(run["sentence_types"]) | set(run["sentence_gates"])) - sentence_ids
         unknown |= {r["sentence_id"] for r in run["confirm_rows"]} - sentence_ids
         unknown |= {f["sentence_id"] for f in run["desk_editor_flags"]} - sentence_ids
+        unknown |= {f["sentence_id"] for f in run.get("check_flags", [])} - sentence_ids
         if unknown:
             raise ValueError(f"{row['file']}: names sentences no edition holds: {', '.join(sorted(unknown))}")
         expected_files.add(row["file"])

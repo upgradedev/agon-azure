@@ -21,7 +21,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { prerender } from "../src/entry-server";
 import { BuildLabelView } from "../src/components/shell";
 import { loadRunsData, type FetchText } from "../src/lib/loader";
-import { DECIDED_CARD_SENTENCE, NOT_DEPLOYED_SENTENCE, STANDIN_HEADER, decidedMessage, editionLabel } from "../src/lib/runs";
+import { DECIDED_CARD_SENTENCE, NOT_DEPLOYED_SENTENCE, STANDIN_HEADER, decidedMessage, editionLabel, flagGroups } from "../src/lib/runs";
 import { PREVIEW_ONLY_SENTENCE } from "../src/lib/destinations";
 import { REPO, afterFetch, diskFetch } from "./helpers";
 
@@ -34,6 +34,7 @@ describe.each(SOURCES)("prerendered markup, %s", (_name, fetchText, committed) =
   let html = "";
   let labels: string[] = [];
   let decided = false;
+  let flagHeadings: string[] = [];
 
   beforeAll(async () => {
     const result = await prerender(fetchText);
@@ -43,6 +44,16 @@ describe.each(SOURCES)("prerendered markup, %s", (_name, fetchText, committed) =
     const run = data.runs[data.defaultRunId].run;
     labels = [`id="wall-label">${run.label}`, `id="approve-label">${run.label}`, `id="recap-label">${editionLabel(run)}`];
     decided = decidedMessage(run) !== null;
+    flagHeadings = flagGroups(run).map((g) => `${g.name} flags`);
+  });
+
+  it("puts every flag on the approval card under the step that raised it", () => {
+    /* The committed default run's one flag is the Fact Gate's; the recorded fixture's is the easy-read rules'. */
+    expect(flagHeadings).toEqual(committed ? ["Fact Gate flags"] : ["Easy-read rules flags"]);
+    for (const heading of flagHeadings) {
+      expect(html, heading).toContain(`>${heading}</p>`);
+    }
+    expect(html).not.toContain(">Desk Editor flags</p>");
   });
 
   it("states the labels of the run it shows by default on every screen that shows it", () => {
