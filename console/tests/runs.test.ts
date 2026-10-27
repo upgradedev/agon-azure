@@ -21,6 +21,7 @@ import {
   compareApproved,
   decidedMessage,
   editionLabel,
+  flagGroups,
   isApproved,
   lastStep,
   stateAt,
@@ -410,5 +411,69 @@ describe("Blow full time", () => {
     expect(runForBlow(data, 1)?.run.run_id).toBe("run-afc16bdd87a7");
     expect(runForBlow(data, 3)?.run.run_id).toBe("run-afc16bdd87a7");
     expect(Object.keys(data.runs)).toContain("sample-s1");
+  });
+});
+
+/* card.json "by" decides where a flag shows: agon.webrecord puts the Desk Editor's own
+   flags in desk_editor_flags and every other step's in check_flags, with the step named. */
+describe("flags, under the step that raised them", () => {
+  const committedRun = (runId: string): Run => readJson<Run>(join(WEB, "runs", `${runId}.json`));
+
+  it("every committed run passes the browser's run rules", () => {
+    const index = readJson<{ runs: { file: string }[] }>(join(WEB, "runs", "index.json"));
+    for (const row of index.runs) {
+      expect(validateRun(readJson(join(WEB, "runs", row.file))), row.file).toEqual([]);
+    }
+  });
+
+  it("shows the default run's template line under the Fact Gate, and no Desk Editor flag", () => {
+    const run = committedRun("run-0e16414b71d7");
+    expect(run.desk_editor_flags).toEqual([]);
+    const groups = flagGroups(run);
+    expect(groups.map((g) => g.name)).toEqual(["Fact Gate"]);
+    expect(groups[0].flags).toEqual([
+      {
+        sentence_id: "s7",
+        text:
+          "The Writer's sentence failed the Fact Gate: claim value 4 (1x) is not written in the prose. " +
+          "Code replaced it with the template line shown, which passed the Fact Gate.",
+      },
+    ]);
+    const deskEditor = run.desks.find((d) => d.desk === "desk_editor");
+    expect(deskEditor?.lines.map((l) => l.text)).toEqual(["Flagged no sentence for a person; 1 Confirm row on the card."]);
+  });
+
+  it("keeps the sample's hand-written Desk Editor flag under the Desk Editor", () => {
+    const groups = flagGroups(sampleRun());
+    expect(groups.map((g) => g.name)).toEqual(["Desk Editor"]);
+    expect(groups[0].flags.map((f) => f.sentence_id)).toEqual(["en-05"]);
+  });
+
+  it("groups the other steps' flags by step, then the Desk Editor's own", () => {
+    const run = clone(committedRun("run-0e16414b71d7"));
+    run.check_flags = [
+      { sentence_id: "s1", by: "factgate", name: "Fact Gate", text: "a" },
+      { sentence_id: "s1-easy", by: "easy_read", name: "Easy-read rules", text: "b" },
+      { sentence_id: "s2", by: "factgate", name: "Fact Gate", text: "c" },
+    ];
+    run.desk_editor_flags = [{ sentence_id: "s3", text: "d" }];
+    expect(validateRun(run)).toEqual([]);
+    expect(flagGroups(run).map((g) => [g.name, g.flags.map((f) => f.text)])).toEqual([
+      ["Fact Gate", ["a", "c"]],
+      ["Easy-read rules", ["b"]],
+      ["Desk Editor", ["d"]],
+    ]);
+  });
+
+  it("refuses a check flag by the Desk Editor or with a missing field", () => {
+    const problem = "check_flags must be a list of {sentence_id, by, name, text}, none by the Desk Editor";
+    const byDesk = clone(committedRun("run-0e16414b71d7"));
+    (byDesk.check_flags ?? [])[0].by = "desk_editor";
+    expect(validateRun(byDesk)).toEqual([problem]);
+    const noName = clone(committedRun("run-0e16414b71d7")) as unknown as { check_flags: Record<string, unknown>[] };
+    delete noName.check_flags[0].name;
+    expect(validateRun(noName)).toEqual([problem]);
+    const notList = { ...clone(committedRun("run-0e16414b71d7")), check_flags: { s7: "x" } };
+    expect(validateRun(notList)).toEqual([problem]);
   });
 });
