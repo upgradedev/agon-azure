@@ -32,6 +32,10 @@ async function settled(page: Page, view: string): Promise<void> {
   if (view === "home") {
     await expect(page.locator('[data-view="home"] section[data-state="ready"]')).toBeVisible({ timeout: 20_000 });
     await expect(page.locator('[data-view="home"] section[data-analysis="ready"]')).toBeAttached({ timeout: 20_000 });
+    /* At 1024 px and wider the players load with the match: wait for them, so axe and the shot see the settled pitch. */
+    if ((page.viewportSize()?.width ?? 0) >= 1024) {
+      await expect(page.locator('[data-view="home"] section[data-tracking="ready"]')).toBeAttached({ timeout: 30_000 });
+    }
   }
   if (view === "data-lab") {
     await expect(page.locator('[data-view="data-lab"] [data-state="ready"]')).toBeVisible({ timeout: 30_000 });
