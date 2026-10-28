@@ -130,7 +130,7 @@ test("a hidden tab stops Pitch Sound, since the replay freezes there", async ({ 
   await expect(start).toHaveAttribute("data-ticking", "false");
 });
 
-test("at 1280 px the players appear without a click, with name tags from the synthetic tracking, and the button hides them", async ({ page }) => {
+test("at 1280 px the players appear without a click, with name tags from the synthetic tracking; the button hides them and a new seed shows them again", async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 800 });
   await page.emulateMedia({ colorScheme: "light", reducedMotion: "reduce" });
   const asked: string[] = [];
@@ -158,6 +158,12 @@ test("at 1280 px the players appear without a click, with name tags from the syn
   await show.click();
   await expect(show).toHaveAttribute("aria-pressed", "false");
   await expect(pitch.locator("circle[data-player]")).toHaveCount(0);
+  /* A new seed shows the players again by itself, with that seed's tracking file; seed 1's was fetched once. */
+  await page.getByText("Seed 2", { exact: true }).click();
+  await expect(show).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator('[data-view="home"] section[data-tracking="ready"]')).toBeAttached({ timeout: 30_000 });
+  expect(asked.some((u) => /kinematics\/2\.kinematics\.json$/.test(u))).toBe(true);
+  expect(asked.filter((u) => /kinematics\/1\.kinematics\.json$/.test(u))).toHaveLength(1);
 });
 
 test("at 375 px the players wait for the button, and no tracking file is fetched before it", async ({ page }) => {
@@ -175,7 +181,7 @@ test("at 375 px the players wait for the button, and no tracking file is fetched
   const show = page.getByRole("button", { name: "Show the players" });
   await expect(show).toBeVisible();
   await expect(show).toHaveAttribute("aria-pressed", "false");
-  await expect(page.getByText(/about 1\.3 MB a match, loaded with the match on a screen 1024 px wide or wider and only when you ask on a narrower one\./)).toBeVisible();
+  await expect(page.getByText(/about 1\.3 MB a match, loaded with the match in a window 1024 px wide or wider and only when you ask in a narrower one\./)).toBeVisible();
   expect(asked, "no tracking file is fetched before the button is pressed").toEqual([]);
   const pitch = page.locator('[data-view="home"] figure').first();
   await expect(pitch.locator("circle[data-player]")).toHaveCount(0);

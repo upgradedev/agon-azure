@@ -8,9 +8,9 @@
   raw ids appear only in the "Ids in the event log" row. Under reduced motion
   the ball jumps from event to event and nothing starts on its own.
 
-  The synthetic players load with each match on a screen 1024 px wide or
-  wider, decided in the browser after hydration (never in the prerender); on a
-  narrower screen Show the players loads them on demand. On every width the
+  The synthetic players load with each match in a browser window 1024 px wide
+  or wider, decided in the browser after hydration (never in the prerender); in
+  a narrower window Show the players loads them on demand. On every width the
   same button hides and shows them. The dots move only with the replay clock.
 
   The header's lead says in one sentence what Agon produces and that a person
@@ -295,7 +295,7 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
     };
   }, [match]);
 
-  /* On a screen 1024 px wide or wider the players are shown once each seed's match is ready and the
+  /* In a window 1024 px wide or wider the players are shown once each seed's match is ready and the
      Match Centre is on screen: read here, in the browser after hydration, so the server and a phone never
      fetch the tracking by themselves. Once per seed, so a viewer who hid them keeps that until the seed changes. */
   const readySeed = match.status === "ready" ? match.seed : null;
@@ -838,7 +838,7 @@ export function MatchCentre({ active, runs, progress, onBlowFullTime }: Props) {
                 {manifestError || match.status === "error"
                   ? "The synthetic tracking needs the match file, which could not be read, so the players cannot be shown."
                   : kin.status === "off"
-                    ? "Shows all 22 players, with name tags for the player in the latest event and the one you follow. The tracks are synthetic, modelled from the event log within speed and acceleration caps, not measured; about 1.3 MB a match, loaded with the match on a screen 1024 px wide or wider and only when you ask on a narrower one."
+                    ? "Shows all 22 players, with name tags for the player in the latest event and the one you follow. The tracks are synthetic, modelled from the event log within speed and acceleration caps, not measured; about 1.3 MB a match, loaded with the match in a window 1024 px wide or wider and only when you ask in a narrower one."
                     : kin.status === "loading"
                       ? "Loading the synthetic tracking for this match."
                       : kin.status === "ready"
